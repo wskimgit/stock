@@ -5,7 +5,7 @@
 
 - Status: `INCOMPLETE_SCAN`
 - Updated at: `2026-10-02T10:24:14+09:00`
-- Swing fingerprint: `sha256:9799294aa43c47c4d926a77964983b6217748c618b9137a5a1cf8d64af353d22`
+- Swing fingerprint: `sha256:3ec83fe143882fafe7dce4c5fa3eeebf466f3ee6a19bf85d64a81cbdb2e82acf`
 - STC14 input status: `NOT_PRESENT`
 - STC14 input fingerprint: `-`
 - Scan count KR: `178`
@@ -77,6 +77,7 @@
 | 13 | AP | https://apnews.com/article/cc56b71699c74950fb1bd9564bee74cc | 미국 지수·금리 변동, MU +3%, NVDA +1.1%, AMAT +3.5% |
 | 14 | MarketWatch | https://www.marketwatch.com/data-news/applied-materials-inc-stock-outperforms-competitors-on-strong-trading-day-50b38e37-40034e3c2968 | AMAT 종가 $529.30(+3.50%), 52주 고점 대비 28.44% 하회 |
 | 15 | Investing.com historical | https://www.investing.com/equities/micron-tech-historical-data | MU 10-01 종가 $1,097.39, 거래량 44.26M, +3.03% |
-| 16 | StockAnalysis historical | https://stockanalysis.com/stocks/nvda/history/ | NVDA 10-01 종가 $230.86, 거래량 97.26M, +1.09%; 종목 가격 교차검증 |
+| 16 | FinanceCharts historical | https://www.financecharts.com/stocks/NVDA/summary/price | NVDA 10-01 종가 $230.86와 거래량을 교차검증; LRCX OHLCV도 확인 |
+| 17 | Investors.com | https://www.investors.com/news/technology/micron-stock-mu-tough-crowd-after-fiscal-q4-beat/ | MU 정규장 +3%와 실적 beat-and-raise 반응을 독립 확인 |
 
 <!-- REPORT_ONE:SWING:END -->
