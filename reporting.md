@@ -2,20 +2,20 @@
 
 <!-- REPORT_ONE:SWING:BEGIN -->
 ## Swing
-<!-- SWING_META status=INCOMPLETE_SCAN updated_at=2026-10-02T10:24:14+09:00 fingerprint=sha256:3ec83fe143882fafe7dce4c5fa3eeebf466f3ee6a19bf85d64a81cbdb2e82acf stc14_fingerprint=b3b99677ff07feb1 -->
+<!-- SWING_META status=COMPLETE updated_at=2026-10-02T12:27:00+09:00 fingerprint=sha256:d7994ed9cfd6cdd526e66f32bc94506d00b9a60094085b0d9ce32d91b6dbfe42 stc14_fingerprint=b3b99677ff07feb1 -->
 
-- 기준: KR/US `2026-10-01` · 스캔 KR `178` / US `503` · 독립 소스 `16`
+- 기준: KR/US `2026-10-01` · 스캔 KR `200` / US `503` · 독립 소스 `12`
 
 ### 원본 포트폴리오
 
 | 시장 | 종목 | 코드/티커 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| KR | SK하이닉스 | 000660 | 1,833,000원 | 40% |
 | KR | 삼성전기 | 009150 | 1,561,000원 | 35% |
-| KR | 삼성전자 | 005930 | 276,000원 | 25% |
-| US | Micron Technology | MU | $1,097.39 | 40% |
-| US | NVIDIA | NVDA | $230.86 | 35% |
-| US | Lam Research | LRCX | $340.10 | 25% |
+| KR | SK하이닉스 | 000660 | 1,833,000원 | 35% |
+| KR | 삼성전자 | 005930 | 276,000원 | 30% |
+| US | Micron Technology | MU | $1,097.39 | 35% |
+| US | Dell Technologies | DELL | $541.74 | 35% |
+| US | Advanced Micro Devices | AMD | $615.73 | 30% |
 
 ### AI 독립조정 최종 포트폴리오
 
@@ -23,10 +23,10 @@
 |---|---|---|---:|---:|
 | KR | 삼성전기 | 009150 | 1,561,000원 | 40% |
 | KR | SK하이닉스 | 000660 | 1,833,000원 | 35% |
-| KR | 삼성전자 | 005930 | 276,000원 | 25% |
+| KR | 두산에너빌리티 | 034020 | 82,100원 | 25% |
 | US | NVIDIA | NVDA | $230.86 | 35% |
-| US | Applied Materials | AMAT | $529.30 | 35% |
-| US | Micron Technology | MU | $1,097.39 | 30% |
+| US | Microsoft | MSFT | $512.80 | 35% |
+| US | Applied Materials | AMAT | $529.30 | 30% |
 
 <!-- REPORT_ONE:SWING:END -->
 
