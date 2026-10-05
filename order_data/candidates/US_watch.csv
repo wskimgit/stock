@@ -1,0 +1,9 @@
+symbol,status,density_status,internal_resistance,last_close,extension_pct,data_status,last_checked,note
+FTNT,RETEST,PASS,159.30,180.95,13.59,SUFFICIENT,2026-10-05,"MA density passed in prior direct validation; too extended, wait for retest"
+WNC,RETEST,PASS,13.19,14.05,6.52,SUFFICIENT,2026-10-05,"Density passed; extension just above 6% threshold, wait for retest"
+MTRN,RETEST,PASS,261.20,312.16,19.51,SUFFICIENT,2026-10-05,"Density and retest were validated previously; now too extended"
+EXEL,PRE_BREAKOUT,UNRESOLVED,59.28,58.39,-1.50,SUFFICIENT,2026-10-05,"Recent closes remain below nearby resistance; not a valid breakout"
+SNOW,PRE_BREAKOUT,UNRESOLVED,348.61,341.04,-2.17,SUFFICIENT,2026-10-05,"Tight action but below recent resistance"
+ARW,FAILED,FAIL,237.33,242.01,1.97,SUFFICIENT,2026-10-05,"Breakout extension acceptable but direct MA5/20/60 density before breakout failed"
+PANW,FAILED,FAIL,398.88,403.24,1.09,SUFFICIENT,2026-10-05,"Breakout extension acceptable but direct MA density before breakout failed"
+S,FAILED,FAIL,24.40,25.06,2.70,SUFFICIENT,2026-10-05,"Breakout extension acceptable but direct MA density before breakout failed"
