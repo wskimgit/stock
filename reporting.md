@@ -2,31 +2,32 @@
 
 <!-- REPORT_ONE:SWING:BEGIN -->
 ## Swing
-<!-- SWING_META status=COMPLETE updated_at=2026-10-02T12:27:00+09:00 fingerprint=sha256:d7994ed9cfd6cdd526e66f32bc94506d00b9a60094085b0d9ce32d91b6dbfe42 stc14_fingerprint=b3b99677ff07feb1 -->
+<!-- SWING_META status=COMPLETE updated_at=2026-10-05T20:02:00+09:00 version=v1.2-FROZEN sources=14 scan_kr=202 scan_us=506 -->
 
-- 기준: KR/US `2026-10-01` · 스캔 KR `200` / US `503` · 독립 소스 `12`
+- 기준: KR/US `2026-10-02` · 스캔 KR `202` / US `506` · 독립 소스 `14`
+- STC14.json: 보조 확인 완료
 
 ### 원본 포트폴리오
 
 | 시장 | 종목 | 코드/티커 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| KR | 삼성전기 | 009150 | 1,561,000원 | 35% |
-| KR | SK하이닉스 | 000660 | 1,833,000원 | 35% |
+| KR | 삼성전기 | 009150 | 1,581,000원 | 35% |
+| KR | SK하이닉스 | 000660 | 1,841,000원 | 35% |
 | KR | 삼성전자 | 005930 | 276,000원 | 30% |
-| US | Micron Technology | MU | $1,097.39 | 35% |
-| US | Dell Technologies | DELL | $541.74 | 35% |
-| US | Advanced Micro Devices | AMD | $615.73 | 30% |
+| US | Applied Materials | AMAT | $540.04 | 35% |
+| US | Hewlett Packard Enterprise | HPE | $69.33 | 35% |
+| US | NVIDIA | NVDA | $233.95 | 30% |
 
 ### AI 독립조정 최종 포트폴리오
 
 | 시장 | 종목 | 코드/티커 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| KR | 삼성전기 | 009150 | 1,561,000원 | 40% |
-| KR | SK하이닉스 | 000660 | 1,833,000원 | 35% |
-| KR | 두산에너빌리티 | 034020 | 82,100원 | 25% |
-| US | NVIDIA | NVDA | $230.86 | 35% |
-| US | Microsoft | MSFT | $512.80 | 35% |
-| US | Applied Materials | AMAT | $529.30 | 30% |
+| KR | 삼성전기 | 009150 | 1,581,000원 | 40% |
+| KR | SK하이닉스 | 000660 | 1,841,000원 | 35% |
+| KR | 비에이치아이 | 083650 | 59,500원 | 25% |
+| US | Applied Materials | AMAT | $540.04 | 35% |
+| US | NVIDIA | NVDA | $233.95 | 35% |
+| US | Microsoft | MSFT | $517.53 | 30% |
 
 <!-- REPORT_ONE:SWING:END -->
 
