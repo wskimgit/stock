@@ -33,29 +33,27 @@
 
 <!-- REPORT_ONE:STC14:BEGIN -->
 ## STC14
-<!-- STC14_META status=DONE updated_at=2026-10-03T19:14:48+09:00 fingerprint=eaae37234360970c swing_fingerprint=sha256:d7994ed9cfd6cdd526e66f32bc94506d00b9a60094085b0d9ce32d91b6dbfe42 -->
+<!-- STC14_META status=DONE updated_at=2026-10-06T19:13:11+09:00 fingerprint=aef6dd32af3e1ee3 swing_fingerprint=- -->
 
-- 기준일: KR `2026-10-02` · US `2026-10-02` · JP `2026-10-02`
-- 결과: `DONE` · 품질 `LIMITED` · 후보 **16** · 처리 350/351 (99.72%) · 오류 1
+- 기준일: KR `2026-10-06` · US `2026-10-05` · JP `2026-10-06`
+- 결과: `DONE` · 품질 `LIMITED` · 후보 **14** · 처리 350/351 (99.72%) · 오류 1
 
 | 시장 | 종목 | 코드 | 상태 | D1 K/D | H60 K/D | MS7 |
 |---|---|---|---|---:|---:|---|
-| JP | SMT SELECTED J-REIT ACTIVE | `258A` | CROSS | 3.79/3.57 | 1.08/0.36 CROSS | M2 · 분할매입 |
-| KR | 대우건설 | `047040` | CROSS | 17.52/17.37 | 22.37/20.18 CROSS | M2 · 분할매입 |
-| US | Schwab | `SCHW` | MATCH | 5.83/7.50 | 17.76/16.05 POST_CROSS | M0 · 관찰 |
-| KR | 휴젤 | `145020` | MATCH | 5.90/5.53 | 26.53/26.81 PRE_CROSS | W · 대기 |
-| JP | 일본제철 | `5401` | MATCH | 7.84/11.14 | 9.60/8.87 POST_CROSS | W · 대기 |
-| JP | 동일본여객철도 | `9020` | MATCH | 8.98/8.09 | 29.00/25.89 POST_CROSS | W · 대기 |
-| KR | 파마리서치 | `214450` | MATCH | 9.04/7.76 | 10.85/10.34 POST_CROSS | M1 · 매입 검토 |
-| KR | 현대건설 | `000720` | MATCH | 9.95/11.11 | 27.27/27.27 PRE_CROSS | M2 · 분할매입 |
-| JP | 닌텐도 | `7974` | MATCH | 11.49/11.39 | 27.39/26.56 POST_CROSS | W · 대기 |
-| JP | 도카이여객철도 | `9022` | MATCH | 15.30/14.80 | 23.10/19.15 POST_CROSS | W · 대기 |
-| JP | 주가이제약 | `4519` | MATCH | 17.26/14.94 | 29.46/25.37 POST_CROSS | W · 대기 |
-| JP | 도요타자동차 | `7203` | MATCH | 22.12/20.51 | 13.78/14.09 PRE_CROSS | W · 대기 |
-| KR | 비에이치아이 | `083650` | MATCH | 22.85/18.60 | 28.99/28.99 PRE_CROSS | M2 · 분할매입 |
-| US | Starbucks | `SBUX` | MATCH | 25.74/25.16 | 25.77/27.81 PRE_CROSS | M2 · 분할매입 |
-| JP | 마루베니 | `8002` | MATCH | 26.56/22.81 | 14.64/12.49 POST_CROSS | W · 대기 |
-| JP | 미쓰비시지쇼 | `8802` | MATCH | 29.01/31.18 | 7.67/9.07 PRE_CROSS | W · 대기 |
+| KR | 미래에셋증권 | `006800` | CROSS | 37.45/27.49 | 26.32/25.91 CROSS | M1 · 매입 검토 |
+| JP | 도카이여객철도 | `9022` | MATCH | 2.29/7.75 | 5.95/8.53 PRE_CROSS | W · 대기 |
+| US | Red Cat Holdings | `RCAT` | MATCH | 4.24/3.98 | 22.67/21.18 POST_CROSS | M1 · 매입 검토 |
+| KR | NAVER | `035420` | MATCH | 5.02/4.21 | 28.79/24.24 POST_CROSS | W · 대기 |
+| KR | 현대건설 | `000720` | MATCH | 8.00/8.98 | 12.20/10.83 POST_CROSS | M2 · 분할매입 |
+| KR | 현대제철 | `004020` | MATCH | 8.01/8.01 | 29.82/24.56 POST_CROSS | W · 대기 |
+| JP | 이토추상사 | `8001` | MATCH | 13.38/15.86 | 23.24/21.84 POST_CROSS | M2 · 분할매입 |
+| KR | 삼성물산 | `028260` | MATCH | 17.35/14.26 | 14.81/13.60 POST_CROSS | M1 · 매입 검토 |
+| KR | 이마트 | `139480` | MATCH | 20.51/16.56 | 22.22/23.15 PRE_CROSS | M2 · 분할매입 |
+| KR | 스튜디오드래곤 | `253450` | MATCH | 20.93/16.95 | 24.56/19.92 POST_CROSS | M1 · 매입 검토 |
+| KR | 한국금융지주 | `071050` | MATCH | 25.50/22.52 | 17.37/13.62 POST_CROSS | W · 대기 |
+| KR | 한일단조 | `024740` | MATCH | 28.88/26.76 | 7.84/10.83 PRE_CROSS | W · 대기 |
+| US | Dow ETF | `DIA` | MATCH | 32.05/20.84 | 29.33/25.93 POST_CROSS | M0 · 관찰 |
+| KR | 위메이드 | `112040` | MATCH | 39.64/29.13 | 16.23/17.34 PRE_CROSS | M1 · 매입 검토 |
 
 <!-- REPORT_ONE:STC14:END -->
 
