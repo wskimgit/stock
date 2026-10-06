@@ -2,32 +2,36 @@
 
 <!-- REPORT_ONE:SWING:BEGIN -->
 ## Swing
-<!-- SWING_META status=COMPLETE updated_at=2026-10-05T20:02:00+09:00 version=v1.2-FROZEN sources=14 scan_kr=202 scan_us=506 -->
+<!-- SWING_META status=COMPLETE updated_at=2026-10-07T00:07:00+09:00 version=v1.2-FROZEN sources=14 scan_kr=220 scan_us=503 -->
 
-- 기준: KR/US `2026-10-02` · 스캔 KR `202` / US `506` · 독립 소스 `14`
-- STC14.json: 보조 확인 완료
+- 기준: KR `2026-10-06` / US `2026-10-05` · 스캔 KR `220` / US `503` · 독립 소스 `14`
+- STC14.json: 2026-10-06 19:13 KST 최신본 보조 확인 완료
+- 원칙: 강한 종목 우선 + 급등 추격 회피 + 눌림/재가속 확인
 
 ### 원본 포트폴리오
 
 | 시장 | 종목 | 코드/티커 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| KR | 삼성전기 | 009150 | 1,581,000원 | 35% |
-| KR | SK하이닉스 | 000660 | 1,841,000원 | 35% |
-| KR | 삼성전자 | 005930 | 276,000원 | 30% |
-| US | Applied Materials | AMAT | $540.04 | 35% |
-| US | Hewlett Packard Enterprise | HPE | $69.33 | 35% |
-| US | NVIDIA | NVDA | $233.95 | 30% |
+| KR | 삼성전기 | 009150 | 1,675,000원 | 35% |
+| KR | 주성엔지니어링 | 036930 | 278,500원 | 35% |
+| KR | LG에너지솔루션 | 373220 | 390,000원 | 30% |
+| US | NVIDIA | NVDA | $238.90 | 35% |
+| US | Shopify | SHOP | $160.11 | 35% |
+| US | Broadcom | AVGO | $362.51 | 30% |
 
 ### AI 독립조정 최종 포트폴리오
 
 | 시장 | 종목 | 코드/티커 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| KR | 삼성전기 | 009150 | 1,581,000원 | 40% |
-| KR | SK하이닉스 | 000660 | 1,841,000원 | 35% |
-| KR | 비에이치아이 | 083650 | 59,500원 | 25% |
-| US | Applied Materials | AMAT | $540.04 | 35% |
-| US | NVIDIA | NVDA | $233.95 | 35% |
-| US | Microsoft | MSFT | $517.53 | 30% |
+| KR | 삼성전기 | 009150 | 1,675,000원 | 40% |
+| KR | LG에너지솔루션 | 373220 | 390,000원 | 35% |
+| KR | 미래에셋증권 | 006800 | 31,950원 | 25% |
+| US | NVIDIA | NVDA | $238.90 | 40% |
+| US | Broadcom | AVGO | $362.51 | 35% |
+| US | Microsoft | MSFT | $525.18 | 25% |
+
+- 조정: KR 주성엔지니어링(10/06 +17.51%) 추격 부담 → 미래에셋증권(STC14 CROSS/M1) 교체.
+- 조정: US Shopify(10/05 +5.76%) 단기 추격 부담 → Microsoft 교체.
 
 <!-- REPORT_ONE:SWING:END -->
 
