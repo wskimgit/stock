@@ -1,24 +1,35 @@
 # mon 지시문 — 한·미·일 종목 선정·매매시점 판단
 
-- 설계 버전: **3.0** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **2** / 결정일: **2026-10-08**.
-- 저장소: **wskimgit/stock** / 브랜치: **main** / 파일: 저장소 루트 **monitor.md**.
-- 구조: **분석 지시문 1개 + PHP 수집기 1개 + 공유 문서 1개**. 사용자가 지정한 이미지의 역할과 흐름을 유지한다.
+- 설계 버전: **3.1** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 결정일: **2026-10-08**.
+- 저장소: **wskimgit/stock** / 브랜치: **main** / 아래 세 파일을 저장소 루트에서 관리한다.
+- 구조: **mon 지시문 1개 + mon.php 1개**. 파일 역할은 **monitor.md=지시문·설계 / mon_data.json=공유 미러 데이터 / mon_result.md=사용자 결과**로 분리한다.
 - 이번 결정은 구현에 사용할 설계 기준이다. 합성 데이터 시뮬레이션으로 흐름·조건·인터페이스를 확인했으며, 실계좌 API 연결 시험이나 투자 성과 백테스트를 실시한 것은 아니다.
-- 현재 운영 상태: PHP 미구현·미배포, 수집·추천 미실행, 예약 미등록. 아래 운영 구역은 빈 양식이며 `enabled=false`다.
+- 현재 운영 상태: PHP 미구현·미배포, 수집·추천 미실행, 예약 미등록. mon_data.json은 빈 운영 양식이며 `watchlist.settings.enabled=false`다. mon_result.md는 분석 전 상태다.
 - 기존 코드와 Eagle·SIS·MS7 등은 참고 자료다. 기존의 서로 다른 조건을 필수 조건으로 자동 합산하지 않는다.
-- 공식 명칭: **mon 지시문** / PHP 수집 코드 파일명: **mon.php** / 공유 저장 파일: 저장소 루트 **monitor.md**. 실행 문구: **“mon 지시문을 수행하라.”**
+- 공식 명칭: **mon 지시문** / 코드 파일명: **mon.php** / 지시문: **monitor.md** / 미러 데이터: **mon_data.json** / 사용자 결과: **mon_result.md**. 실행 문구: **“mon 지시문을 수행하라.”**
+
+## 파일별 역할
+
+| 루트 파일 | 내용 | 작성자 |
+|---|---|---|
+| monitor.md | mon 실행 지시문·설계·데이터 규격 | 지시문 개정 시 갱신 |
+| mon_data.json | 관찰목록·보유 등록·설정·수집 시세·상세 분석·근거·이력 | mon 지시문과 mon.php가 자기 객체만 갱신 |
+| mon_result.md | 최신 판단 표·가격 조건·주요사항 최대 3개 | mon 지시문 |
+| mon.php | 최소 시세 수집·정규화·미러 코드, 구현 예정 | 코드 구현 시 생성 |
+
+사용자는 mon_result.md를 확인한다. 상세 자료는 mon_data.json에 보존한다. 판단 기준 MON-P2.0은 유지하며 파일 분리로 인터페이스 버전을 3으로 올린다.
 
 ## mon 지시문 — 실행용
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v3.0
+# mon 지시문 v3.1
 
-명칭: mon 지시문. 판단 기준: MON-P2.0. 인터페이스: schema_version 2.
-저장소: wskimgit/stock, 브랜치 main, 저장소 루트 monitor.md.
+명칭: mon 지시문. 판단 기준: MON-P2.0. 인터페이스: schema_version 3.
+저장소: wskimgit/stock, 브랜치 main. 루트 파일: monitor.md=지시문·설계, mon_data.json=공유 미러 데이터, mon_result.md=사용자 결과.
 연계 코드: mon.php. 실행 문구: “mon 지시문을 수행하라.”
 
-너는 한국·미국·일본 종목의 독립 선정과 매입·매도 시점 판단을 담당한다. 사용자가 실행을 요청하면 아래 절차를 수행하고 결과를 monitor.md에 저장한 뒤 핵심 결과를 보고한다. 사용자가 지정한 대상국·종목·범위가 있으면 그 범위를 우선하고, 기본 대상은 한국·미국·일본이다.
+너는 한국·미국·일본 종목의 독립 선정과 매입·매도 시점 판단을 담당한다. 사용자가 실행을 요청하면 아래 절차를 수행하고 상세 데이터는 mon_data.json, 사용자 결과는 mon_result.md에 저장한 뒤 핵심 결과를 보고한다. 사용자가 지정한 대상국·종목·범위가 있으면 그 범위를 우선하고, 기본 대상은 한국·미국·일본이다.
 
 1. 기본 원칙
 - 독립 조사와 판단을 우선한다. mon.php가 모은 시세는 가격·시각·자료 상태를 보강하는 보조자료다.
@@ -28,7 +39,7 @@
 - 수집·판단·기록이라는 세 역할을 유지한다. 이 지시문의 실행은 mon.php 배포·활성화 또는 예약 등록을 포함하지 않는다.
 
 2. 문서 읽기와 독립 자료 확보
-- GitHub에서 main/monitor.md의 최신 본문과 blob SHA를 읽는다. WATCHLIST·COLLECTION·ANALYSIS의 JSON, 기준 버전, 설정, 이전 결과, 보유 등록을 확인한다.
+- GitHub의 monitor.md에서 최신 지시문·설계를 읽고 mon_data.json의 최신 JSON과 blob SHA를 조회한다. watchlist·collection·analysis 객체의 기준 버전, 설정, 이전 결과, 보유 등록을 확인한다. WATCHLIST·COLLECTION·ANALYSIS는 이 세 객체의 역할 명칭이다.
 - schema_version 또는 기준 버전이 맞지 않거나 구역이 손상되었으면 임의 초기화·덮어쓰기를 하지 않는다. 독립 분석이 가능한 범위는 수행하고 저장 문제를 따로 보고한다.
 - 현재 목록, 최근 20거래일의 관찰·추천·제외 후보, 최신 근거를 확인한 과거 강한 후보, 이번 신규 후보를 국가|거래소|코드인 symbol_id로 병합한다.
 - 신규 후보는 국가별 20종목 탐색을 목표로 한다. 적게 확보되면 탐색 범위와 부족 사유를 기록하고 확보한 자료로 계속한다.
@@ -74,7 +85,7 @@
 - 그 밖의 등록 보유분은 HOLD다. 단순 MA20·MA60 이탈 하나만으로 매도를 확정하지 않는다. 부족한 근거는 확인 필요 사유로 기록한다.
 
 6. mon.php 보조자료 사용
-- mon.php는 WATCHLIST를 읽어 한국투자증권 API 우선으로 최소 시세를 수집하고 COLLECTION만 갱신한다. 한국은 지원·매핑 확인 후 네이버→야후, 미국·일본은 야후로 보완한다.
+- mon.php는 mon_data.json의 watchlist를 읽어 한국투자증권 API 우선으로 최소 시세를 수집하고 collection만 갱신한다. 한국은 지원·매핑 확인 후 네이버→야후, 미국·일본은 야후로 보완한다.
 - COLLECTION의 목록 버전·symbol_id·거래소·통화·시각·가격 종류·지연 상태를 검증한다. 신규 종목의 PHP 자료가 아직 없으면 수집대기로 표시하고 독립 근거가 충분한 분석은 계속한다.
 - 보조자료는 시세 나이≤900초 범위에서 참고할 수 있으나 ready의 가격 확인에는 300초 조건을 별도로 적용한다. 지연된 가격을 실시간 가격이라고 표시하지 않는다.
 - 같은 종목·통화·거래소·세션·거래일에서 시각 차이≤120초인 가격들이 2% 넘게 다르면 가격 확인 충돌이다. 변동과 가격 종류를 확인하고 최대 1회 독립 재조회한다.
@@ -86,19 +97,19 @@
 - 후보·키를 정렬하고 해시용 숫자는 소수 6자리 문자열, 시각은 UTC의 YYYY-MM-DDTHH:mm:ss.ffffffZ로 정규화한다.
 - selection_fingerprint는 기준 버전과 판단에 쓰인 독립 사실, input_fingerprint는 이 값과 고정 as_of·사용 가격·자료 상태, result_fingerprint는 종목·순위·행동·readiness·가격 계획·무효화에 대한 SHA-256이다.
 - 같은 input_fingerprint와 기준 버전의 저장 결과가 있으면 재사용한다. 재계산이 다르면 기존 정상 결과를 덮지 않고 일관성 오류를 보고한다. 해시를 계산하지 못했으면 추측하지 말고 미확인으로 기록한다.
-- 현재 monitor.md의 데이터 폼에 따라 WATCHLIST·ANALYSIS 두 JSON 구역을 한 커밋으로 갱신한다. COLLECTION과 정적 지시문·설계 본문을 보존한다.
+- monitor.md의 데이터 폼에 따라 mon_data.json의 watchlist·analysis를 갱신하고 같은 분석의 사용자 요약을 mon_result.md에 한 커밋으로 저장한다. collection은 보존한다. 정적 monitor.md는 지시문 개정 때 갱신한다.
 - WATCHLIST에 관찰종목·보유분·국가·거래소·코드·공급자 매핑·확인된 호가단위를 기록한다. 목록 또는 수집 정의가 바뀌면 watchlist_version을 올린다. 가격·시각 표시만 바뀌면 불필요하게 올리지 않는다.
 - ANALYSIS에 기준 버전·as_of·실행 및 입력 식별값·국가별 coverage·독립 결과·최종 결과·전체 후보 audit·최근 후보 이력·근거와 변경 이유를 기록한다.
 - 사용자가 특정 국가만 실행한 경우 다른 국가의 기존 기록은 이전 기준시각을 유지해 보존하고, 이번에 재평가한 것처럼 표시하지 않는다.
-- 최신 blob SHA로 저장한다. 충돌하면 최신 본문을 읽고 자기 두 구역만 재병합하며 최대 2회 재시도한다.
+- 최신 파일 SHA와 브랜치 기준으로 저장한다. 충돌하면 최신 mon_data.json을 읽고 자기 watchlist·analysis만 재병합하며 최대 2회 재시도한다. mon_result.md는 같은 analysis의 결과로 생성한다.
 - 일부 실패면 partial과 사유를 남기고 가능한 결과를 저장한다. GitHub 저장 실패는 분석 완료와 구분해서 보고하며 저장 성공으로 표시하지 않는다. 이전 정상 문서를 초기화하지 않는다.
 
 8. 실행 시각과 최종 보고
 - 수동 요청 때 실행한다. 예약이 별도로 등록된 경우 한국·일본은 한국시간 09:40·14:00, 미국은 뉴욕시간 10:00에 수행한다. 휴장·점심 휴장·조기 폐장·서머타임을 구분한다.
 - mon.php의 계획 주기는 수집 60초·미러 180초다. 이 지시문을 매분 실행하는 뜻이 아니다. enabled=false 설정을 임의 활성화하지 않는다.
-- 사용자에게 국가별 매입 검토·보유/매도 검토 핵심 결과를 표로 보여 준다. 기본 열은 국가·종목(코드)·판단/확인 상태·관측가격/시각·매입 구간/무효화·이유/다음 확인이다.
-- 각국 매입 검토는 최대 3개이며, 전체 관찰·미검증·제외 사유와 계산 근거는 monitor.md에 보존한다. 결과가 없으면 휴장·자료 미확인·후보 부족 중 실제 이유를 표시한다.
-- 끝에 분석 기준시각, 확인된 범위의 신규/전체 후보 수, 최종 상태, monitor.md 저장 성공 여부와 링크를 짧게 표시한다.
+- mon_result.md는 분석 기준시각·완료/부분 상태 한 줄, 결과 표 하나, 주요사항 최대 3개로 작성한다. 표의 열은 국가·종목(코드) / 판단 / 가격조건 / 핵심이유다. 각국 매입 검토 최대 3개와 매도 검토·보유 판단 변경 종목을 표시한다.
+- 판단은 매입 검토·조건부 매입·매도 검토·보유 유지로 짧게 표현한다. 가격조건에는 확인된 관측가·시세시각, 유효 매입 구간·무효화 또는 매도 기준을 압축해 표시한다. 결측은 확인 필요, 지연은 해당 행에 짧게 표시한다. 변동 없는 보유분은 총수 한 줄로 요약하고 보유 등록이 없으면 그 사실만 표시한다.
+- 주요사항은 시장 변화·판단 변경·가격/자료 확인에 필요한 내용만 최대 3개다. 결과가 없으면 실제 사유를 한 줄로 표시한다. 전체 후보·근거·계산값·상태·식별값은 mon_data.json에 보존한다. 보고에는 결과 파일 링크와 저장 성공 여부를 짧게 표시한다.
 - 기존 합성 규칙 시험 52 PASS와 이번 실제 조사·시세 확인·실연결·성과 검증 여부를 구분한다. 검증 및 운영 상태는 최신 기록과 실제 수행 근거로 표시한다. 수행하지 않은 조사·수집·검증·예약을 완료했다고 쓰지 않는다.
 ```
 <!-- MON:INSTRUCTION:END -->
@@ -107,12 +118,12 @@
 
 | 모듈 | 입력 | 처리 | 출력·작성 권한 |
 |---|---|---|---|
-| mon 지시문 | 독립 조회한 시장·기업·완료 일봉·가격 근거, 기존 후보, 보유 등록, 유효한 PHP 자료 | 입력 고정 → 독립 상대 순위 → 동일 입력 재사용 → 보조 가격 확인 | WATCHLIST와 ANALYSIS 두 구역을 한 커밋으로 갱신 |
-| mon.php | WATCHLIST의 설정·달력·국가·거래소·종목 매핑 | 최소 시세 수집·형식 검증·시각 정규화·자료 상태 판정 | COLLECTION 구역만 갱신 |
-| monitor.md | 위 두 작성자의 기록 | 최신 정보 교환과 이력 보존 | 세 쌍의 마커 안 JSON이 기계 입력의 기준 |
+| mon 지시문 | monitor.md, 독립 조회 근거, mon_data.json | 독립 상대 순위 → 가격 확인 → 기록·요약 | mon_data.json의 watchlist·analysis와 mon_result.md |
+| mon.php | mon_data.json의 watchlist | 최소 시세 수집·검증·정규화 | mon_data.json의 collection만 |
+| mon_data.json | 위 두 작성자의 기록 | 관찰목록·시세·상세 판단 교환 | schema_version 3의 JSON 객체 |
+| mon_result.md | 같은 analysis의 최신 결과 | 사용자에게 필요한 내용 표시 | 결과 표 하나·주요사항 최대 3개 |
 
-지시문은 PHP의 평가 결과를 받아 판단하는 구조가 아니다. 후보 평가와 판단 근거를 독립적으로 산출하고, PHP 시세로 가격·시간 조건을 보강하거나 오류를 재확인한다. PHP는 평가·매매 추천·주문을 수행하지 않는다.
-새 관찰종목은 수집 완료 전에는 수집대기다. 필수 근거를 독립 조회로 충분히 확보한 경우 PHP 수집대기만을 이유로 독립 분석 전체를 중단하지 않는다.
+지시문은 독립적으로 선정·판단하고 PHP 시세로 가격·시간 조건을 보강한다. 신규 종목의 PHP 자료가 없으면 수집대기지만 독립 근거가 충분한 분석은 계속한다.
 
 ## 2. 운영 기준 재조정
 
@@ -253,18 +264,18 @@ NREC=3으로 가져온 해외 봉 중 진행 중 봉을 제외하고 최신 두 
 - 여러 원천이 모두 실패해도 해당 종목의 마지막 확인 가격은 원래 시세시각으로 보존한다. `fetch_status=error`와 마지막 시도 시각을 갱신하며 그 가격을 새 확인 가격으로 사용하지 않는다.
 - 신규 종목은 point=null, fetch_status=pending으로 시작한다. 가격·시각·거래량의 결측을 0 또는 현재 시각으로 채우지 않는다.
 
-## 6. 인터페이스 데이터 폼 v2
+## 6. mon_data.json 인터페이스 v3
 
-파일은 UTF-8 Markdown이다. 세 구역에 각각 JSON 객체 하나를 둔다. JSON이 기계 기준이며 사람이 보는 표는 해당 JSON으로 생성한다.
+mon_data.json은 UTF-8 JSON 파일이다. 루트 필수 필드는 schema_version=3, watchlist, collection, analysis이며 세 값은 객체다. 각 객체의 schema_version도 3이다. 기존 항목 폼은 유지하고 문서 마커를 JSON 객체 경로로 바꾼다. mon_result.md는 analysis에서 생성한 사용자 요약이다.
 시간은 UTC 오프셋이 있는 ISO 8601, 거래일은 거래소 현지 YYYY-MM-DD다. 가격·비율은 유한 JSON number, 거래량은 0 이상 number 또는 null, 종목코드는 string, 보유 여부는 boolean이다. null은 확인되지 않음을 뜻한다.
 `symbol_id=국가|거래소|코드`이며 공급자 매핑을 별도로 둔다. 한국 코드 앞자리 0과 일본 영문자 코드를 보존한다. 같은 코드가 여러 거래소에 있으면 별개 식별자다.
-구역 마커 누락·중복, JSON 오류, 알려지지 않은 schema_version, 종목 중복 또는 필수 필드 형식 오류가 있으면 자동 쓰기를 멈추고 오류를 남긴다. 문서를 초기화하지 않는다.
+필수 객체 누락, JSON 오류, 알려지지 않은 schema_version, 종목 중복 또는 필수 필드 형식 오류가 있으면 자동 쓰기를 멈추고 오류를 남긴다. 기존 데이터를 초기화하지 않는다.
 
-| 구역 | 필수 최상위 필드 |
+| mon_data.json 객체 경로 | 필수 필드 |
 |---|---|
-| WATCHLIST | schema_version, criteria_version, watchlist_version, updated_at, run_id, settings, calendar, symbols |
-| COLLECTION | schema_version, collection_id, watchlist_version, started_at, completed_at, status, next_cursor, quotes |
-| ANALYSIS | schema_version, criteria_version, run_id, as_of, analyzed_at, watchlist_version, collection_id, status, selection_fingerprint, input_fingerprint, result_fingerprint, coverage, independent_results, results, candidate_audit, candidate_history, changes, evidence |
+| watchlist (WATCHLIST) | schema_version, criteria_version, watchlist_version, updated_at, run_id, settings, calendar, symbols |
+| collection (COLLECTION) | schema_version, collection_id, watchlist_version, started_at, completed_at, status, next_cursor, quotes |
+| analysis (ANALYSIS) | schema_version, criteria_version, run_id, as_of, analyzed_at, watchlist_version, collection_id, status, selection_fingerprint, input_fingerprint, result_fingerprint, coverage, independent_results, results, candidate_audit, candidate_history, changes, evidence |
 
 ### 공통 상태와 항목 폼
 
@@ -433,21 +444,22 @@ PHP → 지시문, quotes 배열의 한 항목:
 }
 ```
 
-사람이 보는 출력은 **국가·종목·판단·관측가격과 가격 종류·매입 구간·무효화·판단 이유·다음 확인·시세시각·자료 상태**만 표로 표시한다.
-출력이 비어도 해당국 휴장, 통과 없음, 자료 미확인 중 어느 경우인지 분명히 남긴다.
+사용자 출력은 mon_result.md에 **국가·종목(코드) / 판단 / 가격조건 / 핵심이유** 네 열의 표 하나로 생성한다. 가격조건에 확인된 관측가·시세시각, 매입 구간·무효화 또는 매도 기준을 압축한다. 조건부·지연·확인 필요는 해당 행에 짧게 표시한다. 결과가 없으면 실제 사유를 한 줄로 표시한다.
 
-## 7. 동시 갱신·목록 버전·부분 실패 처리
+## 7. 파일 갱신·목록 버전·부분 실패 처리
 
-1. 매번 GitHub Contents API로 main/monitor.md의 최신 내용과 blob SHA를 읽는다. 공개 raw URL의 오래된 캐시를 갱신 기준으로 삼지 않는다.
-2. 지시문은 WATCHLIST·ANALYSIS만, PHP는 COLLECTION만 교체하고 나머지 본문·구역은 보존한다.
-3. 최신 SHA로 파일을 저장한다. SHA 충돌이면 최신 내용 재조회·자기 구역 재병합을 최대 2회 한다. 오래된 전체 문서를 반복 전송하지 않는다.
-4. 목록 또는 공급자 코드·수집 정의가 바뀌면 watchlist_version을 증가시킨다. 점수·표시 시각만 바뀌어 동일 수집 대상이면 불필요하게 증가시키지 않는다.
-5. PHP는 시작한 목록 버전을 기록한다. 저장 직전 버전이 달라지면 그 배치를 새 목록의 완료 결과로 게시하지 않고 다음 실행에서 새 목록을 수집한다.
-6. 지시문은 같은 버전·식별자에 연결된 정상 자료만 보조 확인에 사용한다. 목록 변경 직후 새 종목에는 이전 종목 가격을 연결하지 않는다.
-7. 45초 예산·연결 실패 시 완료 항목, 미처리·실패 항목과 next_cursor를 저장한다. 목록 버전이 바뀌면 커서는 새 목록에 맞춰 다시 정한다.
-8. PHP 실행 잠금을 두고 중복 실행을 생략한다. enabled=false 또는 목록이 비었으면 시세 API를 호출하지 않는다. 상태파일·잠금·토큰 캐시는 PHP 실행 환경의 보조 저장이며 공유 업무 문서는 계속 이 파일 한 개다.
+1. GitHub에서 mon_data.json과 mon_result.md의 최신 내용·SHA 및 브랜치 기준을 읽는다. 오래된 raw 캐시를 갱신 기준으로 삼지 않는다.
+2. mon 지시문은 mon_data.json의 watchlist·analysis를 갱신하고 같은 analysis의 요약인 mon_result.md를 한 커밋으로 저장한다. PHP의 collection은 보존한다. monitor.md는 지시문·설계 개정 시 갱신한다.
+3. mon.php는 mon_data.json의 collection만 바꾸고 watchlist·analysis를 보존한다. PHP가 mon_result.md에 투자 판단을 쓰지 않는다.
+4. SHA 또는 브랜치 충돌이면 최신 데이터 재조회·자기 객체 재병합을 최대 2회 한다. 오래된 전체 JSON을 반복 전송하지 않는다.
+5. 목록·공급자 코드·수집 정의가 바뀌면 watchlist_version을 올린다. 표시 시각만 바뀌면 올리지 않는다.
+6. PHP는 시작한 목록 버전을 collection.watchlist_version에 기록한다. 저장 전 목록이 바뀌면 이전 배치를 새 목록의 완료 결과로 게시하지 않는다.
+7. 지시문은 읽은 목록 버전·식별자에 맞는 자료만 보조 확인에 쓴다. 새 종목에 이전 종목 가격을 연결하지 않는다.
+8. 45초 수집 예산·연결 실패 시 완료·미처리·실패 항목과 next_cursor를 저장한다. 목록 버전이 바뀌면 커서를 다시 맞춘다.
+9. PHP 실행 잠금으로 중복 실행을 생략한다. enabled=false 또는 목록이 비었으면 API를 호출하지 않는다. 잠금·토큰 캐시는 실행 환경에 둔다.
+10. 데이터 저장 실패와 사용자 결과 갱신 실패를 분석 완료와 구분해 보고한다. 저장되지 않은 결과를 저장 성공으로 표시하지 않는다.
 
-최근 시세를 GitHub에 모두 한 번씩 쌓지 않고 최신 두 가격점과 후보의 최신 상태만 유지한다. 문서가 512KiB를 넘으면 중복 설명·중복 이력을 압축하고, 필요한 최근 후보 식별자를 조용히 삭제하지 않는다. 여전히 한도를 넘으면 쓰기를 보류하고 크기 문제를 명시한다.
+mon_data.json은 최신 두 가격점과 후보의 최신 상태·필요한 최근 이력만 유지한다. 512KiB를 넘으면 중복 이력을 압축한다. 필요한 후보나 시세를 조용히 삭제하지 않고, 여전히 넘으면 쓰기를 보류하고 크기 문제를 보고한다.
 
 ## 8. 재조정 시뮬레이션
 
@@ -510,136 +522,28 @@ PHP → 지시문, quotes 배열의 한 항목:
 | 51 | 음수 지연 값은 오류 가격 | PASS |
 | 52 | 음의 영은 같은 숫자로 정규화 | PASS |
 
-기존의 원천 매핑·시세 날짜·JSON·SHA·구역 소유권·실행 예산 규격은 계속 적용한다. 실제 계좌 연결과 실제 시장 백테스트는 아직 수행하지 않았다.
+기존의 원천 매핑·시세 날짜·JSON·SHA·객체 소유권·실행 예산 규격은 계속 적용한다. 실제 계좌 연결과 실제 시장 백테스트는 아직 수행하지 않았다.
 
 ## 9. 구현·실연결에서 확인할 조건
 
 설계 수치와 인터페이스는 위와 같이 결정했다. 다음은 미결정 규격이 아니라 실제 구현으로 확인해야 할 조건이다.
 
 - 동일 PHP 안의 나라별 어댑터가 실제 응답의 날짜·봉 시각 의미·코드·권한·지연·거래량 종류를 정확히 정규화하는지 확인.
-- 관찰 기록 → PHP 읽기 → 실제 시세 수집 → 같은 파일 쓰기 → 지시문 재조회까지 한 번 연결하고, 동시 갱신 후 다른 구역이 보존되는지 확인.
+- mon_data.json 관찰 기록 → PHP 읽기 → 시세 수집·미러 → 지시문 재조회 → mon_result.md 생성까지 연결하고, 동시 갱신 후 다른 작성자의 객체가 보존되는지 확인.
 - 실제 계좌의 호출 한도·응답 속도와 관찰 수에 따라 partial 빈도를 측정. 60초 주기에서 가능한 범위를 확인한 뒤 활성화.
 - 합성 시뮬레이션과 별도로 실제 과거 자료에서 공통 조건의 추천 빈도·후보 편중·무효화 조건을 평가. 검증 없이 수익률 또는 정확도 개선을 주장하지 않음.
 
-## 관찰종목 — 지시문 작성
+## 10. mon_result.md — 최소 사용자 출력 규격
 
-<!-- MONITOR:WATCHLIST:BEGIN -->
-```json
-{
-  "schema_version": 2,
-  "criteria_version": "MON-P2.0",
-  "watchlist_version": 0,
-  "updated_at": null,
-  "run_id": null,
-  "settings": {
-    "enabled": false,
-    "watch_per_country": 10,
-    "buy_review_per_country": 3,
-    "new_candidate_search_target_per_country": 20,
-    "candidate_memory_trading_days": 20,
-    "daily_bars_target": 60,
-    "daily_bars_min": 21,
-    "poll_seconds": 60,
-    "mirror_seconds": 180,
-    "force_mirror_before_analysis_seconds": 60,
-    "auxiliary_max_age_seconds": 900,
-    "action_price_max_age_seconds": 300,
-    "action_known_delay_max_seconds": 300,
-    "future_clock_tolerance_seconds": 5,
-    "http_connect_timeout_seconds": 2,
-    "http_timeout_seconds": 5,
-    "tick_budget_seconds": 55,
-    "request_spacing_seconds": 1.25,
-    "github_conflict_retries": 2,
-    "max_independent_price_rechecks": 1,
-    "analysis_slots": [
-      {
-        "countries": [
-          "KR",
-          "JP"
-        ],
-        "timezone": "Asia/Seoul",
-        "time": "09:40"
-      },
-      {
-        "countries": [
-          "KR",
-          "JP"
-        ],
-        "timezone": "Asia/Seoul",
-        "time": "14:00"
-      },
-      {
-        "countries": [
-          "US"
-        ],
-        "timezone": "America/New_York",
-        "time": "10:00"
-      }
-    ],
-    "collection_budget_seconds": 45,
-    "publish_reserve_seconds": 10,
-    "github_http_timeout_seconds": 3,
-    "consistency_priority": "same_input_same_business_result",
-    "independent_selection_priority": true,
-    "conditional_recommendations": true,
-    "require_two_price_points": false,
-    "hard_liquidity_floor": false,
-    "price_conflict_fraction": 0.02,
-    "comparison_price_time_gap_seconds": 120
-  },
-  "calendar": {
-    "valid_until": null,
-    "markets": []
-  },
-  "symbols": []
-}
-```
-<!-- MONITOR:WATCHLIST:END -->
+- 맨 위에 분석 기준시각과 완료/부분 상태를 한 줄로 표시한다.
+- 표 하나의 열: **국가·종목(코드) / 판단 / 가격조건 / 핵심이유**.
+- 매입 검토는 국가별 최대 3개다. 매도 검토와 보유 판단이 바뀐 종목은 함께 표시한다.
+- 판단은 매입 검토·조건부 매입·매도 검토·보유 유지로 짧게 표현한다. 가격조건은 확인된 가격·시세시각·매입 구간·무효화 또는 매도 기준만 압축한다.
+- 변동 없는 보유분은 총수 한 줄로 요약한다. 등록이 없으면 보유 등록 없음을 표시한다.
+- 주요사항은 시장 변화·판단 변경·가격/자료 확인 필요 중 최대 3개다. 결과가 없으면 실제 사유만 한 줄로 표시한다.
+- 상세 후보·근거·계산값·상태·실행 이력·식별값은 mon_data.json에 보존한다.
 
-## 수집정보 — PHP 작성
-
-<!-- MONITOR:COLLECTION:BEGIN -->
-```json
-{
-  "schema_version": 2,
-  "collection_id": null,
-  "watchlist_version": null,
-  "started_at": null,
-  "completed_at": null,
-  "status": "not_started",
-  "next_cursor": 0,
-  "quotes": []
-}
-```
-<!-- MONITOR:COLLECTION:END -->
-
-## 분석결과 — 지시문 작성
-
-<!-- MONITOR:ANALYSIS:BEGIN -->
-```json
-{
-  "schema_version": 2,
-  "criteria_version": "MON-P2.0",
-  "run_id": null,
-  "analyzed_at": null,
-  "watchlist_version": null,
-  "collection_id": null,
-  "status": "not_started",
-  "coverage": [],
-  "independent_results": [],
-  "results": [],
-  "candidate_audit": [],
-  "candidate_history": [],
-  "changes": [],
-  "evidence": [],
-  "selection_fingerprint": null,
-  "input_fingerprint": null,
-  "result_fingerprint": null,
-  "as_of": null
-}
-```
-<!-- MONITOR:ANALYSIS:END -->
+현재 mon_data.json에는 실제 관찰종목·시세·분석 결과가 없으며 수집 설정은 비활성이다. mon_result.md는 분석 전임을 표시한다.
 
 ## 공식 참고
 

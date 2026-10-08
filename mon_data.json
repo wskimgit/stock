@@ -1,0 +1,102 @@
+{
+  "schema_version": 3,
+  "watchlist": {
+    "schema_version": 3,
+    "criteria_version": "MON-P2.0",
+    "watchlist_version": 0,
+    "updated_at": null,
+    "run_id": null,
+    "settings": {
+      "enabled": false,
+      "watch_per_country": 10,
+      "buy_review_per_country": 3,
+      "new_candidate_search_target_per_country": 20,
+      "candidate_memory_trading_days": 20,
+      "daily_bars_target": 60,
+      "daily_bars_min": 21,
+      "poll_seconds": 60,
+      "mirror_seconds": 180,
+      "force_mirror_before_analysis_seconds": 60,
+      "auxiliary_max_age_seconds": 900,
+      "action_price_max_age_seconds": 300,
+      "action_known_delay_max_seconds": 300,
+      "future_clock_tolerance_seconds": 5,
+      "http_connect_timeout_seconds": 2,
+      "http_timeout_seconds": 5,
+      "tick_budget_seconds": 55,
+      "request_spacing_seconds": 1.25,
+      "github_conflict_retries": 2,
+      "max_independent_price_rechecks": 1,
+      "analysis_slots": [
+        {
+          "countries": [
+            "KR",
+            "JP"
+          ],
+          "timezone": "Asia/Seoul",
+          "time": "09:40"
+        },
+        {
+          "countries": [
+            "KR",
+            "JP"
+          ],
+          "timezone": "Asia/Seoul",
+          "time": "14:00"
+        },
+        {
+          "countries": [
+            "US"
+          ],
+          "timezone": "America/New_York",
+          "time": "10:00"
+        }
+      ],
+      "collection_budget_seconds": 45,
+      "publish_reserve_seconds": 10,
+      "github_http_timeout_seconds": 3,
+      "consistency_priority": "same_input_same_business_result",
+      "independent_selection_priority": true,
+      "conditional_recommendations": true,
+      "require_two_price_points": false,
+      "hard_liquidity_floor": false,
+      "price_conflict_fraction": 0.02,
+      "comparison_price_time_gap_seconds": 120
+    },
+    "calendar": {
+      "valid_until": null,
+      "markets": []
+    },
+    "symbols": []
+  },
+  "collection": {
+    "schema_version": 3,
+    "collection_id": null,
+    "watchlist_version": null,
+    "started_at": null,
+    "completed_at": null,
+    "status": "not_started",
+    "next_cursor": 0,
+    "quotes": []
+  },
+  "analysis": {
+    "schema_version": 3,
+    "criteria_version": "MON-P2.0",
+    "run_id": null,
+    "analyzed_at": null,
+    "watchlist_version": null,
+    "collection_id": null,
+    "status": "not_started",
+    "coverage": [],
+    "independent_results": [],
+    "results": [],
+    "candidate_audit": [],
+    "candidate_history": [],
+    "changes": [],
+    "evidence": [],
+    "selection_fingerprint": null,
+    "input_fingerprint": null,
+    "result_fingerprint": null,
+    "as_of": null
+  }
+}
