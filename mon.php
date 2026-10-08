@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.2.0 -- PHP 7.4+ web control / persistent quote daemon.
+ * mon.php 1.2.1 -- PHP 7.4+ web control / persistent quote daemon.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * Only collection is written. Selection, orders and mon_result.md belong to mon.
  */
@@ -29,8 +29,10 @@ function mon_number($value): ?float {
     $n = (float)$value;
     return is_finite($n) ? $n : null;
 }
-function mon_json($value): string {
-    $s = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR);
+function mon_json($value, bool $pretty = true): string {
+    $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR;
+    if ($pretty) $flags |= JSON_PRETTY_PRINT;
+    $s = json_encode($value, $flags);
     return $s . "\n";
 }
 function mon_decode(string $s) {
@@ -177,7 +179,7 @@ class MonHttp {
             CURLOPT_CONNECTTIMEOUT_MS => (int)(min(2.0, $timeout) * 1000),
             CURLOPT_TIMEOUT_MS => max(1, (int)($timeout * 1000)),
             CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_FOLLOWLOCATION => false, CURLOPT_USERAGENT => 'mon.php/1.2.0',
+            CURLOPT_FOLLOWLOCATION => false, CURLOPT_USERAGENT => 'mon.php/1.2.1',
             CURLOPT_HEADERFUNCTION => static function ($ch, $line) use (&$responseHeaders) {
                 $p = strpos($line, ':'); if ($p !== false) $responseHeaders[strtolower(trim(substr($line, 0, $p)))] = trim(substr($line, $p + 1));
                 return strlen($line);
@@ -323,7 +325,7 @@ final class MonGitHub {
             $latest=$this->read($deadline,$settings['github_http_timeout_seconds']);
             if (!$latest['data']->watchlist->settings->enabled || MonData::signature($latest['data']->watchlist)!==$signature) throw new MonFault('WATCHLIST_CHANGED');
             $latest['data']->collection=$batch; // Preserve all other objects and unknown fields.
-            $raw=mon_json($latest['data']); if (strlen($raw)>524288) throw new MonFault('DATA_SIZE_EXCEEDED');
+            $raw=mon_json($latest['data'],false); if (strlen($raw)>524288) throw new MonFault('DATA_SIZE_EXCEEDED');
             $body=mon_json(['message'=>'mon: mirror collection '.$batch->collection_id,'content'=>base64_encode($raw),'sha'=>$latest['sha'],'branch'=>$this->config->get('MON_BRANCH','main')]);
             $r=$this->http->request('PUT',$this->url,$this->headers(),$body,$deadline,$settings['github_http_timeout_seconds']);
             if (in_array($r['status'],[409,422],true) && $attempt < $settings['github_conflict_retries']) continue;
@@ -419,10 +421,21 @@ final class MonCollector {
         $price=mon_number(mon_get($r,'closePrice')); if ($price===null||$price<=0) throw new MonFault('NAVER_PRICE_INVALID');
         $at=mon_time(mon_get($r,'localTradedAt')); $market=MonMarket::state($w,$s->country,$this->now());
         $date=$at===null?null:(new DateTimeImmutable('@'.$at))->setTimezone(MonMarket::timezone('KR'))->format('Y-m-d');
-        $providerStatus=mon_get($r,'marketStatus'); $session=$providerStatus==='OPEN'?'regular':($providerStatus==='CLOSE'?'closed':$market['session']);
+        $providerExchange=mon_get(mon_get($r,'stockExchangeType'),'code');
+        $expectedExchange=['KOSPI'=>['KS','KOSPI'],'KOSDAQ'=>['KQ','KOSDAQ'],'KRX'=>['KS','KQ','KOSPI','KOSDAQ']][$s->exchange]??[];
+        if (!$expectedExchange || !in_array($providerExchange,$expectedExchange,true) || mon_get(mon_get($r,'stockExchangeType'),'zoneId')!=='Asia/Seoul') throw new MonFault('NAVER_VENUE_MISMATCH');
+        // Listing-market metadata does not prove that an extended-session price is a KRX regular price.
+        $quoteLocal=$at===null?null:(new DateTimeImmutable('@'.$at))->setTimezone(MonMarket::timezone('KR'));
+        $quoteInRegular=$quoteLocal!==null && (int)$quoteLocal->format('N')<=5 && $quoteLocal->format('His')>='090000' && $quoteLocal->format('His')<='153000';
+        $quoteMarket=$at===null?null:MonMarket::state($w,'KR',$at);
+        $providerStatus=mon_get($r,'marketStatus'); $session='unknown';
+        if ($providerStatus==='OPEN' && $market['collect'] && $quoteInRegular && $quoteMarket['collect'] && $date===$market['date']) $session='regular';
+        elseif ($providerStatus==='CLOSE' && $quoteInRegular) $session='closed';
         $delay=mon_number($this->config->get('NAVER_DELAY_SECONDS_KR',''));
+        if ($delay!==null && $delay<0) throw new MonFault('NAVER_DELAY_INVALID');
         $p=$this->point($s,'NAVER',$symbol,$price,null,$at,$date,$session,$session==='closed'?'close':'last',$at===null?'unknown':($session==='closed'?'close':'trade'),$delay,false);
         $p->change_pct=mon_number(mon_get($r,'fluctuationsRatio'));
+        $p->provider_venue=$providerExchange;$p->venue_basis='listing_market';$p->provider_session=mon_get($r,'marketSessionType');
         return [$p];
     }
     public function yahoo($s,$w,float $deadline,array $settings): array {
@@ -434,17 +447,41 @@ final class MonCollector {
         if (mon_get($chart,'error')!==null||!is_array($rows)||!isset($rows[0])) throw new MonFault('YAHOO_RESPONSE_INVALID');
         $meta=mon_get($rows[0],'meta');
         if (strtoupper((string)mon_get($meta,'symbol'))!==strtoupper($symbol)||mon_get($meta,'currency')!==$s->currency) throw new MonFault('YAHOO_ID_OR_CURRENCY_MISMATCH');
+        $venues=['KOSPI'=>['KSC'],'KOSDAQ'=>['KOE'],'NASDAQ'=>['NMS','NGM','NCM'],'NYSE'=>['NYQ'],'AMEX'=>['ASE'],'TSE'=>['JPX']];
+        if ($s->exchange==='KRX') $expected=substr($symbol,-3)==='.KS'?['KSC']:(substr($symbol,-3)==='.KQ'?['KOE']:[]);
+        else $expected=$venues[$s->exchange]??[];
+        $providerVenue=mon_get($meta,'exchangeName');
+        if (!$expected || !in_array($providerVenue,$expected,true) || mon_get($meta,'exchangeTimezoneName')!==MonMarket::timezone($s->country)->getName()) throw new MonFault('YAHOO_VENUE_MISMATCH');
         $price=mon_number(mon_get($meta,'regularMarketPrice')); $rawAt=mon_get($meta,'regularMarketTime');
         if ($price===null||$price<=0||!is_int($rawAt)||$rawAt<=0) throw new MonFault('YAHOO_QUOTE_INVALID');
         $tz=MonMarket::timezone($s->country); $date=(new DateTimeImmutable('@'.$rawAt))->setTimezone($tz)->format('Y-m-d');
         $market=MonMarket::state($w,$s->country,$this->now()); $session=$market['session'];
         $regular=mon_get(mon_get($meta,'currentTradingPeriod'),'regular'); $start=mon_get($regular,'start'); $end=mon_get($regular,'end');
-        if (is_int($start)&&is_int($end)&&$start<$end) $session=$this->now()>=$start&&$this->now()<$end?'regular':'closed';
+        if (is_int($start)&&is_int($end)&&$start<$end) {
+            $open=$this->now()>=$start&&$this->now()<$end;
+            $quoteInSession=$rawAt>=$start&&$rawAt<$end;
+            $session=$open?($quoteInSession?'regular':'unknown'):'closed';
+        } elseif ($session==='regular') $session='unknown';
         // Zero has an unambiguous meaning. Positive undocumented units are not guessed.
         $providerDelay=mon_number(mon_get($meta,'exchangeDataDelayedBy'));
         $delay=$providerDelay===0.0?0.0:mon_number($this->config->get('YAHOO_DELAY_SECONDS_'.$s->country,''));
+        $delayBasis=$providerDelay===0.0?'provider_zero_field':($delay===null?'unknown':'configured_seconds');
+        if ($delay===null) {
+            $policies=mon_get($w->settings,'quote_delay_policies');
+            $policy=mon_get(mon_get($policies,'YAHOO'),$s->country.'|'.$s->exchange);
+            $known=mon_number(mon_get($policy,'delay_seconds'));$verified=mon_get($policy,'verified_at');$url=mon_get($policy,'source_url');
+            $verifiedAt=mon_time($verified);
+            $host=is_string($url)?parse_url($url,PHP_URL_HOST):null;
+            $policyVenues=mon_get($policy,'provider_venues',[mon_get($policy,'provider_venue')]);
+            if ($known!==null&&$known>=0&&$verifiedAt!==null&&$verifiedAt<=$this->now()+$settings['future_clock_tolerance_seconds']&&$this->now()-$verifiedAt<=1209600&&is_string($host)&&preg_match('/(^|\.)help\.yahoo\.com$/',$host)&&is_array($policyVenues)&&in_array($providerVenue,$policyVenues,true)) {
+                $delay=$known;$delayBasis='verified_exchange_policy';
+            }
+        }
         if ($delay!==null&&$delay<0) throw new MonFault('YAHOO_DELAY_INVALID');
-        return [$this->point($s,'YAHOO',$symbol,$price,null,$rawAt,$date,$session,'last','trade',$delay,false)];
+        $p=$this->point($s,'YAHOO',$symbol,$price,null,$rawAt,$date,$session,'last','trade',$delay,false);
+        $p->provider_venue=$providerVenue;$p->delay_basis=$delayBasis;
+        if ($delayBasis==='verified_exchange_policy') {$p->delay_policy_url=$url;$p->delay_policy_verified_at=$verified;}
+        return [$p];
     }
     private function fetch($s,$w,float $deadline,array $settings): array {
         $sources=$s->country==='KR'?['kis','naver','yahoo']:['kis','yahoo']; $best=null; $bestScore=-1; $lastError='NO_SOURCE_AVAILABLE';
@@ -534,7 +571,7 @@ final class MonDaemon {
     private function heartbeat(string $state,?string $error=null): void {
         if ($error!==null) $this->lastError=$error;
         elseif (in_array($state,['paused','empty_watchlist','mirrored','collected'],true)) $this->lastError=null;
-        $this->store->write('status.json',(object)['version'=>'1.2.0','instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'error_code'=>$this->lastError]);
+        $this->store->write('status.json',(object)['version'=>'1.2.1','instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'error_code'=>$this->lastError]);
     }
     public static function forceMirror($w,int $now,array $settings): bool {
         $slots=mon_get($w->settings,'analysis_slots',[]); if (!is_array($slots)) return false;
@@ -784,7 +821,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
         else $message='등록된 종목을 수집하고 GitHub에 반영합니다.';
     } else $message='시작 버튼을 누르면 백그라운드에서 계속 실행합니다.';
     return [
-        'version'=>'1.2.0','running'=>$s['running'],'stopping'=>$stopping,'heartbeat_fresh'=>$fresh,
+        'version'=>'1.2.1','running'=>$s['running'],'stopping'=>$stopping,'heartbeat_fresh'=>$fresh,
         'label'=>$stopping?'중지 중':($s['running']?($fresh?'실행 중':'응답 확인 필요'):'중지됨'),
         'message'=>$message,'status'=>$status,
         'watched'=>is_array($symbols)?count($symbols):0,'collected'=>is_array($quotes)?count(array_filter($quotes,static function($q){return mon_get($q,'point')!==null;})):0,
@@ -814,7 +851,7 @@ p{margin:12px 0}.metrics{display:flex;gap:28px;padding:16px 0;border-top:1px sol
 summary{cursor:pointer;font-weight:650}label{display:block;margin:16px 0 5px;font-size:14px;font-weight:600}input{width:100%;padding:11px;border:1px solid #c9d3de;border-radius:8px;font:inherit}small{display:block;color:#607080;margin:8px 0 16px}.settings-status{font-size:14px;color:#607080}.env{margin:18px 0;font-size:14px}.env summary{font-weight:500}.foot{font-size:13px;color:#607080;margin-top:18px}.settings button{margin-top:16px}
 @media(max-width:480px){main{margin-top:20px}.panel{padding:20px}.metrics{gap:20px}h1{font-size:24px}}
 </style></head><body><main>
-<header><h1>mon 모니터</h1><span>v1.2.0</span></header>
+<header><h1>mon 모니터</h1><span>v1.2.1</span></header>
 <div id="notice" class="$tone" role="status" aria-live="polite">$notice</div>
 <section class="panel" aria-label="데몬 실행 상태">
 <div class="state"><span id="dot" class="dot"></span><span id="state">$label</span></div>
@@ -919,7 +956,7 @@ function mon_main(array $argv): int {
         else throw new MonFault('CLI_OPTION_INVALID');
     }
     if ($mode==='help') {
-        echo "mon.php 1.2.0 (PHP 7.4+ CLI)\nphp74 mon.php = 데몬 시작 (옵션 생략 가능)\n--daemon 시작 / --run 전면 실행 / --once 한 주기 / --status 상태 / --stop 종료 / --check 설정\n기본 설정은 코드 상단 MON_CONFIG, 상태 파일은 mon.php와 같은 폴더\n"; return 0;
+        echo "mon.php 1.2.1 (PHP 7.4+ CLI)\nphp74 mon.php = 데몬 시작 (옵션 생략 가능)\n--daemon 시작 / --run 전면 실행 / --once 한 주기 / --status 상태 / --stop 종료 / --check 설정\n기본 설정은 코드 상단 MON_CONFIG, 상태 파일은 mon.php와 같은 폴더\n"; return 0;
     }
     $store=new MonStore($dir);
     if ($mode==='check') {
