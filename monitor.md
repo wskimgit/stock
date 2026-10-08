@@ -3,7 +3,7 @@
 - 설계 버전: **3.1** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 결정일: **2026-10-08**.
 - 저장소: **wskimgit/stock** / 브랜치: **main** / 아래 파일을 저장소 루트에서 관리한다.
 - 구조: **mon 지시문 1개 + mon.php 1개**. 파일 역할은 **monitor.md=지시문·설계 / mon_data.json=공유 미러 데이터 / mon_result.md=사용자 결과**로 분리한다.
-- 설계와 인터페이스를 기준으로 mon.php **1.0.0**을 구현했다. 합성 설계 시뮬레이션·모의 API 검증·실제 로컬 프로세스 시험을 실시했다. NAS 배포, 실계좌 API 연결 시험, 투자 성과 백테스트는 실시하지 않았다.
+- 설계와 인터페이스를 기준으로 mon.php **1.1.0**을 구현했다. 합성 설계 시뮬레이션·모의 API 검증·실제 로컬 프로세스 시험을 실시했다. NAS 배포, 실계좌 API 연결 시험, 투자 성과 백테스트는 실시하지 않았다.
 - 현재 운영 상태: mon.php 구현 완료·NAS 미배포, 실제 시세 수집·추천 미실행, NAS 재시작 작업 미등록. mon_data.json은 빈 운영 양식이며 `watchlist.settings.enabled=false`다. mon_result.md는 분석 전 상태다.
 - 기존 코드와 Eagle·SIS·MS7 등은 참고 자료다. 기존의 서로 다른 조건을 필수 조건으로 자동 합산하지 않는다.
 - 공식 명칭: **mon 지시문** / 코드 파일명: **mon.php** / 지시문: **monitor.md** / 미러 데이터: **mon_data.json** / 사용자 결과: **mon_result.md**. 실행 문구: **“mon 지시문을 수행하라.”**
@@ -546,75 +546,60 @@ mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·AP
 현재 mon_data.json에는 실제 관찰종목·시세·분석 결과가 없으며 수집 설정은 비활성이다. mon_result.md는 분석 전임을 표시한다.
 
 
-## 11. mon.php 1.0.0 — 상시 데몬 실행
+## 11. mon.php 1.1.0 — /web에서 바로 데몬 실행
 
-PHP CLI **7.4 이상**과 cURL 확장이 필요하다. 로컬 시험은 **PHP 8.3.6**에서 실시했으며 NAS의 PHP 7.4 실행은 아직 확인하지 않았다. mon.php 하나가 계속 대기하며 목록을 다시 읽고 수집한다. 매입·매도 판단은 mon 지시문이 수행한다.
-
-### 실행 방식과 기본 동작
-
-- 기본 수집 주기 60초, GitHub 미러 주기 180초. 설정된 분석 시각 직전에는 미러를 시도한다. 처리 시간·원천 호출 제한으로 일부 종목을 못 끝내면 다음 순환에서 이어서 수집한다.
-- 한국투자증권을 먼저 사용한다. 한국은 네이버→야후, 미국·일본은 야후로 보완한다. watchlist에 확인된 source_codes가 있는 원천만 사용한다.
-- GitHub의 최신 mon_data.json을 매 주기 조회한다. 수집 전에 목록·버전·활성 설정을 확인하고, 저장 직전 최신 SHA로 다시 읽어 collection만 교체한다. 충돌은 최대 2회 재시도한다.
-- enabled=false 또는 종목 목록이 비어 있으면 데몬은 대기한다. 시세 API 호출과 GitHub 쓰기를 하지 않는다. 장애가 나면 오류를 기록하고 재시도하며 마지막 확인 가격과 원래 시각을 보존한다.
-- flock으로 같은 상태 폴더의 중복 실행을 막는다. --stop은 인스턴스를 지정한 종료 파일로 정상 종료한다. pcntl이 있으면 SIGTERM·SIGINT도 처리한다.
-- Unix에서 --daemon은 pcntl·posix가 있으면 분리 프로세스로 실행하고, 없으면 nohup으로 실행한다. 전면 실행 --run은 서비스 관리자가 감시하는 환경에서 사용할 수 있다.
-- 시세 시각·봉 시각 의미·공급자 지연을 확인하지 못하면 unknown을 기록한다. 수집 시각으로 시세 시각을 대체하지 않는다.
-
-### NAS 설치와 비공개 설정
-
-코드는 예를 들어 /volume1/mon/mon.php에 둔다. 인증과 실행 상태는 웹 공개 폴더 밖의 /volume1/mon_private에 둔다. 아래 php74는 NAS에 설치된 PHP CLI 실행 파일명 또는 절대경로로 바꾼다.
-
-비공개 /volume1/mon_private/mon.env 파일의 최소 내용은 다음과 같다. 실제 키는 NAS에 직접 설정하고 GitHub에 저장하지 않는다.
-
-```dotenv
-GITHUB_TOKEN=YOUR_GITHUB_TOKEN
-KIS_APP_KEY=YOUR_KIS_APP_KEY
-KIS_APP_SECRET=YOUR_KIS_APP_SECRET
-```
-
-GitHub 토큰에는 stock 저장소 Contents 읽기·쓰기 권한이 필요하다. 저장소·브랜치 기본값은 wskimgit/stock·main이다. 설정 파일은 문자 그대로 읽으며 운영체제 환경변수가 우선한다. 변경한 설정 파일은 다음 주기에 다시 읽는다.
-
-| 선택 설정 | 값과 적용 |
-|---|---|
-| KIS_BAR_TIME_BASIS_KR / US / JP | 각 국가의 분봉 시각 의미를 확인한 뒤 start 또는 end. 기본 unknown |
-| KIS_DELAY_SECONDS_KR / US / JP | 해당 API·계좌에서 확인된 지연 초. 미설정이면 unknown. 실시간 권한 확인 후에만 0 |
-| NAVER_DELAY_SECONDS_KR, YAHOO_DELAY_SECONDS_KR / US / JP | 공급자 지연을 확인한 경우에만 설정. 야후가 명시한 지연 0 이외의 불명확한 값은 추측하지 않음 |
-| MON_REPOSITORY, MON_BRANCH | 기본 wskimgit/stock, main |
-| MON_ENV_FILE, MON_STATE_DIR | 명령행에서 생략한 설정 파일·상태 폴더 경로 |
-
-위의 KR / US / JP는 실제 변수명 끝에 각각 붙인다. 예: KIS_BAR_TIME_BASIS_US. 초기에는 시각 의미와 지연 설정을 생략해도 수집할 수 있지만 해당 자료의 확인 상태는 unknown이다. 활성 수집에는 mon 지시문이 작성한 유효한 관찰목록과 enabled=true가 필요하다.
+mon.php를 NAS의 **/volume1/web/mon.php**에 두고 다음 한 줄을 실행한다. 실제 web 경로가 다르면 파일 경로만 바꾼다. PHP CLI 7.4 이상과 cURL 확장을 사용한다.
 
 ```bash
-chmod 700 /volume1/mon_private
-chmod 600 /volume1/mon_private/mon.env
-php74 /volume1/mon/mon.php --check --env=/volume1/mon_private/mon.env --state-dir=/volume1/mon_private/state
-php74 /volume1/mon/mon.php --daemon --env=/volume1/mon_private/mon.env --state-dir=/volume1/mon_private/state
+php74 /volume1/web/mon.php
 ```
 
-상태 확인과 정상 종료:
+옵션 없이 실행하면 기본 동작은 **데몬 시작**이다. 시작 명령이 반환된 뒤에도 백그라운드에서 계속 실행한다. 별도의 암호, 설정 파일, 전용 폴더, chmod 작업을 요구하지 않는다. mon.php가 있는 폴더에 필요한 상태 파일을 자동 생성한다. 해당 실행 계정이 그 폴더에 파일을 쓸 수 있어야 한다.
+
+### API 연결 설정
+
+외부 서비스 연결에 사용하는 값은 코드 상단 MON_CONFIG에 한 번 입력한다. 별도의 mon.env 파일은 필요하지 않다.
+
+```php
+const MON_CONFIG = [
+    'GITHUB_TOKEN' => '',
+    'KIS_APP_KEY' => '',
+    'KIS_APP_SECRET' => ''
+];
+```
+
+이 값은 새 로그인 암호가 아니라 GitHub 저장 및 한국투자증권 API 연결에 필요한 서비스 인증값이다. GitHub 토큰은 stock 저장소 Contents 읽기·쓰기 권한을 사용한다. 실제 값은 NAS의 코드에 입력하며 저장소의 배포 원본에는 빈 값을 유지한다. API 값이 없으면 데몬은 종료하지 않고 오류를 기록하며 재시도한다. 수집·미러를 수행하려면 연결 설정과 유효한 관찰목록이 필요하다.
+
+기존 운영체제 환경변수와 명시적으로 지정한 --env 설정은 호환성을 위해 지원한다. 우선순위는 운영체제 환경변수 → 명시한 설정 파일 → MON_CONFIG다. 기본 실행에서는 별도 파일을 읽지 않는다. 코드 상단 설정을 수정한 뒤에는 --stop으로 종료하고 다시 시작한다.
+
+분봉 시각 의미·공급자 지연을 확인한 경우에만 KIS_BAR_TIME_BASIS_KR/US/JP, KIS_DELAY_SECONDS_KR/US/JP 등의 선택 설정을 MON_CONFIG에 추가할 수 있다. 미설정 값은 unknown으로 유지하며 수집 시각을 시세 시각으로 대체하지 않는다.
+
+### 실행 확인과 종료
 
 ```bash
-php74 /volume1/mon/mon.php --status --state-dir=/volume1/mon_private/state
-php74 /volume1/mon/mon.php --stop --state-dir=/volume1/mon_private/state
+php74 /volume1/web/mon.php --status
+php74 /volume1/web/mon.php --stop
 ```
 
-단일 주기 점검은 --once, 서비스 관리자가 감시하는 전면 실행은 --run을 사용한다. 경로를 지정하지 않으면 현재 계정의 HOME 아래 mon_private를 사용하므로, NAS 작업에는 위처럼 동일한 절대경로를 지정한다.
+--status의 running=true이면 실행 중이다. --daemon을 명시해도 같은 방식으로 시작한다. --run은 전면 실행, --once는 한 주기 실행, --check는 설정 확인이다. Unix에서 pcntl·posix를 사용할 수 있으면 분리 프로세스로 실행하고, 없으면 nohup으로 실행한다.
 
-### 재부팅·비정상 종료 뒤 재시작
+NAS 작업 스케줄러에 **부팅 시** 및 **1분마다** 위의 동일한 시작 명령을 등록하면 재부팅·비정상 종료 후에도 다시 실행한다. 같은 실행 계정과 파일을 사용한다. 이미 실행 중이면 중복 데몬을 만들지 않는다. 완전히 중지하려면 재시작 작업을 먼저 사용 안 함으로 바꾼 뒤 --stop을 실행한다.
 
-NAS 작업 스케줄러에 **부팅 시** 및 **1분마다** 위의 동일한 --daemon 명령을 등록한다. 같은 실행 계정과 상태 폴더를 사용한다. 이미 실행 중이면 아무 프로세스도 추가하지 않고 종료하므로, 정상 데몬은 계속 동작하고 종료된 경우에만 다시 시작한다. 등록 작업은 장애 시 재시작을 위한 것이며 수집 자체는 데몬이 수행한다.
+### 자동 상태 파일과 수집 동작
 
-운영 중 완전히 중지하려면 먼저 NAS의 두 재시작 작업을 사용 안 함으로 바꾼 뒤 --stop을 실행한다. 재시작 작업을 유지하면 정상 종료 후에도 다음 실행 시 다시 시작된다. 시세 수집만 잠시 멈추려면 watchlist.settings.enabled=false로 두고 데몬은 유지한다.
+같은 web 폴더에 mon_daemon.lock, mon_status.json, mon_stop.json, mon_pending.json, mon_remote_cache.json, mon.log, mon_launcher.log가 필요할 때 생긴다. 별도 폴더는 만들지 않는다. 기존 status.json 등 다른 프로그램의 파일과 구분하며 web 폴더의 권한을 변경하지 않는다. KIS 발급 토큰은 실행 중 메모리에서 재사용하며 토큰 파일을 만들지 않는다.
 
-### 로컬 상태와 검증 범위
+기본 수집 주기는 60초, GitHub 미러 주기는 180초다. 분석 시각 직전에는 미러를 시도한다. 한국투자증권 우선, 한국 네이버→야후 및 미국·일본 야후 보완, 부분 수집 이어가기, SHA 충돌 재조회·최대 2회 재시도, collection만 교체하는 동작을 유지한다.
 
-비공개 상태 폴더에는 daemon.lock, status.json, stop.json, pending.json, remote_cache.json, kis_token.json, mon.log·launcher.log가 생긴다. GitHub에 올리지 않는다. pending.json은 미러 실패 자료를 다음 주기까지 보존한다. mon.log는 크기를 제한해 교체하며 --status는 키 값 없이 PID·하트비트·오류 코드를 보여 준다.
+watchlist.settings.enabled=false 또는 빈 관찰목록이면 대기한다. 유효한 연결 설정·관찰목록·enabled=true가 갖춰지면 수집한다. 현재 저장소의 운영 데이터는 비활성·빈 목록 상태이며 이 개정에서 활성화하거나 실제 종목을 등록하지 않았다.
 
-- 모의 API·저장 시험 **39개 통과**: 완료 봉·미확인 시각·원천 보완·토큰 캐시·원래 가격 시각 보존·부분 수집·휴장과 일본 점심·미국 서머타임·SHA 충돌·다른 객체 보존·목록 변경·종료 요청 등.
-- 실제 PHP 프로세스 수명주기 시험 **12개 통과**: 시작·실행 상태·중복 실행·키 누락 시 생존·종료·재시작·단일 주기·SIGTERM.
-- pcntl_fork가 없는 환경의 nohup 시작·정상 종료 **2개 통과**.
-- 재현용 시험: tests/mon_daemon_test.php 및 tests/mon_lifecycle_test.py. 후자는 Python 3과 cURL을 활성화한 PHP CLI가 필요하며 MON_TEST_PHP로 실행 파일을 지정할 수 있다.
-- 실제 KIS·네이버·야후 응답 연결, NAS 부팅·작업 스케줄러, 실제 관찰목록으로 전체 순환 시간은 미확인이다. 투자 성과 검증과 구분한다.
+### 변경 검증
+
+- 모의 API·저장 검증 **39개 통과**: 수집·미러·원래 시세시각 보존·부분 처리·동시 갱신·메모리 토큰 재사용.
+- 실제 프로세스 검증 **16개 통과**: 옵션 없는 시작·기본 위치·전용 폴더 미생성·기존 폴더 권한과 파일 보존·코드 상단 설정·중복 실행·정상 종료·재시작·SIGTERM.
+- pcntl_fork 없이 기본 경로에서 nohup 시작·종료 **2개 통과**.
+- 로컬 PHP 8.3.6에서 검증했다. NAS의 PHP 7.4 실행, 실제 API 연결, NAS 부팅 작업 등록은 아직 확인하지 않았다.
+- 재현 시험은 tests/mon_daemon_test.php와 tests/mon_lifecycle_test.py다. 후자는 Python 3과 cURL을 활성화한 PHP CLI가 필요하며 MON_TEST_PHP로 실행 파일을 지정할 수 있다.
 
 
 ## 공식 참고

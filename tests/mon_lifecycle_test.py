@@ -2,6 +2,7 @@
 import json
 import os
 import pathlib
+import shutil
 import signal
 import subprocess
 import tempfile
@@ -27,12 +28,15 @@ def await_stopped(command, env):
 
 with tempfile.TemporaryDirectory(prefix='mon-lifecycle-') as td:
     base = pathlib.Path(td)
-    envfile = base / 'private test.env'
-    envfile.write_text('GITHUB_TOKEN=\nKIS_APP_KEY=\nKIS_APP_SECRET=\nMON_IDLE_POLL_SECONDS=1\n')
-    os.chmod(envfile, 0o600)
+    web = base / 'web folder'
+    web.mkdir(mode=0o755)
+    script = web / 'mon.php'
+    shutil.copyfile(ROOT / 'mon.php', script)
+    original_mode = web.stat().st_mode & 0o777
+    (web / 'status.json').write_text('{"other_application":true}')
     env = dict(os.environ)
-    env.update(GITHUB_TOKEN='', KIS_APP_KEY='', KIS_APP_SECRET='', MON_IDLE_POLL_SECONDS='1')
-    command = [PHP, str(ROOT / 'mon.php'), '--env=' + str(envfile), '--state-dir=' + str(base / 'state')]
+    env.update(GITHUB_TOKEN='', KIS_APP_KEY='', KIS_APP_SECRET='', MON_IDLE_POLL_SECONDS='1', MON_ENV_FILE='', MON_STATE_DIR='')
+    command = [PHP, str(script)]
 
     def run(*args):
         return subprocess.run(command + list(args), env=env, text=True, capture_output=True, timeout=10)
@@ -44,11 +48,25 @@ with tempfile.TemporaryDirectory(prefix='mon-lifecycle-') as td:
         result = run('--check')
         configuration = json.loads(result.stdout)
         check('configuration check reports PHP/curl without disclosing keys', result.returncode == 0 and configuration['curl'] and not configuration['github_token_present'])
-        started = run('--daemon')
-        check('daemon start returns while child keeps running', started.returncode == 0 and 'PID=' in started.stdout)
+        inline = base / 'inline.php'
+        code = script.read_text()
+        for key, value in [('GITHUB_TOKEN','inline-fixture-token'),('KIS_APP_KEY','inline-fixture-key'),('KIS_APP_SECRET','inline-fixture-secret')]:
+            code = code.replace("'" + key + "' => ''", "'" + key + "' => '" + value + "'", 1)
+        inline.write_text(code)
+        inline_env = dict(env)
+        for key in ('GITHUB_TOKEN','KIS_APP_KEY','KIS_APP_SECRET'):
+            inline_env.pop(key, None)
+        result = subprocess.run([PHP, str(inline), '--check'], env=inline_env, text=True, capture_output=True, timeout=10)
+        cfg = json.loads(result.stdout)
+        check('inline API settings work without an env file and values are omitted from status', result.returncode == 0 and cfg['github_token_present'] and cfg['kis_credentials_present'] and 'inline-fixture-' not in result.stdout)
+        started = run()
+        check('no-argument launch returns while daemon keeps running', started.returncode == 0 and 'PID=' in started.stdout)
         first = json.loads(run('--status').stdout)
         check('flock and process heartbeat confirm running', first['running'] and first['status']['instance_id'])
-        duplicate = run('--daemon')
+        check('state files stay beside mon.php with no application subdirectory', configuration['state_directory'] == str(web) and (web / 'mon_status.json').is_file() and not any(p.is_dir() for p in web.iterdir()))
+        check('existing web folder permissions stay unchanged', web.stat().st_mode & 0o777 == original_mode)
+        check('existing application status.json is preserved', (web / 'status.json').read_text() == '{"other_application":true}')
+        duplicate = run()
         second = json.loads(run('--status').stdout)
         check('duplicate launch keeps one existing PID', duplicate.returncode == 0 and first['status']['pid'] == second['status']['pid'])
         time.sleep(1.1)

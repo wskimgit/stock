@@ -46,7 +46,7 @@ try {
     check('no calendar means unknown session',$batch->quotes[0]->point->session==='unknown');
     check('KIS successful response avoids fallback',count($calls)===2&&strpos($calls[1],'FID_INPUT_ISCD=005930')!==false);
     $collector->collect($d,$batch,microtime(true)+5,$s);check('cached token reused',count(array_filter($calls,static function($u){return strpos($u,'/oauth2/tokenP')!==false;}))===1);
-    check('token cache permissions private',(fileperms($store->path('kis_token.json'))&0777)===0600);
+    check('token cache stays in memory without an extra credential file',!file_exists($store->path('kis_token.json')));
     $collector->configure(config(['KIS_BAR_TIME_BASIS_KR'=>'unknown']));$b=$collector->collect($d,$batch,microtime(true)+5,$s);
     check('unverified bar semantics are not fabricated',$b->quotes[0]->point->quote_at===null&&$b->quotes[0]->quality_status==='unknown'&&$b->quotes[0]->point->provider_bar_at!==null);
     $collector->configure(config(['KIS_BAR_TIME_BASIS_KR'=>'start']));$b=$collector->collect($d,$batch,microtime(true)+5,$s);
@@ -59,8 +59,8 @@ try {
     $fallback=new MonCollector(kisHttp($calls,$yahoo),new MonStore(tempdir()),config(),null,static function()use($now){return $now;});
     // Pre-cache auth so the fixture's deliberate KIS error applies to the quote request.
     $cacheKey=hash('sha256',"fixture-key\0fixture-secret");
-    $ref=new ReflectionClass($fallback);$prop=$ref->getProperty('store');$prop->setAccessible(true);$fallbackStore=$prop->getValue($fallback);
-    $fallbackStore->write('kis_token.json',(object)['signature'=>$cacheKey,'access_token'=>'fixture-access-token','expires_at'=>$now+86400]);
+    $ref=new ReflectionClass($fallback);$prop=$ref->getProperty('tokenCache');$prop->setAccessible(true);
+    $prop->setValue($fallback,(object)['signature'=>$cacheKey,'access_token'=>'fixture-access-token','expires_at'=>$now+86400]);
     $b=$fallback->collect($d,$batch,microtime(true)+5,$s);check('KIS error and Naver identity mismatch fall back to Yahoo',$b->quotes[0]->point->source==='YAHOO'&&$b->quotes[0]->point->price===70100.0);
     $positiveDelay=new MonHttp(null,static function()use($now){return response((object)['chart'=>(object)['error'=>null,'result'=>[(object)['meta'=>(object)['symbol'=>'005930.KS','currency'=>'KRW','regularMarketPrice'=>70100,'regularMarketTime'=>$now-10,'exchangeDataDelayedBy'=>15]]]]]);});
     $p=(new MonCollector($positiveDelay,new MonStore(tempdir()),config(),null,static function()use($now){return $now;}))->yahoo(symbol(),$d->watchlist,microtime(true)+5,$s)[0];

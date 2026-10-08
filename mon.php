@@ -1,10 +1,19 @@
 <?php
 /**
- * mon.php 1.0.0 -- PHP 7.4+ CLI quote collector / persistent daemon.
+ * mon.php 1.1.0 -- PHP 7.4+ CLI quote collector / persistent daemon.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * Only collection is written. Selection, orders and mon_result.md belong to mon.
  */
 declare(strict_types=1);
+
+// Put mon.php in /volume1/web and run: php74 /volume1/web/mon.php
+// No separate configuration file or application directory is required.
+// Fill in service API credentials here once; leave unused providers blank.
+const MON_CONFIG = [
+    'GITHUB_TOKEN' => '',
+    'KIS_APP_KEY' => '',
+    'KIS_APP_SECRET' => ''
+];
 
 function mon_get($o, string $key, $default = null) {
     if (is_object($o) && property_exists($o, $key)) return $o->$key;
@@ -45,10 +54,13 @@ final class MonStore {
     public $dir;
     public function __construct(string $dir) {
         $this->dir = rtrim($dir, DIRECTORY_SEPARATOR);
-        if (!is_dir($this->dir) && !@mkdir($this->dir, 0700, true)) throw new MonFault('STATE_DIRECTORY_UNWRITABLE');
-        @chmod($this->dir, 0700);
+        if (!is_dir($this->dir) && !@mkdir($this->dir, 0777, true)) throw new MonFault('STATE_DIRECTORY_UNWRITABLE');
     }
-    public function path(string $name): string { return $this->dir . DIRECTORY_SEPARATOR . $name; }
+    public function path(string $name): string {
+        // Avoid collisions with existing status.json and other NAS web applications.
+        if (strpos($name, 'mon') !== 0) $name = 'mon_' . $name;
+        return $this->dir . DIRECTORY_SEPARATOR . $name;
+    }
     public function read(string $name) {
         $p = $this->path($name);
         if (!is_file($p)) return null;
@@ -61,7 +73,6 @@ final class MonStore {
         if ($tmp === false) throw new MonFault('STATE_WRITE_FAILED');
         try {
             if (@file_put_contents($tmp, mon_json($value), LOCK_EX) === false) throw new MonFault('STATE_WRITE_FAILED');
-            @chmod($tmp, 0600);
             if (!@rename($tmp, $this->path($name))) throw new MonFault('STATE_RENAME_FAILED');
         } finally { if (is_file($tmp)) @unlink($tmp); }
     }
@@ -72,7 +83,6 @@ final class MonStore {
         $p = $this->path('mon.log');
         if (is_file($p) && filesize($p) > 2097152) { @unlink($p . '.1'); @rename($p, $p . '.1'); }
         @file_put_contents($p, json_encode($safe, JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
-        @chmod($p, 0600);
     }
 }
 
@@ -96,7 +106,7 @@ final class MonConfig {
     }
     public function get(string $key, string $default = ''): string {
         $v = getenv($key);
-        return $v !== false ? $v : ($this->values[$key] ?? $default);
+        return $v !== false ? $v : ($this->values[$key] ?? MON_CONFIG[$key] ?? $default);
     }
     public function int(string $key, int $default, int $min, int $max): int {
         $s = $this->get($key, (string)$default);
@@ -152,7 +162,7 @@ class MonHttp {
             CURLOPT_CONNECTTIMEOUT_MS => (int)(min(2.0, $timeout) * 1000),
             CURLOPT_TIMEOUT_MS => max(1, (int)($timeout * 1000)),
             CURLOPT_SSL_VERIFYPEER => true, CURLOPT_SSL_VERIFYHOST => 2,
-            CURLOPT_FOLLOWLOCATION => false, CURLOPT_USERAGENT => 'mon.php/1.0.0',
+            CURLOPT_FOLLOWLOCATION => false, CURLOPT_USERAGENT => 'mon.php/1.1.0',
             CURLOPT_HEADERFUNCTION => static function ($ch, $line) use (&$responseHeaders) {
                 $p = strpos($line, ':'); if ($p !== false) $responseHeaders[strtolower(trim(substr($line, 0, $p)))] = trim(substr($line, $p + 1));
                 return strlen($line);
@@ -318,6 +328,7 @@ final class MonCollector {
     private $control;
     private $clock;
     private $providerCooldown=[];
+    private $tokenCache=null;
     public function __construct(MonHttp $http, MonStore $store, MonConfig $config, ?MonControl $control=null, ?callable $clock=null) {
         $this->http=$http; $this->store=$store; $this->config=$config; $this->control=$control; $this->clock=$clock ?: static function(){return time();};
     }
@@ -326,7 +337,7 @@ final class MonCollector {
     private function token(float $deadline, array $settings): string {
         $key=$this->config->get('KIS_APP_KEY'); $secret=$this->config->get('KIS_APP_SECRET');
         if ($key==='' || $secret==='') throw new MonFault('KIS_CREDENTIALS_MISSING');
-        $signature=hash('sha256',$key."\0".$secret); $cached=$this->store->read('kis_token.json');
+        $signature=hash('sha256',$key."\0".$secret); $cached=$this->tokenCache;
         if (mon_get($cached,'signature')===$signature && (int)mon_get($cached,'expires_at',0)>$this->now()+300 && is_string(mon_get($cached,'access_token'))) return $cached->access_token;
         $r=MonHttp::decode($this->http->request('POST','https://openapi.koreainvestment.com:9443/oauth2/tokenP',['Content-Type: application/json'],mon_json(['grant_type'=>'client_credentials','appkey'=>$key,'appsecret'=>$secret]),$deadline,$settings['http_timeout_seconds'],$settings['request_spacing_seconds']));
         $token=mon_get($r,'access_token'); $seconds=mon_number(mon_get($r,'expires_in'));
@@ -337,7 +348,7 @@ final class MonCollector {
             $dt=DateTimeImmutable::createFromFormat('!Y-m-d H:i:s',$providerExpiry,new DateTimeZone('Asia/Seoul'));
             if ($dt!==false && $dt->format('Y-m-d H:i:s')===$providerExpiry) $expires=min($expires,$dt->getTimestamp());
         }
-        $this->store->write('kis_token.json',(object)['signature'=>$signature,'access_token'=>$token,'expires_at'=>$expires]); return $token;
+        $this->tokenCache=(object)['signature'=>$signature,'access_token'=>$token,'expires_at'=>$expires]; return $token;
     }
     private function point($s,string $source,string $providerSymbol,float $price,$volume,?int $at,?string $date,string $session,string $type,string $basis,?float $delay,bool $verified): stdClass {
         return (object)['price'=>$price,'change_pct'=>null,'volume'=>$volume,'volume_basis'=>$type==='minute_close'?'minute':'unknown','currency'=>$s->currency,'venue'=>$s->exchange,'source'=>$source,'provider_symbol'=>$providerSymbol,'price_type'=>$type,'timestamp_basis'=>$basis,'quote_at'=>$at===null?null:mon_iso($at),'fetched_at'=>mon_iso($this->now()),'market_date'=>$date,'session'=>$session,'delay_kind'=>$delay===null?'unknown':($delay>0?'delayed':'realtime'),'delay_seconds'=>$delay,'bar_time_basis_verified'=>$verified];
@@ -361,7 +372,7 @@ final class MonCollector {
         $r=MonHttp::decode($this->http->request('GET','https://openapi.koreainvestment.com:9443'.$path.'?'.http_build_query($q),$headers,null,$deadline,$settings['http_timeout_seconds'],$settings['request_spacing_seconds']));
         if ((string)mon_get($r,'rt_cd','')!=='0') {
             $code=(string)mon_get($r,'msg_cd','ERROR');
-            if (in_array($code,['EGW00121','EGW00123'],true)) @unlink($this->store->path('kis_token.json'));
+            if (in_array($code,['EGW00121','EGW00123'],true)) $this->tokenCache=null;
             throw new MonFault('KIS_'.$code,$code==='EGW00201'?60:30);
         }
         $rows=mon_get($r,'output2'); if (!is_array($rows)) throw new MonFault('KIS_ROWS_INVALID');
@@ -508,7 +519,7 @@ final class MonDaemon {
     private function heartbeat(string $state,?string $error=null): void {
         if ($error!==null) $this->lastError=$error;
         elseif (in_array($state,['paused','empty_watchlist','mirrored','collected'],true)) $this->lastError=null;
-        $this->store->write('status.json',(object)['version'=>'1.0.0','instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'error_code'=>$this->lastError]);
+        $this->store->write('status.json',(object)['version'=>'1.1.0','instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'error_code'=>$this->lastError]);
     }
     public static function forceMirror($w,int $now,array $settings): bool {
         $slots=mon_get($w->settings,'analysis_slots',[]); if (!is_array($slots)) return false;
@@ -554,7 +565,6 @@ final class MonDaemon {
     public function run(int $maxTicks=0): int {
         $this->lock=@fopen($this->store->path('daemon.lock'),'c+');
         if (!$this->lock||!flock($this->lock,LOCK_EX|LOCK_NB)) { if ($this->lock) fclose($this->lock); throw new MonFault('ALREADY_RUNNING'); }
-        @chmod($this->store->path('daemon.lock'),0600);
         if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
             pcntl_async_signals(true); $ctl=$this->control;
             pcntl_signal(SIGTERM,static function() use($ctl){$ctl->stop=true;}); pcntl_signal(SIGINT,static function() use($ctl){$ctl->stop=true;});
@@ -593,9 +603,7 @@ function mon_status(MonStore $store): array {
 }
 function mon_main(array $argv): int {
     if (PHP_SAPI!=='cli') { http_response_code(403); echo "mon.php는 PHP CLI에서 실행합니다.\n"; return 1; }
-    $taskUserDir=getenv('HOME');
-    $privateDir=$taskUserDir?rtrim($taskUserDir,DIRECTORY_SEPARATOR).'/mon_private':sys_get_temp_dir().'/mon-private-'.substr(hash('sha256',__DIR__),0,16);
-    $mode='run'; $envFile=getenv('MON_ENV_FILE')?:$privateDir.'/mon.env'; $dir=getenv('MON_STATE_DIR')?:$privateDir.'/state'; $maxTicks=0; $instance=bin2hex(random_bytes(12));
+    $mode='daemon'; $envFile=getenv('MON_ENV_FILE')?:''; $dir=getenv('MON_STATE_DIR')?:__DIR__; $maxTicks=0; $instance=bin2hex(random_bytes(12));
     foreach (array_slice($argv,1) as $arg) {
         if (in_array($arg,['--run','--daemon','--once','--status','--stop','--check','--help'],true)) $mode=substr($arg,2);
         elseif (strpos($arg,'--env=')===0) $envFile=substr($arg,6);
@@ -605,12 +613,12 @@ function mon_main(array $argv): int {
         else throw new MonFault('CLI_OPTION_INVALID');
     }
     if ($mode==='help') {
-        echo "mon.php 1.0.0 (PHP 7.4+ CLI)\n--daemon 시작 / --run 전면 실행 / --once 한 주기 / --status 상태 / --stop 종료 / --check 설정\n--env=/비공개/mon.env --state-dir=/비공개/mon_state\n"; return 0;
+        echo "mon.php 1.1.0 (PHP 7.4+ CLI)\nphp74 mon.php = 데몬 시작 (옵션 생략 가능)\n--daemon 시작 / --run 전면 실행 / --once 한 주기 / --status 상태 / --stop 종료 / --check 설정\n기본 설정은 코드 상단 MON_CONFIG, 상태 파일은 mon.php와 같은 폴더\n"; return 0;
     }
     $store=new MonStore($dir);
     if ($mode==='check') {
         $cfg=new MonConfig($envFile);
-        echo mon_json(['php'=>PHP_VERSION,'curl'=>extension_loaded('curl'),'pcntl'=>function_exists('pcntl_fork'),'github_token_present'=>$cfg->get('GITHUB_TOKEN')!=='','kis_credentials_present'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!=='','repository'=>$cfg->get('MON_REPOSITORY','wskimgit/stock'),'branch'=>$cfg->get('MON_BRANCH','main'),'state_directory_writable'=>is_writable($dir)]); return 0;
+        echo mon_json(['php'=>PHP_VERSION,'curl'=>extension_loaded('curl'),'pcntl'=>function_exists('pcntl_fork'),'github_token_present'=>$cfg->get('GITHUB_TOKEN')!=='','kis_credentials_present'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!=='','repository'=>$cfg->get('MON_REPOSITORY','wskimgit/stock'),'branch'=>$cfg->get('MON_BRANCH','main'),'state_directory'=>$store->dir,'state_directory_writable'=>is_writable($dir)]); return 0;
     }
     if ($mode==='status') { echo mon_json(mon_status($store)); return 0; }
     if ($mode==='stop') {
@@ -629,13 +637,12 @@ function mon_main(array $argv): int {
                 // Release inherited caller pipes so the parent command can complete.
                 @fclose(STDIN); @fclose(STDOUT); @fclose(STDERR);
                 $in=fopen('/dev/null','r'); $out=fopen($store->path('launcher.log'),'a'); $err=fopen($store->path('launcher.log'),'a');
-                @chmod($store->path('launcher.log'),0600);
                 exit((new MonDaemon($store,$envFile,$instance))->run($maxTicks));
             }
         } else {
             if (!function_exists('exec')) throw new MonFault('USE_FOREGROUND_WITH_SERVICE_MANAGER');
             $command='nohup '.escapeshellarg(PHP_BINARY).' '.escapeshellarg(__FILE__).' --run --env='.escapeshellarg($envFile).' --state-dir='.escapeshellarg($dir).' --instance='.escapeshellarg($instance).' > '.escapeshellarg($store->path('launcher.log')).' 2>&1 < /dev/null &';
-            exec($command); @chmod($store->path('launcher.log'),0600);
+            exec($command);
         }
         $end=microtime(true)+5;
         do {
