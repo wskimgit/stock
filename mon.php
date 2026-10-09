@@ -1,14 +1,15 @@
 <?php
 /**
- * mon.php 1.2.2 -- PHP 7.4+ web control / persistent quote daemon.
+ * mon.php 1.2.3 -- PHP 7.4+ web control / persistent quote daemon.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * Only collection is written. Selection, orders and mon_result.md belong to mon.
  */
 declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
-// API settings can be saved on the web page; no manual config file is required.
-const MON_VERSION = '1.2.2';
+// Reuse the existing private sync token; browser API settings remain available.
+const MON_VERSION = '1.2.3';
+const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_CONFIG = [
     'GITHUB_TOKEN' => '',
     'KIS_APP_KEY' => '',
@@ -93,6 +94,8 @@ final class MonStore {
 final class MonConfig {
     public $values;
     public $webValues = [];
+    private $privateSyncToken = '';
+    private $privateSyncError = null;
     public function __construct(?string $envFile = null, ?string $stateDir = null) {
         $values = [];
         $settingsPath = rtrim($stateDir ?? __DIR__, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'mon_settings.php';
@@ -121,13 +124,54 @@ final class MonConfig {
             }
         }
         $this->values = $values;
+        $this->loadPrivateSync();
+    }
+    private function loadPrivateSync(): void {
+        $path = MON_PRIVATE_SYNC_CONFIG;
+        clearstatcache(true, $path);
+        if (!is_file($path)) return;
+        if (!is_readable($path)) { $this->privateSyncError = 'PRIVATE_SYNC_CONFIG_UNREADABLE'; return; }
+        // Include the user's existing PHP array in an isolated scope. Never
+        // import its SIS repository/branch, copy its key or emit its output.
+        $level = ob_get_level(); ob_start();
+        try {
+            if (function_exists('opcache_invalidate')) @opcache_invalidate($path, true);
+            $shared = (static function(string $file) { return @include $file; })($path);
+        } catch (Throwable $e) {
+            $this->privateSyncError = 'PRIVATE_SYNC_CONFIG_INVALID'; return;
+        } finally {
+            while (ob_get_level() > $level) ob_end_clean();
+        }
+        if (!is_array($shared)) { $this->privateSyncError = 'PRIVATE_SYNC_CONFIG_INVALID'; return; }
+        foreach (['github_token', 'GITHUB_TOKEN', 'SIS_GITHUB_TOKEN'] as $key) {
+            if (!array_key_exists($key, $shared)) continue;
+            $token = $shared[$key];
+            if (!is_string($token) || strlen($token) > 8192 || preg_match('/[\r\n\x00]/', $token)) {
+                $this->privateSyncError = 'PRIVATE_SYNC_TOKEN_INVALID'; return;
+            }
+            $token = trim($token);
+            if ($token === '') continue;
+            if (preg_match('/\s/', $token)) { $this->privateSyncError = 'PRIVATE_SYNC_TOKEN_INVALID'; return; }
+            $this->privateSyncToken = $token; return;
+        }
+        $this->privateSyncError = 'PRIVATE_SYNC_TOKEN_MISSING';
     }
     public function get(string $key, string $default = ''): string {
+        if ($key === 'GITHUB_TOKEN' && $this->privateSyncToken !== '') return $this->privateSyncToken;
         // An explicit browser save must take effect even when the NAS inherited
         // an empty or older environment value. Other environment settings retain precedence.
         if (in_array($key,['GITHUB_TOKEN','KIS_APP_KEY','KIS_APP_SECRET','PHP_CLI'],true) && array_key_exists($key,$this->webValues)) return $this->webValues[$key];
         $v = getenv($key);
         return $v !== false ? $v : ($this->values[$key] ?? MON_CONFIG[$key] ?? $default);
+    }
+    public function githubTokenSource(): string {
+        if ($this->privateSyncToken !== '') return 'sis_private_sync_config.php';
+        if ($this->get('GITHUB_TOKEN') === '') return 'missing';
+        if (array_key_exists('GITHUB_TOKEN', $this->webValues)) return 'mon_settings.php';
+        return getenv('GITHUB_TOKEN') !== false ? 'environment' : 'env_or_MON_CONFIG';
+    }
+    public function githubTokenError(): string {
+        return $this->get('GITHUB_TOKEN') !== '' ? '' : ($this->privateSyncError ?? 'GITHUB_TOKEN_MISSING');
     }
     public function int(string $key, int $default, int $min, int $max): int {
         $s = $this->get($key, (string)$default);
@@ -137,7 +181,7 @@ final class MonConfig {
 }
 
 function mon_settings_stamp(MonStore $store,string $envFile): string {
-    $parts=[];$paths=[$store->path('settings.php')];if($envFile!=='')$paths[]=$envFile;
+    $parts=[];$paths=[$store->path('settings.php'),MON_PRIVATE_SYNC_CONFIG];if($envFile!=='')$paths[]=$envFile;
     foreach($paths as $path){
         clearstatcache(true,$path);
         $raw=is_file($path)?@file_get_contents($path):'';
@@ -630,7 +674,7 @@ final class MonDaemon {
         $this->lastAttempted=0;$this->lastSucceeded=0;
         $gh=new MonGitHub($this->http,$cfg); $latest=$this->readRemote($gh,$cfg,$start+10); $data=$latest['data']; $w=$data->watchlist; $settings=MonData::settings($w); $this->poll=$settings['poll_seconds'];
         if(!$latest['cached'])$this->cacheRemote($data,$cfg);
-        if($cfg->get('GITHUB_TOKEN')===''){$this->poll=max(300,$this->poll);$this->heartbeat('needs_setup','GITHUB_TOKEN_MISSING');return;}
+        if($cfg->get('GITHUB_TOKEN')===''){$this->poll=max(300,$this->poll);$this->heartbeat('needs_setup',$cfg->githubTokenError());return;}
         if (!$w->settings->enabled || count($w->symbols)===0) { $this->heartbeat($w->settings->enabled?'empty_watchlist':'paused'); return; }
         $signature=MonData::signature($w); $pending=$this->store->read('pending.json');
         $previous=mon_get($pending,'signature')===$signature?mon_get($pending,'collection'):$data->collection;
@@ -706,7 +750,11 @@ function mon_function_available(string $name): bool {
 }
 function mon_web_error(string $code): string {
     $messages=[
-        'GITHUB_TOKEN_MISSING'=>'공개 관찰목록은 읽을 수 있습니다. GitHub 반영키를 저장해야 수집·미러링을 시작합니다.',
+        'GITHUB_TOKEN_MISSING'=>'같은 폴더의 sis_private_sync_config.php에 GitHub 키가 있으면 자동으로 읽습니다. 키가 없으면 연결 설정에 저장하세요.',
+        'PRIVATE_SYNC_CONFIG_UNREADABLE'=>'sis_private_sync_config.php를 읽지 못했습니다. 같은 web 폴더의 파일 읽기 권한을 확인하세요.',
+        'PRIVATE_SYNC_CONFIG_INVALID'=>'sis_private_sync_config.php의 PHP 문법과 반환 배열을 확인하세요. 기존 파일은 수정하지 않았습니다.',
+        'PRIVATE_SYNC_TOKEN_INVALID'=>'sis_private_sync_config.php의 github_token 값 형식을 확인하세요.',
+        'PRIVATE_SYNC_TOKEN_MISSING'=>'sis_private_sync_config.php의 github_token이 비어 있습니다. 기존 키를 확인하거나 연결 설정에 저장하세요.',
         'QUOTE_FETCH_FAILED'=>'이번 시세 조회가 모두 실패했습니다. 이전 가격을 현재가로 표시하지 않습니다.',
         'PHP_CURL_REQUIRED'=>'PHP의 cURL 확장이 필요합니다.',
         'WEB_PROCESS_LAUNCH_DISABLED'=>'웹 서버에서 백그라운드 실행이 차단되어 데몬을 시작하지 못했습니다.',
@@ -862,7 +910,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
     $loaded=is_array($symbols)&&$w!==null;$enabled=mon_get(mon_get($w,'settings'),'enabled');
     $configured=$cfg->get('GITHUB_TOKEN')!=='';$error=mon_get($status,'error_code');$blockers=[];$markets=[];$freshQuotes=0;
     $restart=$s['running']&&is_string(mon_get($status,'version'))&&mon_get($status,'version')!==MON_VERSION;
-    if(!$configured)$blockers[]='GITHUB_TOKEN_MISSING';
+    if(!$configured)$blockers[]=$cfg->githubTokenError();
     if($loaded&&$enabled===false)$blockers[]='COLLECTION_DISABLED';
     if($loaded&&count($symbols)===0)$blockers[]='EMPTY_WATCHLIST';
     if($restart)$blockers[]='DAEMON_RESTART_REQUIRED';
@@ -883,7 +931,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
         if($stopping){$readiness='stopping';$label='중지 중';$message='중지 요청을 처리하고 있습니다.';}
         elseif(!$fresh){$readiness='unknown';$label='응답 확인 필요';$message='프로세스 잠금은 유지되지만 최신 상태 응답을 확인하지 못했습니다.';}
         elseif($restart){$readiness='restart_required';$label='재시작 필요';$message='새 코드가 저장되었습니다. 중지 후 시작하면 v'.MON_VERSION.'이 적용됩니다.';}
-        elseif(!$configured){$readiness='needs_setup';$label='설정 필요';$message=mon_web_error('GITHUB_TOKEN_MISSING');if($enabled===false)$message.=' 관찰목록의 수집 설정도 꺼져 있습니다.';}
+        elseif(!$configured){$readiness='needs_setup';$label='설정 필요';$message=mon_web_error($cfg->githubTokenError());if($enabled===false)$message.=' 관찰목록의 수집 설정도 꺼져 있습니다.';}
         elseif($error){$readiness='error';$label=$error==='QUOTE_FETCH_FAILED'?'시세 조회 실패':'연결 확인 필요';$message=mon_web_error($error);}
         elseif($enabled===false){$readiness='paused';$label='수집 꺼짐';$message='관찰목록의 수집 설정이 꺼져 있어 대기 중입니다.';}
         elseif(!$loaded){$readiness='loading';$label='목록 확인 중';$message='GitHub 관찰목록을 확인하고 있습니다.';}
@@ -902,7 +950,8 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
         'message'=>$message,'status'=>$status,
         'watched'=>is_array($symbols)?count($symbols):0,'collected'=>is_array($quotes)?count(array_filter($quotes,static function($q){return mon_get($q,'point')!==null;})):0,
         'last_mirrored_at'=>mon_get($status,'last_published_at'),
-        'connection'=>['github'=>$configured,'kis'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!=='']
+        'connection'=>['github'=>$configured,'kis'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!==''],
+        'github_token_source'=>$cfg->githubTokenSource()
     ];
 }
 function mon_web_html(array $data, string $notice, bool $ok, string $phpPath): void {
@@ -911,7 +960,7 @@ function mon_web_html(array $data, string $notice, bool $ok, string $phpPath): v
     $label=$h($data['label']); $message=$h($data['message']); $notice=$h($notice); $phpPath=$h($phpPath);
     $count=$data['watchlist_loaded']?(int)$data['watched']:'—'; $collected=(int)$data['fresh_quotes'];$version=$h(MON_VERSION);
     $startDisabled=$data['running']?' disabled':''; $stopDisabled=$data['running']?'':' disabled';
-    $github=$data['connection']['github']?'설정됨':'미설정'; $kis=$data['connection']['kis']?'설정됨':'미설정';
+    $github=($data['github_token_source']??'')==='sis_private_sync_config.php'?'기존 설정 파일 사용':($data['connection']['github']?'설정됨':'미설정'); $kis=$data['connection']['kis']?'설정됨':'미설정';
     $open=$data['connection']['github']?'':' open'; $tone=$ok?'ok':'bad';
     echo <<<HTML
 <!doctype html>
@@ -944,10 +993,10 @@ summary{cursor:pointer;font-weight:650}label{display:block;margin:16px 0 5px;fon
 <p id="settings-status" class="settings-status">GitHub $github · 한국투자증권 $kis</p>
 <form class="action-form" method="post" autocomplete="off">
 <input type="hidden" name="action" value="save_settings">
-<label for="github">GitHub 반영키</label><input id="github" name="GITHUB_TOKEN" type="text" spellcheck="false" placeholder="stock 저장소의 Contents 쓰기 권한이 있는 키">
+<label for="github">GitHub 키 — 직접 입력은 선택</label><input id="github" name="GITHUB_TOKEN" type="text" spellcheck="false" placeholder="sis_private_sync_config.php의 기존 키를 자동 참조">
 <label for="kis-key">한국투자증권 앱키</label><input id="kis-key" name="KIS_APP_KEY" type="text" spellcheck="false" placeholder="새 앱키 입력">
 <label for="kis-secret">한국투자증권 앱시크릿</label><input id="kis-secret" name="KIS_APP_SECRET" type="text" spellcheck="false" placeholder="새 앱시크릿 입력">
-<small>공개 관찰목록 조회는 키 없이 가능합니다. 수집 결과 반영에는 GitHub 키가 필요합니다. 빈 연결값은 기존 설정을 유지합니다.</small>
+<small>같은 폴더의 sis_private_sync_config.php에서 GitHub 키를 우선 읽습니다. 이 키에는 stock 저장소의 Contents 쓰기 권한이 필요합니다. 빈 연결값은 기존 설정을 유지합니다.</small>
 <details class="env"><summary>실행 환경 — 자동으로 찾습니다</summary>
 <label for="php-path">PHP 실행 파일 위치</label><input id="php-path" name="PHP_CLI" value="$phpPath" placeholder="비워 두면 자동 찾기" spellcheck="false">
 <small>자동 찾기에 실패했을 때만 설치된 PHP 실행 파일 위치를 지정합니다.</small></details>
@@ -965,7 +1014,7 @@ function draw(s){
  document.getElementById('start').disabled=busy||s.running;document.getElementById('stop').disabled=busy||!s.running;
  var stamp=s.last_mirrored_at;
  text('mirror',stamp?new Date(stamp).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'}):'—');
- text('settings-status','GitHub '+(s.connection.github?'설정됨':'미설정')+' · 한국투자증권 '+(s.connection.kis?'설정됨':'미설정'));
+ text('settings-status','GitHub '+(s.github_token_source==='sis_private_sync_config.php'?'기존 설정 파일 사용':s.connection.github?'설정됨':'미설정')+' · 한국투자증권 '+(s.connection.kis?'설정됨':'미설정'));
 }
 function notice(message,ok){var e=document.getElementById('notice');e.textContent=message;e.className=ok?'ok':'bad';}
 function unverified(message){

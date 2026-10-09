@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix='mon-errc-http-') as tmp:
         check('disabled shared collection remains disabled after saving keys',s['readiness']=='paused' and s['setup_blockers']==['COLLECTION_DISABLED'] and not s['monitoring_active'])
         check('wait heartbeat retains the paused activity stage',s['status']['activity_state']=='paused')
         html=request(html=True)
-        check('HTML renders version and latest-price counter with no credential values','v1.2.2' in html and '최신 가격' in html and 'fixture-browser-key' not in html and 'fixture-secret' not in html)
+        check('HTML renders version and latest-price counter with no credential values','v1.2.3' in html and '최신 가격' in html and 'fixture-browser-key' not in html and 'fixture-secret' not in html)
         allcalls=[json.loads(line) for line in (web/'mon_test_calls.jsonl').read_text().splitlines()]
         check('setup and disabled collection perform no provider or publishing calls',all(c['method']=='GET' for c in allcalls))
         stop=request({'action':'stop'});check('web Stop releases the worker after setup reload',stop['ok'] and not stop['data']['running'])
