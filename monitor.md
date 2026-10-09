@@ -1,11 +1,11 @@
 # mon 지시문 — 한·미·일 종목 선정·매매시점 판단
 
-- 설계 버전: **3.4** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 개정일: **2026-10-09**.
+- 설계 버전: **3.5** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 개정일: **2026-10-10 KST**.
 - 저장소: **wskimgit/stock** / 브랜치: **main** / 아래 파일을 저장소 루트에서 관리한다.
 - 구조: **mon 지시문 1개 + mon.php 1개**. 파일 역할은 **monitor.md=지시문·설계 / mon_data.json=공유 미러 데이터 / mon_result.md=사용자 결과**로 분리한다.
-- mon.php **1.2.3**: 같은 web 폴더의 기존 sis_private_sync_config.php에서 GitHub 키를 직접 읽는다. 키 재입력·복사를 요구하지 않으며, 저장 대상은 wskimgit/stock을 유지한다. 기존 공개 목록 조회·웹 시작·중지·분리 프로세스 방식은 유지한다.
-- 확인 기록: 마지막 독립 분석 기준은 **2026-10-09 00:59 KST**, 후보181개·비교152개·관찰30개·조건부 매입9개다. 공유 데이터는 `collection.status=not_started`, `watchlist.settings.enabled=false`다. **2026-10-09 22:56 KST** NAS 조회에서는 웹·데몬1.2.2, PID24521, 최신 heartbeat와30종목 목록이 확인됐다. `GITHUB_TOKEN_MISSING`과 수집 비활성으로 시세 수집은0건이었다. 기존 설정 파일 참조 기능1.2.3의 NAS 적용과 실제 미러링은 별도 확인한다.
-- 이번 개정은 GitHub 키 재사용에 대한 최소 수정이다. MON-P2.0, schema_version 3, 종목 순위·가격 계획·세 업무 해시와 공유 데이터는 변경하지 않는다. 1.2.3의 NAS 적용은 mon.php 교체와 웹 중지→시작 후 상태의 버전·키 출처를 확인한다.
+- mon.php **1.2.4**: `/web/mon.php`와 같은 폴더의 **broker_config.local.php**에서 한국투자증권 `app_key`·`app_secret`을 직접 읽는다. GitHub 키는 기존 sis_private_sync_config.php를 계속 참조한다. 키를 다시 입력하거나 복사할 필요가 없으며 저장 대상은 wskimgit/stock이다.
+- 확인 기록: 마지막 독립 분석 기준은 **2026-10-09 00:59 KST**, 후보181개·비교152개·관찰30개·조건부 매입9개다. **2026-10-09 23:50 KST** NAS에서는 웹·데몬1.2.3, PID26136, 최신 heartbeat, `enabled=true`, 미국 Yahoo 시세10개 수집과 GitHub 미러를 확인했다. 마지막 미러 시각은2026-10-09T14:49:05Z다. 당시 KIS 연결값은 미설정이었다. 새1.2.4의 NAS 적용·실제 KIS 인증은 교체 후 확인한다.
+- 이번 개정은 기존 broker 설정 파일 참조에 대한 최소 수정이다. MON-P2.0, schema_version 3, 종목 순위·가격 계획·세 업무 해시와 공유 데이터는 변경하지 않는다. NAS에서 mon.php만 교체하고 웹 중지→시작 후 버전1.2.4와 키 출처를 확인한다.
 - 기존 코드와 Eagle·SIS·MS7 등은 참고 자료다. 기존의 서로 다른 조건을 필수 조건으로 자동 합산하지 않는다.
 - 공식 명칭: **mon 지시문** / 코드 파일명: **mon.php** / 지시문: **monitor.md** / 미러 데이터: **mon_data.json** / 사용자 결과: **mon_result.md**. 실행 문구: **“mon 지시문을 수행하라.”**
 
@@ -24,7 +24,7 @@
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v3.4
+# mon 지시문 v3.5
 
 명칭: mon 지시문. 판단 기준: MON-P2.0. 인터페이스: schema_version 3.
 저장소: wskimgit/stock, 브랜치 main. 루트 파일: monitor.md=지시문·설계, mon_data.json=공유 미러 데이터, mon_result.md=사용자 결과.
@@ -610,7 +610,7 @@ mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·AP
 마지막 저장 분석은2026-10-09 00:59 KST 기준 후보181개·비교152개·관찰30개·조건부 매입9개다. PHP 수집부는 not_started이고 비활성 설정을 유지한다. 결과표는 이 분석의 과거 관측과 가격 계획을 표시하며 현재 시세 재확인이 필요하다. 이 절은 관측 기록이며 다음 실행은 최신 mon_data.json을 읽는다.
 
 
-## 11. mon.php 1.2.3 — 웹 화면으로 운영
+## 11. mon.php 1.2.4 — 웹 화면으로 운영
 
 사용자가 CLI 명령을 입력하지 않고 **브라우저의 mon.php 화면**에서 데몬을 시작·중지하고 상태·연결 설정을 관리한다. 별도 로그인 암호나 전용 폴더를 요구하지 않는다.
 
@@ -618,7 +618,7 @@ mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·AP
 
 1. mon.php를 NAS의 /volume1/web/mon.php로 교체한다. 실제 web 경로가 다르면 해당 웹 폴더에 둔다.
 2. 브라우저에서 NAS 웹 주소의 /mon.php를 연다.
-3. mon.php와 같은 폴더의 **sis_private_sync_config.php**에서 `github_token`을 자동으로 읽는다. 기존 파일은 그대로 사용하고 GitHub 키를 다시 입력하지 않는다. 해당 키는 stock 저장소 Contents 쓰기 권한이 필요하다. 기존 파일에 키가 없으면 **연결 설정**에서 직접 저장할 수 있다. 한국투자증권 앱키·앱시크릿은 기존 웹 설정을 유지하며 필요할 때만 입력한다. 공개 목록 조회에는 키를 강제하지 않는다.
+3. mon.php와 같은 폴더의 **sis_private_sync_config.php**에서 `github_token`, **broker_config.local.php**에서 한국투자증권 `app_key`·`app_secret`을 자동으로 읽는다. 사용자가 지정한 경로는 **/web/broker_config.local.php**다. 기존 파일을 그대로 사용하고 키를 다시 입력하지 않는다. GitHub 키는 stock 저장소 Contents 쓰기 권한이 필요하다. 기존 파일에서 사용할 수 있는 연결값을 찾지 못하면 **연결 설정**의 종전 저장값으로 보완한다. 공개 목록 조회에는 키를 강제하지 않는다.
 4. **시작**을 누르고 운영 상태를 확인한다. 시작 성공은 프로세스 존재이며 실수집 성공은 별도다. 설정 필요·수집 꺼짐·장외 대기·수집 확인 중·부분 수집·수집 중을 구분한다. 새 코드 교체 뒤 기존 프로세스가 남아 있으면 **재시작 필요**로 표시하므로 중지→시작한다.
 5. **중지**로 정상 종료한다. 화면은 3초마다 상태를 확인한다.
 
@@ -637,7 +637,7 @@ mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·AP
 
 GitHub 반영키가 없으면 공개 목록만 읽고 설정을 기다린다. 익명 조회는 저장소·브랜치·실제 조회시각을 확인한 로컬 캐시를 최대300초 재사용하고 조회 주기를 최소300초로 둔다. 캐시 사용으로 원래 조회시각을 갱신하지 않는다. 반영키 없이 공급자 수집이나 GitHub PUT을 시작하지 않는다. private 저장소는 읽기 권한도 필요하다.
 
-watchlist.settings.enabled=false 또는 빈 관찰목록이면 데몬은 대기한다. API 연결값과 유효한 목록·enabled=true가 갖춰져야 실제 수집·미러를 수행한다. 최신 확인 목록은30개·버전5이며 이번 코드 개정은 enabled=false·collection·분석을 변경하지 않았다. 수집 설정은 mon 지시문이 소유하므로 PHP 화면에서 임의로 활성화하지 않는다.
+watchlist.settings.enabled=false 또는 빈 관찰목록이면 데몬은 대기한다. GitHub 반영키와 유효한 목록·enabled=true가 갖춰지면 시세 수집·미러를 수행한다. KIS 키가 없거나 조회에 실패하면 기존 네이버·Yahoo 보완을 사용한다. 최신 확인 목록은30개·버전5이며 사용자의 활성화 요청에 따라 enabled=true로 운영 중이다. 이번 코드 개정은 활성화 값·collection·분석을 변경하지 않는다. 수집 설정은 mon 지시문이 소유하므로 PHP 화면에서 임의로 활성화하지 않는다.
 
 ### 연결 설정과 자동 파일
 
@@ -645,9 +645,13 @@ watchlist.settings.enabled=false 또는 빈 관찰목록이면 데몬은 대기�
 
 GitHub 키는 같은 폴더의 sis_private_sync_config.php가 반환하는 배열의 `github_token`을 최우선 적용한다. `GITHUB_TOKEN`·`SIS_GITHUB_TOKEN` 별칭도 지원한다. 이 파일의 repo·branch·api_base·web_sync_key 등은 MON 설정으로 가져오지 않는다. MON의 기본 저장소는 wskimgit/stock, 브랜치는 main이다. 공유 키를 mon_settings.php에 복사하거나 기존 SIS 파일을 수정하지 않는다.
 
-기존 파일이 없거나 사용할 수 있는 키가 없으면 종전 GITHUB_TOKEN 설정으로 보완한다. 웹에서 직접 저장한 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·PHP_CLI는 해당 웹 저장값을 환경변수보다 우선 적용한다. 나머지 설정은 운영체제 환경변수 → 명시한 --env 파일 → 저장값 → MON_CONFIG 순서를 유지한다. 빈 API 입력은 기존 값을 유지하며 PHP_CLI를 빈 값으로 저장하면 자동 탐색을 사용한다. PHP 문법·읽기 권한·키 형식 오류는 키 값 없이 사유를 표시하며 웹 시작·중지 기능을 막지 않는다.
+한국투자증권 키는 **broker_config.local.php가 반환하는 배열**의 `app_key`·`app_secret`을 한 쌍으로 최우선 적용한다. `KIS_APP_KEY`·`KIS_APP_SECRET` 배열 키 별칭도 지원한다. 파일이 없거나 한쪽이 비었거나 형식이 잘못되면 이 파일의 한쪽 키를 다른 출처와 섞지 않고 종전 KIS 설정으로 보완한다. 앱키·앱시크릿은 읽기만 하며 mon_settings.php·mon_data.json·GitHub·로그·화면에 복사하지 않는다. 기존 broker 설정 원본은 수정하지 않는다.
 
-데몬은 매 주기에 저장값과 sis_private_sync_config.php를 다시 읽으며, 대기 중에는5초 단위로 두 파일 내용의 변경을 감지해 장시간 재시도 대기를 끝낸다. 파일이 생성·삭제되거나 동일한 수정시각·길이로 키를 교체해도 내용 변경을 감지한다. 수집·게시 중 변경은 현재 작업을 마친 후 반영한다. PHP 실행 파일 위치는 다음 데몬 시작에 사용한다. 설정 변경과 데몬 코드 교체는 구분한다. 공유 키를 사용할 때 화면은 **GitHub 기존 설정 파일 사용**, 상태 JSON은 `github_token_source=sis_private_sync_config.php`로 표시하며 키 값은 출력하지 않는다.
+broker 설정의 `mode`·계좌·주문 허용값·자동매매 설정·repo·branch는 MON 설정으로 가져오지 않는다. MON은 기존 시세 조회용 KIS API `https://openapi.koreainvestment.com:9443`을 유지한다. Trade의 `mode=paper`만으로 KIS 시세 API 환경을 바꾸지 않는다. 파일 참조 또는 설정됨 표시는 연결값의 존재이며 실제 인증 성공을 뜻하지 않는다. KIS 설정 파일 오류는 `kis_config_error`로 따로 표시하고 GitHub·웹 시작·중지나 기존 보완 공급자 수집을 막지 않는다.
+
+기존 파일에서 사용할 수 있는 연결값을 얻지 못하면 종전 설정으로 보완한다. 웹에서 직접 저장한 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·PHP_CLI는 해당 웹 저장값을 환경변수보다 우선 적용한다. 나머지 설정은 운영체제 환경변수 → 명시한 --env 파일 → 저장값 → MON_CONFIG 순서를 유지한다. 빈 API 입력은 기존 값을 유지하며 PHP_CLI를 빈 값으로 저장하면 자동 탐색을 사용한다. PHP 문법·읽기 권한·키 형식 오류는 키 값 없이 사유를 표시하며 웹 시작·중지 기능을 막지 않는다.
+
+데몬은 매 주기에 저장값·sis_private_sync_config.php·broker_config.local.php를 다시 읽으며, 대기 중에는5초 단위로 세 파일 내용의 변경을 감지해 장시간 재시도 대기를 끝낸다. 파일이 생성·삭제되거나 동일한 수정시각·길이로 키를 교체해도 내용 변경을 감지한다. KIS 키 쌍이 바뀌면 기존 발급 토큰·공급자 재시도 대기 상태를 새 연결값에 맞춰 초기화한다. 수집·게시 중 변경은 현재 작업을 마친 후 반영한다. PHP 실행 파일 위치는 다음 데몬 시작에 사용한다. 설정 변경과 데몬 코드 교체는 구분한다. 공유 키를 사용할 때 화면은 **GitHub 기존 설정 파일 사용** 또는 **한국투자증권 기존 설정 파일 사용**, 상태 JSON은 `github_token_source=sis_private_sync_config.php` 또는 `kis_credentials_source=broker_config.local.php`로 표시하며 키 값은 출력하지 않는다.
 
 mon.php 옆에 mon_daemon.lock, mon_status.json, mon_stop.json, mon_pending.json, mon_remote_cache.json, mon.log, mon_launcher.log, mon_web_launch.lock, mon_php_runtime.json 및 저장 시 mon_settings.php가 생긴다. 기존 web 폴더의 권한을 변경하지 않고 다른 프로그램의 status.json 등을 덮어쓰지 않는다. KIS 발급 토큰은 실행 중 메모리에 보관한다. 실제 연결값이 담긴 운영 파일은 코드 배포 커밋에 포함하지 않는다.
 
@@ -658,7 +662,7 @@ mon_remote_cache.json의 로컬 전용 _mon_cache는 repository·branch·fetched
 | 요청 | 입력 | 출력·효과 |
 |---|---|---|
 | GET mon.php | 없음 | 한글 HTML 제어 화면 |
-| GET mon.php?view=status | 없음 | ok·message·error_code·data JSON. running·heartbeat_fresh·readiness·monitoring_active·restart_required·setup_blockers·fresh_quotes·watchlist_loaded·market_states·github_token_source. 키 값은 포함하지 않음 |
+| GET mon.php?view=status | 없음 | ok·message·error_code·data JSON. running·heartbeat_fresh·readiness·monitoring_active·restart_required·setup_blockers·fresh_quotes·watchlist_loaded·market_states·github_token_source·kis_credentials_source·kis_config_error. 키 값은 포함하지 않음 |
 | POST mon.php | action=start | PHP 실행 환경 자동 확인 → 데몬 시작 확인 → 상태 |
 | POST mon.php | action=stop | 현재 인스턴스 종료 요청 → 종료·중지 중 상태 |
 | POST mon.php | action=save_settings 및 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·선택 PHP_CLI | 자동 저장 → 대기 중5초 단위 감지 또는 진행 중 작업 완료 후 적용 |
@@ -675,8 +679,9 @@ POST가 application/json 응답을 요청하면 같은 상태 JSON을 반환한�
 - 이전1.2.1 검증: 모의 API·저장 **57개 통과**(기존39개+추가18개), PHP 문법 검사 통과. 당시 실제 분석 크기+30종목×2가격점 게시, compact 형식, 분석/해시 보존, 공간 예약, 초과 크기의 PUT 차단, 네이버 식별·시장·시간대·시간외, 야후 시장·시간대·세션·지연 정책을 확인했다.
 - 후보181개의 전체 지표·전체 독립 결과·기존 압축 사실을 해제 후 대조하고 세 업무 해시·collection·보유 상태·수집 비활성이 보존됨을 확인했다. 새 투자 분석이나 성과 검증이 아니다. 분리 프로세스 로직은 바뀌지 않아 기존 프로세스·웹 시험을 반복 실행하지 않았다.
 - 이전1.2.2 검증: 변경 영향 회귀 **56개 PASS /0 FAIL** — 모의 API·설정·캐시·운영상태36개, 실제 HTTP·분리 프로세스15개, 웹 상태 통신 실패5개. PHP 문법 검사 통과. 공개 GET·익명 PUT 차단·설정 우선순위·동일 수정시각의 설정 변경·대기 중 반영·시세 만료·구버전 재시작 표시·공유 분석 보존을 확인했다. 외부 API 호출은 시험하지 않고 모의 응답을 사용했다. 기존 정상 가격 어댑터·판단 수식의 시험은 반복하지 않았다.
-- 이번1.2.3 검증: 기존 설정 파일 참조에 대한 변경 영향 **38개 PASS /0 FAIL** — 설정·인증 요청·게시 보존26개, 실제 HTTP·분리 프로세스12개. 기존 github_token 읽기, 기존 키 우선순위, stock/main 유지, 다른 웹 설정 저장 시 키 미복사, 동일 수정시각·길이의 키 변경, 대기 중5초 단위 반영, 설정 PHP 출력 제거, 문법 오류 시 상태·중지 동작을 확인했다. PHP와 생성 웹 JavaScript·Python 시험 파일의 문법 검사도 통과했다. 외부 GitHub·시세 API는 모의 응답을 사용했으며 실제 NAS 토큰 권한은 시험하지 않았다. 이미 PASS한 가격 어댑터·판단 수식·일반 상태 시험은 반복하지 않았다.
-- 2026-10-09 22:56 KST에는 실제 NAS1.2.2의 배포·새 데몬·HTTP 상태·PID·heartbeat·목록 읽기와 설정 대기를 확인했다. 새1.2.3 배포·NAS PHP7.4 실동작·실제 시세 연결·부팅 작업 등록은 미확인이다. 회귀 실행 환경은 PHP8.3.6이다.
+- 이전1.2.3 검증: 기존 설정 파일 참조에 대한 변경 영향 **38개 PASS /0 FAIL** — 설정·인증 요청·게시 보존26개, 실제 HTTP·분리 프로세스12개. 기존 github_token 읽기, 기존 키 우선순위, stock/main 유지, 다른 웹 설정 저장 시 키 미복사, 동일 수정시각·길이의 키 변경, 대기 중5초 단위 반영, 설정 PHP 출력 제거, 문법 오류 시 상태·중지 동작을 확인했다. PHP와 생성 웹 JavaScript·Python 시험 파일의 문법 검사도 통과했다. 외부 GitHub·시세 API는 모의 응답을 사용했으며 당시 실제 NAS 토큰 권한은 시험하지 않았다. 이미 PASS한 가격 어댑터·판단 수식·일반 상태 시험은 반복하지 않았다.
+- 이번1.2.4 검증: broker 설정 파일 참조에 대한 변경 영향 **34개 PASS /0 FAIL** — 설정·모의 OAuth·시세 요청 헤더25개, 실제 HTTP·분리 프로세스9개. 반환 배열의 키 쌍·출처 우선순위·키 미복사·stock/main 유지·같은 수정시각과 길이의 키 변경·토큰 갱신·대기 중5초 단위 반영·오류 중 웹 중지를 확인했다. PHP·생성 웹 JavaScript·Python 시험 파일 문법 검사도 통과했다. 이미 정상 확인한 가격 어댑터·판단 수식은 반복 시험하지 않았다. 외부 KIS 인증·시세 응답은 시험용이며 실제 키를 사용하지 않았다.
+- 2026-10-09 23:50 KST에는 실제 NAS1.2.3의 배포·데몬·HTTP 상태·heartbeat·30종목·수집 활성화·미국 Yahoo 시세10개와 GitHub 미러를 확인했다. 새1.2.4의 NAS 적용과 실제 KIS 인증·시세 연결은 미확인이다. 회귀 실행 환경은 PHP8.3.6이며 부팅 작업은 등록하지 않았다.
 - 재현용 파일: tests/mon_daemon_test.php, tests/mon_lifecycle_test.py, tests/mon_web_test.py. Python 시험은 cURL을 활성화한 PHP CLI를 MON_TEST_PHP로 지정할 수 있다. 이 실행 방법은 개발 검증용이며 운영 사용자의 CLI 입력을 요구하는 절차가 아니다.
 
 ### ERRC 개선 내역
@@ -691,6 +696,8 @@ POST가 application/json 응답을 요청하면 같은 상태 JSON을 반환한�
 추가 회귀 재현 파일: tests/mon_errc_test.php, tests/mon_errc_web_test.py, tests/mon_errc_ui_test.js. 순서대로 PHP 회귀 → 실제 HTTP 회귀 → PHP 회귀가 만든 test_ui.html에 대한 Node 상태 표시 회귀를 실행한다. GitHub 공유 데이터·추천 결과·다른 NAS 프로그램은 이 코드 개정에서 변경하지 않는다.
 
 1.2.3 참조 기능 재현 파일은 tests/mon_private_sync_test.php와 tests/mon_private_sync_web_test.py다. 모든 키와 GitHub 응답은 시험용이며 기존 SIS 설정 원본·실제 키를 시험 파일이나 배포 커밋에 넣지 않는다. ERRC 관점에서 키 중복 입력·복사를 제거하고, 갱신 지연을 줄이며, stock 저장 대상과 오류 중 제어 동작을 검증하고, 기존 키 사용 출처 표시를 추가했다.
+
+1.2.4 broker 참조 기능 재현 파일은 tests/mon_broker_config_test.php와 tests/mon_broker_config_web_test.py다. 실제 /web/broker_config.local.php와 앱키·앱시크릿은 시험 파일이나 코드 배포 커밋에 넣지 않는다. PHP 시험은 test_broker_ui.html을 생성하며 이 화면의 JavaScript 문법을 추가 확인할 수 있다.
 
 
 ## 공식 참고

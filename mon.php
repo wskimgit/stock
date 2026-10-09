@@ -1,15 +1,16 @@
 <?php
 /**
- * mon.php 1.2.3 -- PHP 7.4+ web control / persistent quote daemon.
+ * mon.php 1.2.4 -- PHP 7.4+ web control / persistent quote daemon.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * Only collection is written. Selection, orders and mon_result.md belong to mon.
  */
 declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
-// Reuse the existing private sync token; browser API settings remain available.
-const MON_VERSION = '1.2.3';
+// Reuse the existing SIS token and broker credential file in the same folder.
+const MON_VERSION = '1.2.4';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
+const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
     'GITHUB_TOKEN' => '',
     'KIS_APP_KEY' => '',
@@ -96,6 +97,8 @@ final class MonConfig {
     public $webValues = [];
     private $privateSyncToken = '';
     private $privateSyncError = null;
+    private $brokerCredentials = [];
+    private $brokerError = null;
     public function __construct(?string $envFile = null, ?string $stateDir = null) {
         $values = [];
         $settingsPath = rtrim($stateDir ?? __DIR__, DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'mon_settings.php';
@@ -125,6 +128,7 @@ final class MonConfig {
         }
         $this->values = $values;
         $this->loadPrivateSync();
+        $this->loadBroker();
     }
     private function loadPrivateSync(): void {
         $path = MON_PRIVATE_SYNC_CONFIG;
@@ -156,8 +160,38 @@ final class MonConfig {
         }
         $this->privateSyncError = 'PRIVATE_SYNC_TOKEN_MISSING';
     }
+    private function loadBroker(): void {
+        $path = MON_BROKER_CONFIG; clearstatcache(true, $path);
+        if (!is_file($path)) return;
+        if (!is_readable($path)) { $this->brokerError = 'BROKER_CONFIG_UNREADABLE'; return; }
+        $level = ob_get_level(); ob_start();
+        try {
+            // Read the user's existing returned array in an isolated scope.
+            // Import only the credential pair, not broker modes or order settings.
+            if (function_exists('opcache_invalidate')) @opcache_invalidate($path, true);
+            $shared = (static function(string $file) { return @include $file; })($path);
+        } catch (Throwable $e) {
+            $this->brokerError = 'BROKER_CONFIG_INVALID'; return;
+        } finally {
+            while (ob_get_level() > $level) ob_end_clean();
+        }
+        if (!is_array($shared)) { $this->brokerError = 'BROKER_CONFIG_INVALID'; return; }
+        $pair = ['KIS_APP_KEY'=>$shared['app_key']??$shared['KIS_APP_KEY']??'',
+                 'KIS_APP_SECRET'=>$shared['app_secret']??$shared['KIS_APP_SECRET']??''];
+        foreach ($pair as &$value) {
+            if (!is_string($value) || strlen($value)>8192 || preg_match('/[\r\n\x00]/',$value)) {
+                $this->brokerError = 'BROKER_CREDENTIALS_INVALID'; return;
+            }
+            $value = trim($value);
+            if ($value === '') { $this->brokerError = 'BROKER_CREDENTIALS_MISSING'; return; }
+            if (preg_match('/\s/',$value)) { $this->brokerError = 'BROKER_CREDENTIALS_INVALID'; return; }
+        }
+        unset($value);
+        $this->brokerCredentials = $pair; // Apply both values together; never mix credential sources.
+    }
     public function get(string $key, string $default = ''): string {
         if ($key === 'GITHUB_TOKEN' && $this->privateSyncToken !== '') return $this->privateSyncToken;
+        if (array_key_exists($key,$this->brokerCredentials)) return $this->brokerCredentials[$key];
         // An explicit browser save must take effect even when the NAS inherited
         // an empty or older environment value. Other environment settings retain precedence.
         if (in_array($key,['GITHUB_TOKEN','KIS_APP_KEY','KIS_APP_SECRET','PHP_CLI'],true) && array_key_exists($key,$this->webValues)) return $this->webValues[$key];
@@ -173,6 +207,14 @@ final class MonConfig {
     public function githubTokenError(): string {
         return $this->get('GITHUB_TOKEN') !== '' ? '' : ($this->privateSyncError ?? 'GITHUB_TOKEN_MISSING');
     }
+    public function kisCredentialsSource(): string {
+        if ($this->brokerCredentials) return 'broker_config.local.php';
+        if ($this->get('KIS_APP_KEY')==='' || $this->get('KIS_APP_SECRET')==='') return 'missing';
+        return 'web_or_environment';
+    }
+    public function kisConfigError(): ?string {
+        return $this->kisCredentialsSource() === 'missing' ? $this->brokerError : null;
+    }
     public function int(string $key, int $default, int $min, int $max): int {
         $s = $this->get($key, (string)$default);
         if (!preg_match('/^\d+$/', $s)) throw new MonFault('ENV_NUMBER_INVALID');
@@ -181,7 +223,7 @@ final class MonConfig {
 }
 
 function mon_settings_stamp(MonStore $store,string $envFile): string {
-    $parts=[];$paths=[$store->path('settings.php'),MON_PRIVATE_SYNC_CONFIG];if($envFile!=='')$paths[]=$envFile;
+    $parts=[];$paths=[$store->path('settings.php'),MON_PRIVATE_SYNC_CONFIG,MON_BROKER_CONFIG];if($envFile!=='')$paths[]=$envFile;
     foreach($paths as $path){
         clearstatcache(true,$path);
         $raw=is_file($path)?@file_get_contents($path):'';
@@ -755,6 +797,10 @@ function mon_web_error(string $code): string {
         'PRIVATE_SYNC_CONFIG_INVALID'=>'sis_private_sync_config.php의 PHP 문법과 반환 배열을 확인하세요. 기존 파일은 수정하지 않았습니다.',
         'PRIVATE_SYNC_TOKEN_INVALID'=>'sis_private_sync_config.php의 github_token 값 형식을 확인하세요.',
         'PRIVATE_SYNC_TOKEN_MISSING'=>'sis_private_sync_config.php의 github_token이 비어 있습니다. 기존 키를 확인하거나 연결 설정에 저장하세요.',
+        'BROKER_CONFIG_UNREADABLE'=>'broker_config.local.php의 읽기 권한을 확인하세요. 한국투자증권 키를 읽지 못해 보완 원천을 사용합니다.',
+        'BROKER_CONFIG_INVALID'=>'broker_config.local.php의 반환 배열에 있는 앱키·앱시크릿을 확인하세요. 보완 원천을 사용합니다.',
+        'BROKER_CREDENTIALS_INVALID'=>'broker_config.local.php의 앱키·앱시크릿 형식을 확인하세요. 보완 원천을 사용합니다.',
+        'BROKER_CREDENTIALS_MISSING'=>'broker_config.local.php에 앱키와 앱시크릿이 모두 있어야 합니다. 보완 원천을 사용합니다.',
         'QUOTE_FETCH_FAILED'=>'이번 시세 조회가 모두 실패했습니다. 이전 가격을 현재가로 표시하지 않습니다.',
         'PHP_CURL_REQUIRED'=>'PHP의 cURL 확장이 필요합니다.',
         'WEB_PROCESS_LAUNCH_DISABLED'=>'웹 서버에서 백그라운드 실행이 차단되어 데몬을 시작하지 못했습니다.',
@@ -951,7 +997,8 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
         'watched'=>is_array($symbols)?count($symbols):0,'collected'=>is_array($quotes)?count(array_filter($quotes,static function($q){return mon_get($q,'point')!==null;})):0,
         'last_mirrored_at'=>mon_get($status,'last_published_at'),
         'connection'=>['github'=>$configured,'kis'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!==''],
-        'github_token_source'=>$cfg->githubTokenSource()
+        'github_token_source'=>$cfg->githubTokenSource(),
+        'kis_credentials_source'=>$cfg->kisCredentialsSource(),'kis_config_error'=>$cfg->kisConfigError()
     ];
 }
 function mon_web_html(array $data, string $notice, bool $ok, string $phpPath): void {
@@ -960,7 +1007,9 @@ function mon_web_html(array $data, string $notice, bool $ok, string $phpPath): v
     $label=$h($data['label']); $message=$h($data['message']); $notice=$h($notice); $phpPath=$h($phpPath);
     $count=$data['watchlist_loaded']?(int)$data['watched']:'—'; $collected=(int)$data['fresh_quotes'];$version=$h(MON_VERSION);
     $startDisabled=$data['running']?' disabled':''; $stopDisabled=$data['running']?'':' disabled';
-    $github=($data['github_token_source']??'')==='sis_private_sync_config.php'?'기존 설정 파일 사용':($data['connection']['github']?'설정됨':'미설정'); $kis=$data['connection']['kis']?'설정됨':'미설정';
+    $github=($data['github_token_source']??'')==='sis_private_sync_config.php'?'기존 설정 파일 사용':($data['connection']['github']?'설정됨':'미설정');
+    $kis=($data['kis_credentials_source']??'')==='broker_config.local.php'?'기존 설정 파일 사용':($data['connection']['kis']?'설정됨':'미설정');
+    $kisError=$h(!empty($data['kis_config_error'])?mon_web_error($data['kis_config_error']):'');
     $open=$data['connection']['github']?'':' open'; $tone=$ok?'ok':'bad';
     echo <<<HTML
 <!doctype html>
@@ -991,12 +1040,13 @@ summary{cursor:pointer;font-weight:650}label{display:block;margin:16px 0 5px;fon
 <section class="panel settings">
 <details$open><summary>연결 설정</summary>
 <p id="settings-status" class="settings-status">GitHub $github · 한국투자증권 $kis</p>
+<p id="kis-config-error" class="settings-status">$kisError</p>
 <form class="action-form" method="post" autocomplete="off">
 <input type="hidden" name="action" value="save_settings">
 <label for="github">GitHub 키 — 직접 입력은 선택</label><input id="github" name="GITHUB_TOKEN" type="text" spellcheck="false" placeholder="sis_private_sync_config.php의 기존 키를 자동 참조">
-<label for="kis-key">한국투자증권 앱키</label><input id="kis-key" name="KIS_APP_KEY" type="text" spellcheck="false" placeholder="새 앱키 입력">
-<label for="kis-secret">한국투자증권 앱시크릿</label><input id="kis-secret" name="KIS_APP_SECRET" type="text" spellcheck="false" placeholder="새 앱시크릿 입력">
-<small>같은 폴더의 sis_private_sync_config.php에서 GitHub 키를 우선 읽습니다. 이 키에는 stock 저장소의 Contents 쓰기 권한이 필요합니다. 빈 연결값은 기존 설정을 유지합니다.</small>
+<label for="kis-key">한국투자증권 앱키 — 직접 입력은 선택</label><input id="kis-key" name="KIS_APP_KEY" type="text" spellcheck="false" placeholder="broker_config.local.php에서 자동 참조">
+<label for="kis-secret">한국투자증권 앱시크릿 — 직접 입력은 선택</label><input id="kis-secret" name="KIS_APP_SECRET" type="text" spellcheck="false" placeholder="broker_config.local.php에서 자동 참조">
+<small>같은 폴더의 sis_private_sync_config.php와 broker_config.local.php에서 기존 키를 우선 읽습니다. GitHub 키에는 stock 저장소의 Contents 쓰기 권한이 필요합니다. 빈 연결값은 기존 설정을 유지합니다.</small>
 <details class="env"><summary>실행 환경 — 자동으로 찾습니다</summary>
 <label for="php-path">PHP 실행 파일 위치</label><input id="php-path" name="PHP_CLI" value="$phpPath" placeholder="비워 두면 자동 찾기" spellcheck="false">
 <small>자동 찾기에 실패했을 때만 설치된 PHP 실행 파일 위치를 지정합니다.</small></details>
@@ -1014,7 +1064,8 @@ function draw(s){
  document.getElementById('start').disabled=busy||s.running;document.getElementById('stop').disabled=busy||!s.running;
  var stamp=s.last_mirrored_at;
  text('mirror',stamp?new Date(stamp).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'}):'—');
- text('settings-status','GitHub '+(s.github_token_source==='sis_private_sync_config.php'?'기존 설정 파일 사용':s.connection.github?'설정됨':'미설정')+' · 한국투자증권 '+(s.connection.kis?'설정됨':'미설정'));
+ text('settings-status','GitHub '+(s.github_token_source==='sis_private_sync_config.php'?'기존 설정 파일 사용':s.connection.github?'설정됨':'미설정')+' · 한국투자증권 '+(s.kis_credentials_source==='broker_config.local.php'?'기존 설정 파일 사용':s.connection.kis?'설정됨':'미설정'));
+ text('kis-config-error',s.kis_config_error?({BROKER_CONFIG_UNREADABLE:'broker_config.local.php의 읽기 권한을 확인하세요. 보완 원천을 사용합니다.',BROKER_CONFIG_INVALID:'broker_config.local.php의 앱키 설정 형식을 확인하세요. 보완 원천을 사용합니다.',BROKER_CREDENTIALS_INVALID:'broker_config.local.php의 앱키·앱시크릿 형식을 확인하세요. 보완 원천을 사용합니다.',BROKER_CREDENTIALS_MISSING:'broker_config.local.php에 앱키와 앱시크릿이 모두 있어야 합니다. 보완 원천을 사용합니다.'}[s.kis_config_error]||'한국투자증권 설정을 확인하세요.'):'');
 }
 function notice(message,ok){var e=document.getElementById('notice');e.textContent=message;e.className=ok?'ok':'bad';}
 function unverified(message){
