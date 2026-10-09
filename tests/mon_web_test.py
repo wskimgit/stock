@@ -1,5 +1,6 @@
 """Actual HTTP/web control tests. No live broker/GitHub API requests."""
 import fcntl
+import datetime as dt
 import json
 import os
 import pathlib
@@ -34,6 +35,10 @@ class Site:
         self.web = base / "web folder"
         self.web.mkdir()
         shutil.copyfile(ROOT / "mon.php", self.web / "mon.php")
+        # Public-read support must not turn isolated lifecycle tests into live API calls.
+        cache = json.loads((ROOT / "mon_data.json").read_text())
+        cache["_mon_cache"] = {"repository": "wskimgit/stock", "branch": "main", "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat()}
+        (self.web / "mon_remote_cache.json").write_text(json.dumps(cache, ensure_ascii=False))
         self.env = dict(os.environ)
         for key in ("GITHUB_TOKEN", "KIS_APP_KEY", "KIS_APP_SECRET", "PHP_CLI"):
             self.env.pop(key, None)

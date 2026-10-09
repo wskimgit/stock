@@ -1,11 +1,11 @@
 # mon 지시문 — 한·미·일 종목 선정·매매시점 판단
 
-- 설계 버전: **3.2** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 개정일: **2026-10-08**.
+- 설계 버전: **3.3** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 개정일: **2026-10-09**.
 - 저장소: **wskimgit/stock** / 브랜치: **main** / 아래 파일을 저장소 루트에서 관리한다.
 - 구조: **mon 지시문 1개 + mon.php 1개**. 파일 역할은 **monitor.md=지시문·설계 / mon_data.json=공유 미러 데이터 / mon_result.md=사용자 결과**로 분리한다.
-- mon.php **1.2.1**: GitHub 미러를 compact JSON으로 저장하고 보완 원천의 식별·거래소·시간대·세션·지연 근거를 검증한다. 웹 시작·중지와 분리 프로세스 방식은 유지한다.
-- 현재 확인 상태: 독립 분석은 **2026-10-08 23:07 KST**에 수행됐다. 후보181개·관찰30개·조건부 매입9개이며 상세 데이터와 결과가 저장돼 있다. PHP `collection.status=not_started`, `watchlist.settings.enabled=false`다. NAS에서의 실제 상시 동작·실계좌 연결·부팅 작업 등록 여부는 미확인이다.
-- 이번 개정은 코드·저장 규격·표시 보완이다. 기존 분석 기준시각·종목 순위·가격 계획·세 업무 해시는 유지한다. 설계 3.2와 코드 1.2.1은 판단 수식 변경이 아니므로 MON-P2.0과 schema_version 3을 유지한다.
+- mon.php **1.2.2**: 공개 목록 읽기와 인증이 필요한 미러 쓰기를 구분하고, 웹 저장값·대기 중 설정 반영·운영상태·최신 가격 표시를 보완한다. 웹 시작·중지와 분리 프로세스 방식은 유지한다.
+- 확인 기록: 마지막 독립 분석 기준은 **2026-10-09 00:59 KST**, 후보181개·비교152개·관찰30개·조건부 매입9개다. 공유 데이터는 `collection.status=not_started`, `watchlist.settings.enabled=false`다. **2026-10-09 21:36 KST** NAS 상태 조회에서는 코드1.2.1, PID4082, 최신 heartbeat가 확인됐으나 `GITHUB_TOKEN_MISSING`으로 대기 중이었다. 이 관측은 현재 실수집이나 새 코드 배포 완료를 뜻하지 않는다.
+- 이번 개정은 운영 문제에 대한 ERRC 개선이다. MON-P2.0, schema_version 3, 종목 순위·가격 계획·세 업무 해시와 공유 데이터는 변경하지 않는다. 1.2.2의 NAS 적용은 파일 교체와 웹 중지→시작 후 상태의 버전을 확인한다.
 - 기존 코드와 Eagle·SIS·MS7 등은 참고 자료다. 기존의 서로 다른 조건을 필수 조건으로 자동 합산하지 않는다.
 - 공식 명칭: **mon 지시문** / 코드 파일명: **mon.php** / 지시문: **monitor.md** / 미러 데이터: **mon_data.json** / 사용자 결과: **mon_result.md**. 실행 문구: **“mon 지시문을 수행하라.”**
 
@@ -24,7 +24,7 @@
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v3.2
+# mon 지시문 v3.3
 
 명칭: mon 지시문. 판단 기준: MON-P2.0. 인터페이스: schema_version 3.
 저장소: wskimgit/stock, 브랜치 main. 루트 파일: monitor.md=지시문·설계, mon_data.json=공유 미러 데이터, mon_result.md=사용자 결과.
@@ -356,6 +356,7 @@ schema_version 3의 기존 전체 행 폼을 읽을 수 있어야 하며 아래 
 | metrics_ref=candidate_audit:식별자 | 해당 audit.metrics와 필요한 metrics_ref를 따라 전체 지표 복원 |
 | independent_results | 기존 전체 행 배열 또는 symbol_id·rank·action·readiness·result_ref 인덱스 배열. 후자는 independent_results:식별자로 payload.independent_results[식별자]의 전체 독립 행 복원 |
 | analysis.results | 전체 최종 판단 행 배열. 사용자 표와 업무 결과 해시의 기준 |
+| input_snapshot.evidence_details_note / payload.evidence_details[id] | 평문 evidence의 6개 필수 필드는 유지한다. 상세 claim·선택 provider_name을 이 근거 ID 맵에서 손실 없이 복원하며 URL·조회시각·자료시각을 새로 바꾸지 않는다 |
 | comparison_dates_ref | input_snapshot.comparison_periods의 이름으로 공통 비교 거래일 배열 복원 |
 | analysis.display | rendered_at·analysis_as_of·analysis_recomputed=false·가격 표시 상태. 만료 표시용이며 고정 분석 사실을 수정하는 값이 아님 |
 | analysis.maintenance | 변경시각·코드/설계 버전·실제 분석 목록 버전·현재 수집 정의 버전·재분석 여부. 유지보수와 새 분석을 구분 |
@@ -606,10 +607,10 @@ mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·AP
 
 가격 구간 충족은 분석 당시 확인과 현재 표시를 구분한다. 표시시각이 quote_valid_until을 넘으면 해당 관측을 “만료·현재 재확인”으로 표시하고 현재도 구간을 충족한다고 쓰지 않는다. 새 분석 없이 문서를 보완할 때는 분석 기준시각을 유지하고 표시 보완시각을 따로 적는다. 이미 만료된 정규장 상태를 현재 장 상태라고 다시 보고하지 않는다.
 
-현재 mon_data.json에는 독립 분석 후보181개·관찰30개·조건부 매입9개가 있다. 분석 기준시각은2026-10-08 23:07 KST다. PHP 수집부는 not_started이고 비활성 설정을 유지한다. 결과표는 이 분석의 과거 관측과 가격 계획을 표시하며 현재 시세 재확인이 필요하다.
+마지막 저장 분석은2026-10-09 00:59 KST 기준 후보181개·비교152개·관찰30개·조건부 매입9개다. PHP 수집부는 not_started이고 비활성 설정을 유지한다. 결과표는 이 분석의 과거 관측과 가격 계획을 표시하며 현재 시세 재확인이 필요하다. 이 절은 관측 기록이며 다음 실행은 최신 mon_data.json을 읽는다.
 
 
-## 11. mon.php 1.2.1 — 웹 화면으로 운영
+## 11. mon.php 1.2.2 — 웹 화면으로 운영
 
 사용자가 CLI 명령을 입력하지 않고 **브라우저의 mon.php 화면**에서 데몬을 시작·중지하고 상태·연결 설정을 관리한다. 별도 로그인 암호나 전용 폴더를 요구하지 않는다.
 
@@ -617,8 +618,8 @@ mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·AP
 
 1. mon.php를 NAS의 /volume1/web/mon.php로 교체한다. 실제 web 경로가 다르면 해당 웹 폴더에 둔다.
 2. 브라우저에서 NAS 웹 주소의 /mon.php를 연다.
-3. **연결 설정**에 GitHub 연결키, 한국투자증권 앱키·앱시크릿을 입력하고 **설정 저장**을 누른다. 이미 코드 상단이나 서버 환경에 유효한 연결값이 있으면 새로 입력할 필요가 없다.
-4. **시작**을 누르고 **실행 중** 표시를 확인한다. 시작 요청은 실제 데몬 인스턴스와 잠금을 확인한 뒤 성공을 보고한다.
+3. **연결 설정**에 GitHub 반영키, 한국투자증권 앱키·앱시크릿을 입력하고 **설정 저장**을 누른다. GitHub 키는 stock 저장소 Contents 쓰기 권한이 필요하다. 공개 목록 조회에는 키를 강제하지 않는다. 이미 유효한 연결값이 있으면 새로 입력할 필요가 없다.
+4. **시작**을 누르고 운영 상태를 확인한다. 시작 성공은 프로세스 존재이며 실수집 성공은 별도다. 설정 필요·수집 꺼짐·장외 대기·수집 확인 중·부분 수집·수집 중을 구분한다. 새 코드 교체 뒤 기존 프로세스가 남아 있으면 **재시작 필요**로 표시하므로 중지→시작한다.
 5. **중지**로 정상 종료한다. 화면은 3초마다 상태를 확인한다.
 
 시작한 데몬은 브라우저를 닫아도 계속 실행한다. 웹 요청 자체를 무한 실행시키지 않으며, 서버 내부에서 설치된 PHP 실행 환경을 자동 확인해 분리 프로세스로 시작한다. PHP-FPM/CGI 실행 파일을 CLI 실행 환경으로 잘못 인정하지 않고, PHP 7.4 이상·cURL 사용 가능 여부를 확인한다. 사용자는 SSH나 CLI 명령을 입력하지 않는다.
@@ -627,30 +628,38 @@ mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·AP
 
 ### 화면 표시와 역할
 
-- **시작·중지** 버튼, 실행 중·중지 중·중지됨·응답 확인 필요 상태.
-- 관찰종목 수, 가격이 보존된 종목 수, 최근 GitHub 미러 시각.
+- **시작·중지** 버튼, 프로세스 존재와 실제 수집 준비·활동 상태를 분리한 표시.
+- 관찰종목 수, 식별·가격·세션·시각·지연 조건을 충족한 최신 가격 수, 최근 GitHub 미러 시각. 조회하지 못한 관찰목록은 0으로 확정하지 않고 —로 표시한다.
+- 오래된 가격·다른 목록 버전·통화·거래소·미확인 시각의 가격은 최신 가격 수에 넣지 않는다. 이는 수집 운영 지표이며 투자 판단 확인을 대신하지 않는다.
+- 상태 요청 실패·오래된 heartbeat·5초를 넘는 미래 heartbeat에서는 이전 정상 표시를 유지하지 않는다. PID만 살아 있는 설정 대기는 정상 수집의 녹색 표시를 켜지 않는다.
 - 연결값 설정 여부와 현재 처리 상태·오류 사유. 설정됨은 인증 성공을 주장하는 표시가 아니다.
 - 웹 화면은 수집기의 운영 화면이다. 종목 선정·매입·매도 판단과 사용자 투자 결과는 기존대로 mon 지시문 및 mon_result.md가 담당한다.
 
-watchlist.settings.enabled=false 또는 빈 관찰목록이면 데몬은 대기한다. API 연결값과 유효한 목록·enabled=true가 갖춰져야 실제 수집·미러를 수행한다. 현재 관찰목록은30개이며 이번 유지보수는 enabled=false와 collection을 보존했다. 목록의 네이버 매핑·지연 정책이 바뀌어 수집 정의 버전은4다. 기존 분석의 watchlist_version=3은 실제 분석 당시 버전이며 maintenance에서 현재 수집 정의 버전과 연결한다. 다음 실제 분석은 그때 읽은 최신 버전을 기록한다.
+GitHub 반영키가 없으면 공개 목록만 읽고 설정을 기다린다. 익명 조회는 저장소·브랜치·실제 조회시각을 확인한 로컬 캐시를 최대300초 재사용하고 조회 주기를 최소300초로 둔다. 캐시 사용으로 원래 조회시각을 갱신하지 않는다. 반영키 없이 공급자 수집이나 GitHub PUT을 시작하지 않는다. private 저장소는 읽기 권한도 필요하다.
+
+watchlist.settings.enabled=false 또는 빈 관찰목록이면 데몬은 대기한다. API 연결값과 유효한 목록·enabled=true가 갖춰져야 실제 수집·미러를 수행한다. 최신 확인 목록은30개·버전5이며 이번 코드 개정은 enabled=false·collection·분석을 변경하지 않았다. 수집 설정은 mon 지시문이 소유하므로 PHP 화면에서 임의로 활성화하지 않는다.
 
 ### 연결 설정과 자동 파일
 
 설정 저장은 같은 web 폴더에 mon_settings.php를 자동 생성한다. 설정 파일을 사용자가 별도로 만들 필요가 없다. 입력하지 않은 API 연결값은 기존 값을 유지한다. PHP 실행 파일 위치는 비워 두면 자동 탐색을 사용한다. 저장된 API 연결값은 상태 JSON이나 웹 화면에 다시 출력하지 않는다.
 
-설정 우선순위는 운영체제 환경변수 → 명시한 --env 파일 → 웹 저장값 → 코드 상단 MON_CONFIG다. 기존 환경변수·코드 상단 설정은 호환성을 유지한다. 데몬은 매 주기에 웹 저장값을 다시 읽으며 연결 설정 변경을 반영한다. PHP 실행 파일 위치는 다음 데몬 시작에 사용한다.
+웹에서 직접 저장한 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·PHP_CLI는 웹 저장값을 최우선 적용한다. 나머지 설정은 운영체제 환경변수 → 명시한 --env 파일 → 저장값 → MON_CONFIG 순서를 유지한다. 빈 API 입력은 기존 값을 유지하며 PHP_CLI를 빈 값으로 저장하면 자동 탐색을 사용한다.
+
+데몬은 매 주기에 저장값을 읽으며, 대기 중에는5초 단위로 설정 파일 내용의 변경을 감지해 장시간 재시도 대기를 끝낸다. 수집·게시 중 변경은 현재 작업을 마친 후 반영한다. PHP 실행 파일 위치는 다음 데몬 시작에 사용한다. 설정 변경과 데몬 코드 교체는 구분한다.
 
 mon.php 옆에 mon_daemon.lock, mon_status.json, mon_stop.json, mon_pending.json, mon_remote_cache.json, mon.log, mon_launcher.log, mon_web_launch.lock, mon_php_runtime.json 및 저장 시 mon_settings.php가 생긴다. 기존 web 폴더의 권한을 변경하지 않고 다른 프로그램의 status.json 등을 덮어쓰지 않는다. KIS 발급 토큰은 실행 중 메모리에 보관한다. 실제 연결값이 담긴 운영 파일은 코드 배포 커밋에 포함하지 않는다.
+
+mon_remote_cache.json의 로컬 전용 _mon_cache는 repository·branch·fetched_at을 기록한다. 실제 원격 조회 때만 갱신하며 공유 mon_data.json에는 쓰지 않는다. mon_status.json은 기존 state 외에 activity_state·last_attempted·last_succeeded를 기록하여 waiting heartbeat가 실제 오류·일시정지 상태를 가리지 않게 한다.
 
 ### 웹 입력·출력 인터페이스
 
 | 요청 | 입력 | 출력·효과 |
 |---|---|---|
 | GET mon.php | 없음 | 한글 HTML 제어 화면 |
-| GET mon.php?view=status | 없음 | ok·message·error_code·data JSON. 키 값은 포함하지 않음 |
+| GET mon.php?view=status | 없음 | ok·message·error_code·data JSON. running·heartbeat_fresh·readiness·monitoring_active·restart_required·setup_blockers·fresh_quotes·watchlist_loaded·market_states. 키 값은 포함하지 않음 |
 | POST mon.php | action=start | PHP 실행 환경 자동 확인 → 데몬 시작 확인 → 상태 |
 | POST mon.php | action=stop | 현재 인스턴스 종료 요청 → 종료·중지 중 상태 |
-| POST mon.php | action=save_settings 및 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·선택 PHP_CLI | 자동 설정 저장 → 다음 주기 적용 |
+| POST mon.php | action=save_settings 및 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·선택 PHP_CLI | 자동 저장 → 대기 중5초 단위 감지 또는 진행 중 작업 완료 후 적용 |
 
 POST가 application/json 응답을 요청하면 같은 상태 JSON을 반환한다. 일반 HTML 폼 요청도 지원한다. 지원하지 않는 요청·잘못된 설정은 오류로 응답하며 기존 저장값을 임의로 초기화하지 않는다.
 
@@ -661,13 +670,29 @@ POST가 application/json 응답을 요청하면 같은 상태 JSON을 반환한�
 브라우저를 닫는 것은 데몬 종료가 아니다. 웹 서버 재시작 뒤에도 살아 있는 데몬을 다시 확인하고 제어할 수 있다. NAS 자체를 재부팅하면 웹 화면에서 다시 **시작**한다. 부팅 후 웹 요청 없이 자동 실행하려면 NAS의 부팅 작업 등록이 별도로 필요하며 이번 개정에서 자동 등록하지 않았다.
 
 - 이전1.2.0 검증 기록: 모의 API·저장39개, 실제 프로세스 호환성16개, 실제 HTTP·분리 프로세스26개로 총81개 통과. PHP·웹 JavaScript 문법 검사도 통과했다. 이전 검증은 로컬 PHP8.3.6에서 수행한 기록이다.
-- 이번1.2.1 검증: 모의 API·저장 **57개 통과**(기존39개+추가18개), PHP 문법 검사 통과. 추가 검증은 실제 분석 크기+30종목×2가격점 게시, compact 형식, 분석/해시 보존, 공간 예약, 초과 크기의 PUT 차단, 네이버 식별·시장·시간대·시간외, 야후 시장·시간대·세션·지연 정책의 유효/만료/잘못된 원천을 확인한다.
+- 이전1.2.1 검증: 모의 API·저장 **57개 통과**(기존39개+추가18개), PHP 문법 검사 통과. 당시 실제 분석 크기+30종목×2가격점 게시, compact 형식, 분석/해시 보존, 공간 예약, 초과 크기의 PUT 차단, 네이버 식별·시장·시간대·시간외, 야후 시장·시간대·세션·지연 정책을 확인했다.
 - 후보181개의 전체 지표·전체 독립 결과·기존 압축 사실을 해제 후 대조하고 세 업무 해시·collection·보유 상태·수집 비활성이 보존됨을 확인했다. 새 투자 분석이나 성과 검증이 아니다. 분리 프로세스 로직은 바뀌지 않아 기존 프로세스·웹 시험을 반복 실행하지 않았다.
-- 실제 NAS Web Station·PHP 7.4·공급자 API 연결과 브라우저에서의 시각 검수는 미확인이다. HTML·HTTP·프로세스 검증과 투자 성과 검증을 구분한다.
+- 이번1.2.2 검증: 변경 영향 회귀 **56개 PASS /0 FAIL** — 모의 API·설정·캐시·운영상태36개, 실제 HTTP·분리 프로세스15개, 웹 상태 통신 실패5개. PHP 문법 검사 통과. 공개 GET·익명 PUT 차단·설정 우선순위·동일 수정시각의 설정 변경·대기 중 반영·시세 만료·구버전 재시작 표시·공유 분석 보존을 확인했다. 외부 API 호출은 시험하지 않고 모의 응답을 사용했다. 기존 정상 가격 어댑터·판단 수식의 시험은 반복하지 않았다.
+- 2026-10-09 21:36 KST에는 실제 NAS1.2.1의 HTTP 상태·PID·heartbeat와 설정 대기를 확인했다. 개선1.2.2의 NAS 배포·PHP7.4 실동작·실계좌 시세 연결·부팅 작업 등록은 미확인이다. 회귀 실행 환경은 PHP8.3.6이다.
 - 재현용 파일: tests/mon_daemon_test.php, tests/mon_lifecycle_test.py, tests/mon_web_test.py. Python 시험은 cURL을 활성화한 PHP CLI를 MON_TEST_PHP로 지정할 수 있다. 이 실행 방법은 개발 검증용이며 운영 사용자의 CLI 입력을 요구하는 절차가 아니다.
+
+### ERRC 개선 내역
+
+| 기준 | 확인한 문제 | 1.2.2 처리 |
+|---|---|---|
+| Eliminate 제거 | 공개 읽기에도 연결키 강제, PID만으로 정상 수집 표시, 오래된 가격을 최신으로 집계 | GET 인증 선택·PUT 인증 필수, 운영 준비/활동 분리, 최신 가격 조건 직접 확인 |
+| Reduce 축소 | 설정 대기 중 반복 익명 조회, 긴 재시도 대기 때문에 설정 적용 지연 | 300초 공개 캐시·조회 주기, 대기 중5초 설정 변경 감지 |
+| Raise 강화 | 웹 저장값이 환경변수에 가림, 상태 요청 실패 뒤 정상 표시 유지, 대기 heartbeat가 실제 상태 가림 | 명시적 웹 저장 우선, 통신 실패 즉시 미확인 표시, activity_state 유지 |
+| Create 추가 | 파일만 교체한 뒤 구버전 프로세스가 계속 실행되는 것을 확인할 수 없음 | restart_required와 웹 중지→시작 안내; 구조화된 운영 상태 |
+
+추가 회귀 재현 파일: tests/mon_errc_test.php, tests/mon_errc_web_test.py, tests/mon_errc_ui_test.js. 순서대로 PHP 회귀 → 실제 HTTP 회귀 → PHP 회귀가 만든 test_ui.html에 대한 Node 상태 표시 회귀를 실행한다. GitHub 공유 데이터·추천 결과·다른 NAS 프로그램은 이 코드 개정에서 변경하지 않는다.
 
 
 ## 공식 참고
+
+- [GitHub Contents GET의 공개 조회와 PUT의 쓰기 권한](https://docs.github.com/en/rest/repos/contents)
+- [GitHub 익명 요청 한도와 재시도](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
+- [PHP 환경변수 읽기](https://www.php.net/manual/en/function.getenv.php)
 
 - [KRX 정규장·시간외·휴장 규칙](https://global.krx.co.kr/contents/GLB/06/0602/0602010201/GLB0602010201T1.jsp)
 - [JPX 정규장·점심 휴장](https://www.jpx.co.jp/english/equities/trading/domestic/01.html)

@@ -1,5 +1,6 @@
 """Real CLI/process tests; no broker credentials or outbound API calls."""
 import json
+import datetime as dt
 import os
 import pathlib
 import shutil
@@ -32,6 +33,10 @@ with tempfile.TemporaryDirectory(prefix='mon-lifecycle-') as td:
     web.mkdir(mode=0o755)
     script = web / 'mon.php'
     shutil.copyfile(ROOT / 'mon.php', script)
+    # Missing write credentials now permit cached public-list preview, without live APIs.
+    cache=json.loads((ROOT/'mon_data.json').read_text())
+    cache['_mon_cache']={'repository':'wskimgit/stock','branch':'main','fetched_at':dt.datetime.now(dt.timezone.utc).isoformat()}
+    (web/'mon_remote_cache.json').write_text(json.dumps(cache,ensure_ascii=False))
     original_mode = web.stat().st_mode & 0o777
     (web / 'status.json').write_text('{"other_application":true}')
     env = dict(os.environ)
@@ -80,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='mon-lifecycle-') as td:
         run('--stop')
         check('restarted daemon also stops', await_stopped(command, env))
         once = run('--once')
-        check('single-cycle failure exits and releases lock', once.returncode == 1 and not json.loads(run('--status').stdout)['running'])
+        check('single-cycle setup wait exits normally and releases lock', once.returncode == 0 and not json.loads(run('--status').stdout)['running'])
         process = subprocess.Popen(command + ['--run'], env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         end = time.monotonic() + 5
         while time.monotonic() < end and not json.loads(run('--status').stdout)['running']:
