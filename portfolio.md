@@ -1,6 +1,6 @@
 # Swing Portfolio
 
-기준일: KR 2026-10-07 / US 2026-10-07
+기준일: KR 2026-10-08 / US 2026-10-08
 지시문: Swing Portfolio v1.2 FROZEN
 경쟁군: KR 220종목 / US 503종목
 독립 소스: 14개
@@ -11,17 +11,17 @@
 
 | 순위 | 종목 | 코드 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| 1 | 삼성전기 | 009150 | 1,604,000원 | 35% |
-| 2 | LG이노텍 | 011070 | 591,000원 | 35% |
-| 3 | LG에너지솔루션 | 373220 | 391,000원 | 30% |
+| 1 | LG에너지솔루션 | 373220 | 401,000원 | 35% |
+| 2 | 삼성SDI | 006400 | 569,000원 | 35% |
+| 3 | 삼성전기 | 009150 | 1,546,000원 | 30% |
 
 ### 미국
 
 | 순위 | 종목 | 티커 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| 1 | Micron Technology | MU | $1,088.00 | 35% |
-| 2 | Broadcom | AVGO | $376.51 | 35% |
-| 3 | NVIDIA | NVDA | $238.09 | 30% |
+| 1 | PepsiCo | PEP | $128.34 | 35% |
+| 2 | ExxonMobil | XOM | $168.50 | 35% |
+| 3 | Palantir | PLTR | $198.78 | 30% |
 
 ## 생성형 AI 독립조정 후 최종 포트폴리오
 
@@ -29,24 +29,25 @@
 
 | 순위 | 종목 | 코드 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| 1 | 삼성전기 | 009150 | 1,604,000원 | 40% |
-| 2 | LG에너지솔루션 | 373220 | 391,000원 | 35% |
-| 3 | KB금융 | 105560 | 168,500원 | 25% |
+| 1 | LG에너지솔루션 | 373220 | 401,000원 | 40% |
+| 2 | 삼성SDI | 006400 | 569,000원 | 35% |
+| 3 | POSCO홀딩스 | 005490 | 306,500원 | 25% |
 
 ### 미국
 
 | 순위 | 종목 | 티커 | 기준가격 | 비중 |
 |---|---|---|---:|---:|
-| 1 | Micron Technology | MU | $1,088.00 | 40% |
-| 2 | Broadcom | AVGO | $376.51 | 35% |
-| 3 | Microsoft | MSFT | $529.76 | 25% |
+| 1 | Palantir | PLTR | $198.78 | 40% |
+| 2 | RTX | RTX | $184.32 | 35% |
+| 3 | ExxonMobil | XOM | $168.50 | 25% |
 
 ## 독립조정 요약
 
-- KR: LG이노텍은 10/06 급등 후 10/07 -8.23%로 변동성이 과도해 최종 제외. 삼성전기는 강한 중기 상대강도 뒤 10/07 -4.24% 눌림으로 추격 부담이 낮아졌고, LG에너지솔루션과 KB금융은 KOSPI -1.98% 급락일에도 각각 +0.26%, +0.96%로 상대강도를 보임.
-- US: Micron은 10/07 +4.06%로 메모리/AI 수요 모멘텀이 재확인됐고 Broadcom은 +0.19%로 강세를 유지. NVIDIA는 장기 주도력은 유지되지만 단기 AI 집중도를 낮추기 위해 Microsoft로 독립조정.
-- STC14.json은 보조 확인 용도. 최신 스냅샷은 KR 2026-10-07 / US 2026-10-06으로 미국 데이터가 주 분석 기준보다 하루 느려 최종 판단의 단독 근거로 사용하지 않음.
+- KR: KOSPI가 10/08 -2.62% 급락한 가운데 LG에너지솔루션(+2.56%)과 삼성SDI(+1.25%)가 역행 상승해 상대강도 우위. 삼성전기는 -3.62%로 약화되어 최종 제외. POSCO홀딩스는 -0.33%로 방어력이 높았고 최신 STC14에서 CROSS / M1·매입 검토로 보조 확인되어 편입.
+- US: Nasdaq -1.25%와 AI 반도체 급락 속 Palantir(+2.40%), RTX(+2.25%), ExxonMobil(+2.71%)이 상대강도 우위. PepsiCo(+3.73%)는 실적/비용절감 이벤트성 급등 성격이 강해 원본에서 최종 제외.
+- Micron(-4.79%), Broadcom(-4.35%), NVIDIA(-2.94%)는 직전 주도력이 훼손되어 이번 최종에서 제외.
+- STC14.json은 보조 확인 용도이며 단독 편입 권위로 사용하지 않음. 최신 스냅샷은 KR 2026-10-08 / US 2026-10-07로 미국 데이터가 주 분석 기준보다 하루 느림.
 
 ## 사용한 독립 소스군
 
-Reuters, BusinessKorea, Seoul Economic Daily, The Korea Times, Maeil Business/Pulse, Investing.com, StockAnalysis/S&P Global Market Intelligence, Yahoo Finance, MarketWatch, Barron's, The Wall Street Journal, Investor's Business Daily, Morningstar, TradingView/Zacks.
+Reuters, AP, Yonhap, The Korea Times, Seoul Economic Daily, Investing.com, StockAnalysis/S&P Global Market Intelligence, MarketWatch, Barron's, Investor's Business Daily, Zacks, Yahoo Finance, TrendForce, Samsung Electro-Mechanics IR.
