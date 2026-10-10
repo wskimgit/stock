@@ -334,5 +334,7 @@ mon_result.md는 기준시각·상태 한 줄, **국가/종목/판단/자료 기
 - v4.2 / mon.php 1.4.0: 종목별 요청·응답, 장외 상세 수집, 실패 시 이전 검증자료·성공 부분값 보존, 원래 자료시각 유지, 낡은 응답 배제, 자율 과거자료 참고 선택과 결과 자료 날짜를 구현했다. 변경 검증 성적과 NAS 구분은 이번 반영 기록에 남긴다.
 
 - v4.2 최종 변경 검증: **함수47건＋데몬·응답 연계16건＋웹 HTTP10건, 총73건 PASS / 0 FAIL**. 종목별 독립 처리·재시도·마감·주말 완료봉 재사용·이전시각 보존·부분 가격 보존·KIS 100봉 페이지 제한 해소·가격 기준 충돌·잘못된 연결키/압축/수치의 개별 격리·동시 요청 교체·직전 정상자료·보조자료 자율 선정/과거 참고 저장·collection 보존을 모의 검증했다. PHP8.3에서 검사했으며 코드 문법은 PHP7.4 호환 범위를 유지한다. 실제 NAS/KIS 접속 검증은 수행하지 않았다.
+- v4.2 NAS 운영 확인(2026-10-10 23:25 KST): 사용자의 재시작 후 6종목의 개별 응답과 GitHub 즉시 반영, 요청 연결키·압축자료 해시·저장 수치의 일치를 확인했다. 첫 한국·일본 5종목은 마지막 완료봉 재사용으로 응답했고, 이미 마감된 미국 요청은 이전 검증자료를 반환했다. 이어 한국 LG에너지솔루션 강제 새 조회와 미국 팔란티어 누락 완료봉 새 요청을 보내 두 종목 모두 `DETAIL_PRICE_BASIS_CONFLICT`가 반환됨을 확인했다. 최신 수집 성공으로 처리하지 않고 현재 조건부 추천을 보류해 과거자료 참고로 반영했다. 보존된 팔란티어 원본에는 저장 가격 139.40과 원본 139.39500427246094의 정밀도 차이가 있으나 NAS 응답에 새 일봉이 없어 최신 충돌의 전체 원인과 LG에너지솔루션의 불일치 필드는 미확인이다. 직접 NAS 상태/PID·실제 KIS 일봉 공급자 성공은 확인하지 못했다. 코드 1.4.0과 기존73건 PASS는 재작성·재시험하지 않았다.
 
 - 공식 KIS API 정의: [국내 기간별 일봉](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_daily_itemchartprice/inquire_daily_itemchartprice.py), [해외 일봉](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/overseas_stock/dailyprice/dailyprice.py), [국내 지수 일봉](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_daily_indexchartprice/inquire_daily_indexchartprice.py).
+
