@@ -1,14 +1,14 @@
 <?php
 /**
- * mon.php 1.2.4 -- PHP 7.4+ web control / persistent quote daemon.
+ * mon.php 1.2.5 -- PHP 7.4+ web control / persistent quote daemon.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
- * Only collection is written. Selection, orders and mon_result.md belong to mon.
+ * The daemon writes only collection. Stateless MON adapters return files; MON owns analysis and result.
  */
 declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.2.4';
+const MON_VERSION = '1.2.5';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -1094,7 +1094,654 @@ draw(current);setInterval(refresh,3000);
 </script></body></html>
 HTML;
 }
+// MON-RUN-1.0: stateless input/output adapters. No credentials or remote writes.
+final class MonRun {
+    const CONTRACT = 'MON-RUN-1.0';
+    const MAX_SOURCE = 524288;
+    const MAX_BODY = 4194304;
+    const MAX_PAYLOAD = 8388608;
+    const VIEW_BYTES = 12288;
+    const BLOCKERS = ['identity_needs_check', 'quote_time_unknown', 'current_price_needs_check', 'quote_delay_needs_check', 'quote_basis_needs_check', 'price_invalid', 'market_date_needs_check', 'regular_session_needs_check', 'outside_entry_zone', 'entry_plan_needs_data', 'plan_expired', 'latest_comparison_pending', 'corporate_risk_needs_check', 'trading_status_needs_check', 'confirmed_material_adverse'];
+    private static $payloadCache = [];
+
+    public static function json($v): string {
+        if ($v instanceof stdClass) {
+            $keys = array_keys(get_object_vars($v)); sort($keys, SORT_STRING); $o = new stdClass();
+            foreach ($keys as $k) $o->$k = self::ordered($v->$k);
+            $v = $o;
+        } else $v = self::ordered($v);
+        $precision = ini_get('serialize_precision'); ini_set('serialize_precision', '-1');
+        try { return json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR); }
+        finally { ini_set('serialize_precision', (string)$precision); }
+    }
+    private static function ordered($v) {
+        if ($v instanceof stdClass) {
+            $keys = array_keys(get_object_vars($v)); sort($keys, SORT_STRING); $o = new stdClass();
+            foreach ($keys as $k) $o->$k = self::ordered($v->$k); return $o;
+        }
+        if (is_array($v)) return array_map([self::class, 'ordered'], $v);
+        return $v;
+    }
+    public static function decimal6($v): string {
+        if (!is_int($v) && !is_float($v) && !is_string($v)) throw new MonFault('MON_NUMBER_INVALID');
+        if (is_float($v)) {
+            if (!is_finite($v)) throw new MonFault('MON_NUMBER_INVALID');
+            $precision = ini_get('serialize_precision'); ini_set('serialize_precision', '-1');
+            try { $s = json_encode($v, JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR); }
+            finally { ini_set('serialize_precision', (string)$precision); }
+        } else $s = (string)$v;
+        if (!preg_match('/^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/', $s, $m)) throw new MonFault('MON_NUMBER_INVALID');
+        $exp = isset($m[4]) ? (int)$m[4] : 0;
+        if (abs($exp) > 324 || strlen($s) > 400) throw new MonFault('MON_NUMBER_INVALID');
+        $digits = $m[2] . ($m[3] ?? ''); $cut = strlen($m[2]) + $exp + 6;
+        if ($cut < 0) $out = '0';
+        elseif ($cut === 0) $out = $digits[0] >= '5' ? '1' : '0';
+        else {
+            $out = substr($digits . str_repeat('0', max(0, $cut - strlen($digits))), 0, $cut);
+            if (strlen($digits) > $cut && $digits[$cut] >= '5') {
+                $carry = 1;
+                for ($i = strlen($out) - 1; $i >= 0 && $carry; $i--) {
+                    $n = (int)$out[$i] + 1; $out[$i] = (string)($n % 10); $carry = $n === 10 ? 1 : 0;
+                }
+                if ($carry) $out = '1' . $out;
+            }
+        }
+        $out = ltrim($out, '0'); if ($out === '') $out = '0'; $out = str_pad($out, 7, '0', STR_PAD_LEFT);
+        return ($m[1] === '-' && trim($out, '0') !== '' ? '-' : '') . substr($out, 0, -6) . '.' . substr($out, -6);
+    }
+    public static function utc($s): string {
+        if (!is_string($s) || !preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})$/', $s)) throw new MonFault('MON_TIME_INVALID');
+        try {
+            $d = new DateTimeImmutable($s); $errors = DateTimeImmutable::getLastErrors();
+            if ($errors !== false && ($errors['warning_count'] || $errors['error_count'])) throw new MonFault('MON_TIME_INVALID');
+            return $d->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.u\Z');
+        } catch (Throwable $e) { throw new MonFault('MON_TIME_INVALID'); }
+    }
+    public static function seconds($s): float {
+        $d = new DateTimeImmutable(self::utc($s)); return $d->getTimestamp() + (int)$d->format('u') / 1000000;
+    }
+    private static function canonical($v) {
+        if (is_int($v) || is_float($v)) return self::decimal6($v);
+        if (is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}T/', $v)) return self::utc($v);
+        if ($v instanceof stdClass) {
+            $o = new stdClass(); foreach ($v as $k => $x) $o->$k = self::canonical($x); return $o;
+        }
+        if (is_array($v)) return array_map([self::class, 'canonical'], $v);
+        return $v;
+    }
+    public static function validate($d): void {
+        MonData::validate($d);
+        foreach (['coverage', 'independent_results', 'results', 'candidate_audit', 'candidate_history', 'changes', 'evidence'] as $field) if (!is_array(mon_get($d->analysis, $field))) throw new MonFault('MON_ROWS_INVALID');
+        self::utc($d->analysis->as_of);
+        foreach (['selection_fingerprint', 'input_fingerprint', 'result_fingerprint'] as $field) if (!is_string($d->analysis->$field) || !preg_match('/^[a-f0-9]{64}$/', $d->analysis->$field)) throw new MonFault('MON_FACT_HASH_INVALID');
+    }
+    public static function digest($v): string { return hash('sha256', self::json(self::canonical($v))); }
+    public static function gitSha(string $s): string { return sha1('blob ' . strlen($s) . "\0" . $s); }
+    public static function pick($v, array $fields): stdClass {
+        $o = new stdClass(); foreach ($fields as $k) if (is_object($v) && property_exists($v, $k)) $o->$k = $v->$k; return $o;
+    }
+    public static function context($c): stdClass {
+        if (!($c instanceof stdClass) || !preg_match('/^[a-f0-9]{40}$/', (string)mon_get($c, 'source_blob_sha', ''))) throw new MonFault('MON_SOURCE_SHA_INVALID');
+        $o = self::pick($c, ['source_blob_sha', 'rendered_at', 'countries', 'important_ids']);
+        $o->rendered_at = self::utc(mon_get($c, 'rendered_at'));
+        $countries = mon_get($c, 'countries', ['KR', 'US', 'JP']);
+        if (!is_array($countries) || !$countries || count($countries) !== count(array_unique($countries, SORT_REGULAR))) throw new MonFault('MON_SCOPE_INVALID');
+        foreach ($countries as $country) if (!is_string($country) || !in_array($country, ['KR', 'US', 'JP'], true)) throw new MonFault('MON_SCOPE_INVALID');
+        sort($countries, SORT_STRING); $o->countries = $countries;
+        $ids = mon_get($c, 'important_ids', []);
+        if (!is_array($ids) || count($ids) > 1000) throw new MonFault('MON_SCOPE_INVALID');
+        foreach ($ids as $sid) self::identity($sid);
+        $ids = array_values(array_unique($ids)); sort($ids, SORT_STRING); $o->important_ids = $ids; return $o;
+    }
+    public static function identity($sid): void {
+        if (!is_string($sid) || !preg_match('/^(KR|US|JP)\|[A-Z0-9._-]+\|[A-Za-z0-9._-]+$/', $sid)) throw new MonFault('MON_SYMBOL_INVALID');
+    }
+    public static function rows($rows): array {
+        if (!is_array($rows)) throw new MonFault('MON_ROWS_INVALID'); $map = [];
+        foreach ($rows as $r) {
+            if (!($r instanceof stdClass)) throw new MonFault('MON_ROWS_INVALID');
+            $sid = mon_get($r, 'symbol_id'); self::identity($sid);
+            if (isset($map[$sid])) throw new MonFault('MON_SYMBOL_DUPLICATE'); $map[$sid] = $r;
+        }
+        return $map;
+    }
+    public static function periods($d, string $at): array {
+        $now = (int)floor(self::seconds($at)); $out = [];
+        foreach (mon_get($d->analysis, 'market_summary', []) as $m) {
+            $country = mon_get($m, 'country'); if (!in_array($country, ['KR', 'US', 'JP'], true)) throw new MonFault('MON_PERIOD_INVALID');
+            $verified = mon_get($m, 'completed_bar_date'); $target = mon_get($m, 'target_completed_bar_date', $verified);
+            foreach ([$verified, $target] as $date) if (!is_string($date) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) throw new MonFault('MON_PERIOD_INVALID');
+            $state = MonMarket::state($d->watchlist, $country, $now);
+            if ($state['session'] !== 'unknown') foreach (mon_get($d->watchlist->calendar, 'markets', []) as $cal) {
+                if (mon_get($cal, 'country') !== $country || mon_get($cal, 'timezone') !== MonMarket::timezone($country)->getName()) continue;
+                $checked = mon_time(mon_get($cal, 'checked_at')); $until = mon_time(mon_get($d->watchlist->calendar, 'valid_until'));
+                if ($checked === null || $checked > $now || $until === null || $until < $now || $until - $checked > 15 * 86400) continue;
+                $closes = [];
+                foreach (mon_get($cal, 'sessions', []) as $s) {
+                    $date = mon_get($s, 'market_date'); $open = mon_time(mon_get($s, 'open_at')); $close = mon_time(mon_get($s, 'close_at'));
+                    if (!is_string($date) || $open === null || $close === null || $open >= $close) continue;
+                    // A Japanese morning close is not a completed daily bar.
+                    $closes[$date] = max($closes[$date] ?? 0, $close);
+                }
+                foreach ($closes as $date => $close) if ($close <= $now && $date > $target) $target = $date;
+            }
+            $current = $verified === $target && mon_get($m, 'comparison_status') !== 'pending_benchmark';
+            $out[$country] = (object)['country' => $country, 'verified_completed_date' => $verified, 'target_completed_date' => $target, 'comparison_status' => $current ? mon_get($m, 'comparison_status', 'needs_check') : ($verified === $target ? 'pending_benchmark' : 'preparation_required'), 'current_period' => $current, 'session' => $state['session'], 'preparation_running' => false];
+        }
+        return $out;
+    }
+    public static function token($d, $context): string {
+        return hash('sha256', self::CONTRACT . '|' . MON_VERSION . '|' . self::json($context) . '|' . self::json($d));
+    }
+    public static function auxiliary($d, string $at): array {
+        $watch = self::rows($d->watchlist->symbols); $settings = MonData::settings($d->watchlist);
+        $settings['auxiliary_max_age_seconds'] = min(900, $settings['auxiliary_max_age_seconds']);
+        $settings['action_price_max_age_seconds'] = min(300, $settings['action_price_max_age_seconds']);
+        $settings['future_clock_tolerance_seconds'] = min(5, $settings['future_clock_tolerance_seconds']);
+        $now = (int)floor(self::seconds($at)); $counts = []; $usable = [];
+        $matched = $d->collection->watchlist_version === $d->watchlist->watchlist_version;
+        foreach (self::rows($d->collection->quotes) as $sid => $row) {
+            $p = mon_get($row, 'point'); $quality = MonData::quality($p, $now, $settings);
+            $counts[$quality] = ($counts[$quality] ?? 0) + 1;
+            if (!$matched || !isset($watch[$sid]) || !in_array($quality, ['normal', 'delayed'], true) || mon_get($row, 'fetch_status') !== 'ok') continue;
+            $w = $watch[$sid]; $price = mon_number(mon_get($p, 'price'));
+            if (mon_get($p, 'currency') !== $w->currency || mon_get($p, 'venue') !== $w->exchange || $price === null || $price <= 0 || !in_array(mon_get($p, 'timestamp_basis'), ['trade', 'bar_end', 'close'], true)) continue;
+            $source = mon_get($p, 'source'); if (!is_string($source)) continue;
+            $sourceKey = ['KIS' => 'kis', 'NAVER' => 'naver', 'YAHOO' => 'yahoo'][$source] ?? null;
+            if ($sourceKey === null || mon_get($p, 'provider_symbol') !== mon_get(mon_get($w->source_codes, $sourceKey), 'symbol')) continue;
+            $fetched = mon_time(mon_get($p, 'fetched_at')); if ($fetched === null || $fetched > $now + 5) continue;
+            $quoteAt = mon_get($p, 'quote_at'); $date = (new DateTimeImmutable($quoteAt))->setTimezone(MonMarket::timezone($w->country))->format('Y-m-d');
+            if (mon_get($p, 'market_date') !== $date) continue;
+            $usable[$sid] = (object)['source' => mon_get($p, 'source'), 'price' => $price, 'quote_at' => $quoteAt, 'age_seconds' => (float)self::decimal6(self::seconds($at) - self::seconds($quoteAt)), 'delay_seconds' => mon_get($p, 'delay_seconds'), 'session' => mon_get($p, 'session'), 'quality' => $quality, 'purpose' => 'auxiliary_only'];
+        }
+        return ['counts' => $counts, 'watchlist_version_match' => $matched, 'usable' => $usable];
+    }
+    public static function xzBinary(): ?string {
+        if (!function_exists('proc_open')) return null;
+        foreach (['/usr/bin/xz', '/bin/xz', '/usr/syno/bin/xz', '/opt/bin/xz'] as $p) if (is_file($p) && is_executable($p)) return $p;
+        return null;
+    }
+    private static function xz(string $input, bool $decode): string {
+        $binary = self::xzBinary(); if ($binary === null) throw new MonFault('MON_XZ_UNAVAILABLE');
+        $in = tmpfile(); $out = tmpfile(); $err = tmpfile();
+        if ($in === false || $out === false || $err === false) {
+            foreach ([$in, $out, $err] as $f) if (is_resource($f)) fclose($f);
+            throw new MonFault('MON_CODEC_TEMP_FAILED');
+        }
+        $proc = null;
+        try {
+            if (fwrite($in, $input) !== strlen($input)) throw new MonFault('MON_CODEC_TEMP_FAILED'); rewind($in);
+            // Fixed executable/arguments; no shell or user-provided command. Small dictionary keeps memory bounded.
+            $args = $decode ? [$binary, '--format=xz', '--decompress', '--stdout', '--memlimit-decompress=128MiB'] : [$binary, '--format=xz', '--stdout', '-9', '--lzma2=dict=2MiB', '--threads=1'];
+            $pipes = []; $proc = @proc_open($args, [0 => $in, 1 => $out, 2 => $err], $pipes);
+            if (!is_resource($proc)) throw new MonFault('MON_XZ_UNAVAILABLE');
+            $end = microtime(true) + 10; $code = -1; $limit = $decode ? self::MAX_PAYLOAD : self::MAX_SOURCE;
+            do {
+                $stat = proc_get_status($proc); $size = fstat($out);
+                if ($size !== false && $size['size'] > $limit) throw new MonFault('MON_PAYLOAD_TOO_LARGE');
+                if (!$stat['running']) { $code = $stat['exitcode']; break; }
+                if (microtime(true) >= $end) throw new MonFault('MON_CODEC_TIMEOUT');
+                usleep(10000);
+            } while (true);
+            $closed = proc_close($proc); $proc = null;
+            if ($code !== 0 && $closed !== 0) throw new MonFault('MON_PAYLOAD_INVALID');
+            rewind($out); $result = stream_get_contents($out, $limit + 1);
+            if ($result === false || strlen($result) > $limit) throw new MonFault('MON_PAYLOAD_TOO_LARGE'); return $result;
+        } finally {
+            if (is_resource($proc)) { proc_terminate($proc, 9); proc_close($proc); }
+            fclose($in); fclose($out); fclose($err);
+        }
+    }
+    public static function payload($d): stdClass {
+        $packed = mon_get(mon_get($d->analysis, 'input_snapshot'), 'lossless_payload');
+        if (!($packed instanceof stdClass) || !in_array(mon_get($packed, 'format'), ['json', 'UTF-8 JSON'], true) || !preg_match('/^[a-f0-9]{64}$/', (string)mon_get($packed, 'sha256', ''))) throw new MonFault('MON_PAYLOAD_INVALID');
+        $bytes = mon_get($packed, 'uncompressed_bytes');
+        if (!is_int($bytes) || $bytes < 1 || $bytes > self::MAX_PAYLOAD) throw new MonFault('MON_PAYLOAD_TOO_LARGE');
+        $encoded = mon_get($packed, 'data');
+        if (!is_string($encoded) || strlen($encoded) > self::MAX_SOURCE) throw new MonFault('MON_PAYLOAD_INVALID');
+        $key = hash('sha256', self::json($packed));
+        if (isset(self::$payloadCache[$key])) return mon_decode(self::$payloadCache[$key]);
+        $binary = base64_decode($encoded, true); if ($binary === false) throw new MonFault('MON_PAYLOAD_INVALID');
+        if ($packed->encoding === 'xz+base64') $raw = self::xz($binary, true);
+        elseif ($packed->encoding === 'gzip+base64' && function_exists('gzdecode')) $raw = @gzdecode($binary, self::MAX_PAYLOAD + 1);
+        else throw new MonFault('MON_CODEC_UNAVAILABLE');
+        if (!is_string($raw) || strlen($raw) !== $bytes || !hash_equals($packed->sha256, hash('sha256', $raw))) throw new MonFault('MON_PAYLOAD_HASH_INVALID');
+        try { $v = mon_decode($raw); } catch (Throwable $e) { throw new MonFault('MON_PAYLOAD_INVALID'); }
+        if (!($v instanceof stdClass)) throw new MonFault('MON_PAYLOAD_INVALID');
+        // A bounded per-request cache, keyed by compressed bytes and metadata, never a model-context copy.
+        if (count(self::$payloadCache) >= 2) self::$payloadCache = [];
+        self::$payloadCache[$key] = $raw; return $v;
+    }
+    public static function pack($payload, string $encoding): stdClass {
+        $raw = self::json($payload); if (strlen($raw) > self::MAX_PAYLOAD) throw new MonFault('MON_PAYLOAD_TOO_LARGE');
+        if ($encoding === 'xz+base64') $binary = self::xz($raw, false);
+        elseif ($encoding === 'gzip+base64' && function_exists('gzencode')) $binary = gzencode($raw, 9);
+        else throw new MonFault('MON_CODEC_UNAVAILABLE');
+        if (!is_string($binary)) throw new MonFault('MON_PAYLOAD_INVALID');
+        return (object)['data' => base64_encode($binary), 'encoding' => $encoding, 'format' => 'UTF-8 JSON', 'sha256' => hash('sha256', $raw), 'uncompressed_bytes' => strlen($raw)];
+    }
+    public static function business($map): array {
+        if (!($map instanceof stdClass)) throw new MonFault('MON_RESULT_INVALID'); $rows = [];
+        foreach ($map as $sid => $r) {
+            if (!($r instanceof stdClass) || mon_get($r, 'symbol_id') !== $sid) throw new MonFault('MON_RESULT_INVALID'); self::identity($sid);
+            $row = new stdClass();
+            foreach (['symbol_id', 'rank', 'action', 'readiness', 'entry_plans', 'active_plan', 'entry_zone', 'invalidation'] as $k) {
+                if (!property_exists($r, $k)) throw new MonFault('MON_RESULT_INVALID'); $row->$k = $r->$k;
+            }
+            $rows[$sid] = $row;
+        }
+        ksort($rows, SORT_STRING); return array_values($rows);
+    }
+    public static function verifyFacts($d, $payload): void {
+        foreach (['selection_facts', 'input_facts', 'final_results_details', 'independent_results'] as $k) if (!(mon_get($payload, $k) instanceof stdClass)) throw new MonFault('MON_PAYLOAD_FACTS_MISSING');
+        foreach (['selection_fingerprint' => $payload->selection_facts, 'input_fingerprint' => $payload->input_facts, 'result_fingerprint' => self::business($payload->final_results_details)] as $k => $v) {
+            if (!is_string(mon_get($d->analysis, $k)) || !hash_equals($d->analysis->$k, self::digest($v))) throw new MonFault('MON_FACT_HASH_INVALID');
+        }
+        if (mon_get($payload->input_facts, 'selection_fingerprint') !== $d->analysis->selection_fingerprint || self::utc(mon_get($payload->input_facts, 'as_of')) !== self::utc($d->analysis->as_of)) throw new MonFault('MON_FACT_SOURCE_CONFLICT');
+        $plain = self::rows($d->analysis->results); $full = $payload->final_results_details;
+        if (count($plain) !== count(get_object_vars($full))) throw new MonFault('MON_RESULT_SOURCE_CONFLICT');
+        foreach ($plain as $sid => $r) {
+            if (!property_exists($full, $sid)) throw new MonFault('MON_RESULT_SOURCE_CONFLICT');
+            foreach (['rank', 'action', 'readiness', 'entry_plans', 'active_plan', 'entry_zone', 'invalidation', 'price', 'price_as_of'] as $k) {
+                if (property_exists($r, $k) && self::json($r->$k) !== self::json(mon_get($full->$sid, $k))) throw new MonFault('MON_RESULT_SOURCE_CONFLICT');
+            }
+        }
+    }
+    public static function quoteState($r, $w, string $asOf): stdClass {
+        $checks = mon_get($r, 'price_checks', new stdClass()); $at = mon_get($r, 'price_as_of'); $country = mon_get($r, 'country');
+        $state = (object)['valid' => false, 'age_seconds' => null, 'delay_seconds' => mon_get($checks, 'delay_seconds'), 'session' => 'unknown', 'blockers' => []];
+        if (!in_array($country, ['KR', 'US', 'JP'], true)) { $state->blockers[] = 'identity_needs_check'; return $state; }
+        $now = self::seconds($asOf); $market = MonMarket::state($w, $country, (int)floor($now)); $state->session = $market['session'];
+        try { $age = $now - self::seconds($at); $state->age_seconds = (float)self::decimal6($age); }
+        catch (MonFault $e) { $state->blockers[] = 'quote_time_unknown'; $age = null; }
+        $delay = mon_number($state->delay_seconds); $settings = $w->settings;
+        $ageMax = min(300, max(0, (int)mon_get($settings, 'action_price_max_age_seconds', 300)));
+        $delayMax = min(300, max(0, (int)mon_get($settings, 'action_known_delay_max_seconds', 300)));
+        $future = min(5, max(0, (int)mon_get($settings, 'future_clock_tolerance_seconds', 5)));
+        if ($age === null || $age < -$future || $age > $ageMax) $state->blockers[] = 'current_price_needs_check';
+        if ($delay === null || $delay < 0 || $delay > $delayMax) $state->blockers[] = 'quote_delay_needs_check';
+        if (!in_array(mon_get($checks, 'timestamp_basis'), ['trade', 'bar_end'], true) || !in_array(mon_get($r, 'price_type'), ['last', 'minute_close'], true)) $state->blockers[] = 'quote_basis_needs_check';
+        $price = mon_number(mon_get($r, 'price')); if ($price === null || $price <= 0) $state->blockers[] = 'price_invalid';
+        $zone = MonMarket::timezone($country); $date = (new DateTimeImmutable($asOf))->setTimezone($zone)->format('Y-m-d');
+        $quoteDate = $age === null ? null : (new DateTimeImmutable($at))->setTimezone($zone)->format('Y-m-d');
+        if ($quoteDate !== $date || mon_get($checks, 'market_date') !== $date) $state->blockers[] = 'market_date_needs_check';
+        if ($state->session !== 'regular' || mon_get($checks, 'session_at_analysis') !== 'regular') $state->blockers[] = 'regular_session_needs_check';
+        $state->blockers = array_values(array_unique($state->blockers)); $state->valid = !$state->blockers; return $state;
+    }
+    public static function current($r, $w, string $at, bool $comparisonReady = true): stdClass {
+        $q = self::quoteState($r, $w, $at); $risk = mon_get($r, 'risk_checks', new stdClass());
+        $blockers = $q->blockers; $plans = mon_get($r, 'entry_plans'); $matching = [];
+        $price = mon_number(mon_get($r, 'price'));
+        foreach (is_array($plans) ? $plans : [] as $p) {
+            $z = mon_get($p, 'entry_zone');
+            if (is_array($z) && count($z) === 2 && $price !== null && mon_number($z[0]) !== null && mon_number($z[1]) !== null && $price >= mon_number($z[0]) && $price <= mon_number($z[1])) $matching[] = mon_get($p, 'mode');
+        }
+        $expiry = mon_get($r, 'plan_valid_until');
+        try { $planCurrent = self::seconds($at) <= self::seconds($expiry); } catch (MonFault $e) { $planCurrent = false; }
+        if (!$matching) $blockers[] = $plans ? 'outside_entry_zone' : 'entry_plan_needs_data';
+        if (!$planCurrent) $blockers[] = 'plan_expired';
+        if (!$comparisonReady) $blockers[] = 'latest_comparison_pending';
+        // Saved risk checks are historical. An old ready never becomes a current ready on redisplay.
+        $review = mon_get($r, 'risk_review', new stdClass());
+        $reviewAt = mon_get($risk, 'verified_as_of', mon_get($review, 'checked_at'));
+        $sameReview = false; $tradingCurrent = false;
+        try {
+            $reviewAge = self::seconds($at) - self::seconds($reviewAt); $zone = MonMarket::timezone($r->country);
+            $sameReview = $reviewAge >= -5 && (new DateTimeImmutable($reviewAt))->setTimezone($zone)->format('Y-m-d') === (new DateTimeImmutable($at))->setTimezone($zone)->format('Y-m-d');
+            $tradingCurrent = $sameReview && $reviewAge <= 300;
+        } catch (MonFault $ignore) {}
+        if (!$sameReview || mon_get($risk, 'current_corporate_risk_verified') !== true) $blockers[] = 'corporate_risk_needs_check';
+        if (!$tradingCurrent || mon_get($risk, 'current_trading_status_verified') !== true) $blockers[] = 'trading_status_needs_check';
+        if (mon_get($risk, 'confirmed_material_adverse') === true) $blockers[] = 'confirmed_material_adverse';
+        return (object)['quote' => $q, 'readiness' => mon_get($r, 'action') === 'BUY_REVIEW' && !$blockers ? 'ready' : ($plans && $planCurrent && $comparisonReady ? 'conditional' : 'needs_data'), 'matching_plans' => $matching, 'blockers' => array_values(array_unique($blockers))];
+    }
+    public static function storage($d, bool $enforce): stdClass {
+        $policy = mon_get($d->watchlist->settings, 'analysis_storage_policy', new stdClass());
+        $max = min(self::MAX_SOURCE, max(1, (int)mon_get($policy, 'max_bytes', self::MAX_SOURCE)));
+        $reserve = max(65536, (int)mon_get($policy, 'collection_reserve_min_bytes', 65536), 4096 + 2048 * count($d->watchlist->symbols));
+        $copy = clone $d; $copy->collection = (object)[]; $bytes = strlen(self::json($d)); $owned = strlen(self::json($copy));
+        $s = (object)['bytes' => $bytes, 'max_bytes' => $max, 'bytes_without_collection' => $owned, 'collection_reserve_bytes' => $reserve, 'remaining_after_reserve' => $max - $owned - $reserve, 'fits' => $bytes <= $max && $owned + $reserve <= $max];
+        if ($enforce && !$s->fits) throw new MonFault('MON_STORAGE_LIMIT'); return $s;
+    }
+    public static function evidence($d, $payload): array {
+        $map = [];
+        foreach ($d->analysis->evidence as $entry) {
+            if (!($entry instanceof stdClass) || !is_string(mon_get($entry, 'id'))) throw new MonFault('MON_EVIDENCE_INVALID');
+            $id = $entry->id;
+            if (property_exists($entry, 'evidence_ref')) {
+                if ($entry->evidence_ref !== 'mon_evidence_index:' . $id || !(mon_get(mon_get($payload, 'mon_evidence_index'), $id) instanceof stdClass)) throw new MonFault('MON_EVIDENCE_INVALID');
+                $entry = $payload->mon_evidence_index->$id;
+                if (mon_get($entry, 'id') !== $id) throw new MonFault('MON_EVIDENCE_INVALID');
+            }
+            if (isset($map[$id])) throw new MonFault('MON_EVIDENCE_ID_CONFLICT'); $map[$id] = $entry;
+        }
+        return $map;
+    }
+    public static function compactEvidence($d, $payload): void {
+        $full = self::evidence($d, $payload);
+        if (!(mon_get($payload, 'mon_evidence_index') instanceof stdClass)) $payload->mon_evidence_index = new stdClass();
+        $index = [];
+        foreach ($full as $id => $entry) { $payload->mon_evidence_index->$id = $entry; $index[] = (object)['id' => $id, 'evidence_ref' => 'mon_evidence_index:' . $id]; }
+        $d->analysis->evidence = $index;
+        $d->analysis->input_snapshot->compressed_fields = array_keys(get_object_vars($payload)); sort($d->analysis->input_snapshot->compressed_fields, SORT_STRING);
+    }
+    public static function render($d, string $at, array $reasons = []): string {
+        $a = $d->analysis; $watch = self::rows($d->watchlist->symbols); $rows = []; $periods = self::periods($d, $at);
+        foreach ($a->results as $r) if (in_array(mon_get($r, 'action'), ['BUY_REVIEW', 'SELL_REVIEW'], true) || mon_get($watch[mon_get($r, 'symbol_id')] ?? null, 'is_held') === true) $rows[] = $r;
+        $known = self::rows($a->results);
+        foreach ($watch as $sid => $wr) if ($wr->is_held && !isset($known[$sid])) $rows[] = (object)['symbol_id' => $sid, 'country' => $wr->country, 'name' => $wr->name, 'currency' => $wr->currency, 'action' => 'HOLD', 'entry_plans' => null, 'reason' => '등록 보유분의 분석 준비 필요'];
+        usort($rows, static function ($a, $b) { return strcmp($a->country, $b->country) ?: ((int)mon_get($a, 'rank', 9999) <=> (int)mon_get($b, 'rank', 9999)) ?: strcmp($a->symbol_id, $b->symbol_id); });
+        $safe = static function ($s) { return str_replace(['|', "\r", "\n", '<', '>'], ['／', ' ', ' ', '＜', '＞'], (string)$s); };
+        $num = static function ($n) { if (mon_number($n) === null) return '미확인'; return rtrim(rtrim(MonRun::decimal6($n), '0'), '.'); };
+        $same = self::utc($a->as_of) === self::utc($at);
+        $text = '기준 ' . $a->as_of . ' · ' . $a->status . ($same ? '' : ' · 재사용 표시 ' . $at) . "\n\n| 국가 | 종목 | 판단 | 가격 조건 | 핵심 이유 |\n|---|---|---|---|---|\n";
+        foreach ($rows as $r) {
+            $conditions = [];
+            foreach (is_array(mon_get($r, 'entry_plans')) ? $r->entry_plans : [] as $p) {
+                $z = mon_get($p, 'entry_zone');
+                if (is_array($z) && count($z) === 2) $conditions[] = (mon_get($p, 'mode') === 'breakout' ? '돌파 ' : '눌림 ') . $num($z[0]) . '~' . $num($z[1]) . ' / 무효 ' . $num(mon_get($p, 'invalidation'));
+            }
+            $comparisonReady = mon_get($periods[$r->country] ?? null, 'current_period', false);
+            $now = self::current($r, $d->watchlist, $at, $comparisonReady); $state = $now->readiness;
+            if ($r->action === 'SELL_REVIEW') $label = '매도 검토'; elseif ($r->action === 'BUY_REVIEW') $label = ($comparisonReady ? '매입 검토 · ' : '이전 후보 참고 · ') . $state; else $label = '보유 관찰';
+            $text .= '| ' . $safe($r->country) . ' | ' . $safe(mon_get($r, 'name', $r->symbol_id)) . ' (' . $safe(explode('|', $r->symbol_id)[2]) . ') | ' . $label . ' | ' . $safe($conditions ? implode('; ', $conditions) . ' ' . mon_get($r, 'currency', '') : '계획 확인 필요') . ' | ' . $safe(mon_get($r, 'reason', '확인 필요')) . " |\n";
+        }
+        $notes = [];
+        if ($reasons) $notes[] = implode('; ', array_values(array_unique($reasons)));
+        if (!$same) $notes[] = '이전 검증 결과 재사용. 현재 가격·거래·기업 확인은 새로 완료한 것이 아닙니다.';
+        $limits = mon_get($a, 'limitations', []); $riskNotes = [];
+        $corporate = mon_get(mon_get($a, 'input_snapshot'), 'corporate_risk');
+        foreach (['confirmed_current_material_adverse' => '확인된 중대 위험', 'pending_items' => '후속 확인 필요'] as $kind => $label) foreach (mon_get($corporate, $kind, []) as $event) {
+            $sid = mon_get($event, 'symbol_id'); if (!is_string($sid)) continue;
+            $riskNotes[] = $label . ': ' . mon_get($watch[$sid] ?? null, 'name', $sid);
+        }
+        if ($limits || $riskNotes) $notes[] = '기록 기준 ' . mon_get($a, 'limitations_as_of', $a->as_of) . ': ' . implode('; ', array_values(array_unique(array_merge($limits, $riskNotes))));
+        foreach ($notes as $note) $text .= "\n- " . $safe($note);
+        return $text . "\n";
+    }
+    public static function rebase($base, $candidate, $latest): stdClass {
+        self::validate($latest); $b = clone $base; $l = clone $latest; unset($b->collection, $l->collection);
+        if (self::json($b) !== self::json($l)) throw new MonFault('MON_ANALYSIS_SOURCE_CONFLICT');
+        $out = mon_decode(self::json($candidate)); $out->collection = $latest->collection; self::storage($out, true); return $out;
+    }
+}
+
+function mon_project_for_mon($data, $context): array {
+    MonRun::validate($data); $c = MonRun::context($context); $a = $data->analysis;
+    $audit = MonRun::rows($a->candidate_audit); $results = MonRun::rows($a->results); $watch = MonRun::rows($data->watchlist->symbols);
+    $coverage = []; $markets = MonRun::periods($data, $c->rendered_at); $discovery = []; $pool = []; $events = []; $aux = MonRun::auxiliary($data, $c->rendered_at);
+    $corporate = mon_get(mon_get($a, 'input_snapshot'), 'corporate_risk');
+    foreach (['confirmed_current_material_adverse', 'pending_items'] as $kind) foreach (mon_get($corporate, $kind, []) as $r) {
+        $sid = mon_get($r, 'symbol_id'); MonRun::identity($sid); $events[$sid][] = MonRun::pick($r, ['risk_kind', 'event_date', 'company_primary_confirmation', 'production_recovery_verified']);
+    }
+    foreach ($a->coverage as $r) $coverage[mon_get($r, 'country', '')] = $r;
+    foreach (mon_get(mon_get($a, 'discovery_state'), 'countries', []) as $r) $discovery[] = MonRun::pick($r, ['country', 'market_date', 'completed_bar_date', 'daily_target', 'new_ids_identified_today', 'daily_goal_met']);
+    foreach ($audit as $sid => $r) {
+        $country = explode('|', $sid)[0];
+        if (!isset($pool[$country])) $pool[$country] = ['total' => 0, 'pass' => 0, 'near' => 0, 'unverified' => 0, 'fail' => 0, 'other' => 0];
+        $pool[$country]['total']++; $eligibility = mon_get($r, 'eligibility', 'other');
+        if (!in_array($eligibility, ['pass', 'near', 'unverified', 'fail'], true)) $eligibility = 'other'; $pool[$country][$eligibility]++;
+    }
+    $cards = []; $counts = []; $pending = []; $prep = []; $competition = [];
+    foreach ($c->countries as $country) {
+        $m = $markets[$country] ?? new stdClass(); $v = $coverage[$country] ?? new stdClass();
+        $prep[] = $m;
+        $comp = MonRun::pick($v, ['country', 'comparable_count', 'previous_comparable_count', 'status']);
+        if (mon_get($m, 'current_period') !== true) { $comp->previous_comparable_count = max((int)mon_get($comp, 'previous_comparable_count', 0), (int)mon_get($comp, 'comparable_count', 0)); $comp->comparable_count = 0; }
+        $comp->pool = $pool[$country] ?? ['total' => 0]; $competition[] = $comp;
+        if (mon_get($m, 'current_period') !== true) $pending[] = (object)['country' => $country, 'kind' => mon_get($m, 'comparison_status') === 'pending_benchmark' ? 'benchmark' : 'completed_period', 'target_date' => mon_get($m, 'target_completed_date'), 'status' => 'preparation_required', 'ranking_scope' => 'previous_reference'];
+    }
+    foreach ($results as $sid => $r) {
+        $country = explode('|', $sid)[0]; $held = mon_get($watch[$sid] ?? null, 'is_held') === true; $action = mon_get($r, 'action');
+        $event = isset($events[$sid]) || mon_get(mon_get($r, 'risk_checks'), 'confirmed_material_adverse') === true || in_array($sid, $c->important_ids, true);
+        $include = $held || $action === 'SELL_REVIEW' || $event || ($action === 'BUY_REVIEW' && in_array($country, $c->countries, true));
+        if (!$include) continue;
+        if (!$held && $action === 'BUY_REVIEW') { $counts[$country] = ($counts[$country] ?? 0) + 1; if ($counts[$country] > 3) throw new MonFault('MON_RESULT_LIMIT_INVALID'); }
+        $card = MonRun::pick($r, ['symbol_id', 'country', 'name', 'currency', 'rank', 'action', 'eligibility', 'entry_plans', 'active_plan', 'plan_valid_until', 'price', 'price_as_of', 'price_type', 'risk_checks', 'details_ref']);
+        $card->evidence_count = count(mon_get($r, 'evidence_ids', []));
+        $card->metrics = MonRun::pick(mon_get($r, 'metrics'), ['R20', 'RS20_pp']);
+        $card->readiness_at_analysis = mon_get($r, 'readiness'); $card->held = $held;
+        if (isset($aux['usable'][$sid])) $card->php_auxiliary = $aux['usable'][$sid];
+        if ($held) $card->position = mon_get($watch[$sid], 'position');
+        if (isset($events[$sid])) $card->events = $events[$sid];
+        $card->ranking_scope = mon_get($markets[$country] ?? null, 'current_period') === true ? 'stored_completed_period' : 'previous_reference';
+        $now = MonRun::current($r, $data->watchlist, $c->rendered_at, $card->ranking_scope !== 'previous_reference');
+        $codes = []; foreach ($now->blockers as $blocker) { $code = array_search($blocker, MonRun::BLOCKERS, true); if ($code === false) throw new MonFault('MON_BLOCKER_INVALID'); $codes[] = $code; }
+        $card->current = (object)['readiness' => $now->readiness, 'price_valid' => $now->quote->valid, 'age_seconds' => $now->quote->age_seconds, 'delay_seconds' => $now->quote->delay_seconds, 'session' => $now->quote->session, 'blocker_ids' => $codes]; $cards[$sid] = $card;
+    }
+    // Do not hide a held position or important failed candidate merely because it has no result row.
+    foreach ($watch as $sid => $r) if (mon_get($r, 'is_held') === true && !isset($cards[$sid])) $cards[$sid] = (object)['symbol_id' => $sid, 'country' => $r->country, 'name' => $r->name, 'held' => true, 'position' => $r->position, 'status' => 'held_analysis_missing'];
+    foreach ($audit as $sid => $r) if (!isset($cards[$sid]) && (isset($events[$sid]) || in_array($sid, $c->important_ids, true) || mon_get($r, 'eligibility') === 'fail')) $cards[$sid] = (object)['symbol_id' => $sid, 'eligibility' => mon_get($r, 'eligibility'), 'evidence_ids' => mon_get($r, 'evidence_ids', []), 'events' => $events[$sid] ?? [], 'details_ref' => 'candidate_audit:' . $sid, 'status' => 'candidate_needs_review'];
+    foreach ($events as $sid => $items) if (!isset($cards[$sid])) $cards[$sid] = (object)['symbol_id' => $sid, 'events' => $items, 'status' => 'event_analysis_missing', 'preparation_required' => true];
+    foreach ($c->important_ids as $sid) if (!isset($cards[$sid])) $cards[$sid] = (object)['symbol_id' => $sid, 'status' => 'candidate_not_in_source', 'preparation_required' => true];
+    ksort($cards, SORT_STRING); $cards = array_values($cards); $token = MonRun::token($data, $c);
+    $view = ['header' => ['run_contract' => MonRun::CONTRACT, 'processor_version' => MON_VERSION, 'schema_version' => 3, 'criteria_version' => 'MON-P2.0', 'source_blob_sha' => $c->source_blob_sha, 'source_run_id' => $a->run_id, 'analysis_as_of' => $a->as_of, 'rendered_at' => $c->rendered_at, 'selection_fingerprint' => $a->selection_fingerprint, 'input_fingerprint' => $a->input_fingerprint, 'result_fingerprint' => $a->result_fingerprint, 'blocker_keys' => MonRun::BLOCKERS],
+        'preparation' => $prep, 'competition' => ['full_pool_count' => count($audit), 'audit_sha256' => hash('sha256', MonRun::json($a->candidate_audit)), 'payload_hash_verified' => false, 'ranking_recomputed' => false, 'countries' => $competition],
+        'cards' => [], 'changes' => ['last_change_ref' => 'analysis.changes:' . max(0, count($a->changes) - 1)], 'discovery' => $discovery,
+        'pending' => ['groups' => $pending, 'limitations' => mon_get($a, 'limitations', []), 'retry_queue_count' => count(mon_get(mon_get($a, 'discovery_state'), 'retry_queue', [])), 'retry_queue_ref' => 'analysis.discovery_state.retry_queue'],
+        'persistence' => ['collection_id' => $data->collection->collection_id, 'collection_watchlist_version' => $data->collection->watchlist_version, 'analysis_used_collection_id' => $a->collection_id, 'watchlist_version' => $data->watchlist->watchlist_version, 'php_auxiliary_quality' => $aux['counts'], 'php_auxiliary_watchlist_match' => $aux['watchlist_version_match'], 'write_required' => false, 'legacy_xz_available' => MonRun::xzBinary() !== null],
+        'page' => ['cursor' => 0, 'next_cursor' => null, 'total_cards' => count($cards), 'remaining_cards' => count($cards)]];
+    $cursor = mon_get($context, 'cursor', 0);
+    if (!is_int($cursor) || $cursor < 0 || $cursor > count($cards)) throw new MonFault('MON_CURSOR_INVALID');
+    if ($cursor > 0 && !hash_equals($token, (string)mon_get($context, 'state_token', ''))) throw new MonFault('MON_STATE_TOKEN_INVALID');
+    $view['page']['cursor'] = $cursor; $i = $cursor;
+    if ($cursor > 0) $view = ['header' => ['run_contract' => MonRun::CONTRACT, 'processor_version' => MON_VERSION, 'source_blob_sha' => $c->source_blob_sha, 'state_token' => $token, 'shared_fields_ref' => 'first_page'], 'cards' => [], 'page' => $view['page']];
+    for (; $i < count($cards); $i++) {
+        $view['cards'][] = $cards[$i]; $view['page']['remaining_cards'] = count($cards) - $i - 1; $view['page']['next_cursor'] = $i + 1 < count($cards) ? $i + 1 : null;
+        if (strlen(MonRun::json((object)$view)) > MonRun::VIEW_BYTES) { array_pop($view['cards']); break; }
+    }
+    $view['page']['remaining_cards'] = count($cards) - $i; $view['page']['next_cursor'] = $i < count($cards) ? $i : null;
+    $bytes = strlen(MonRun::json((object)$view));
+    if ($bytes > MonRun::VIEW_BYTES || (!$view['cards'] && $i < count($cards))) throw new MonFault('MON_VIEW_ITEM_TOO_LARGE');
+    return ['state_token' => $token, 'model_input_bytes' => $bytes, 'view' => $view];
+}
+
+function mon_apply_mon_patch($data, $patch): array {
+    MonRun::validate($data);
+    if (!($patch instanceof stdClass)) throw new MonFault('MON_PATCH_INVALID');
+    foreach (['run_mode', 'base_source_blob_sha', 'base_analysis_run_id', 'fixed_as_of', 'changes', 'new_evidence', 'pending', 'short_reasons', 'view_context', 'state_token'] as $k) if (!property_exists($patch, $k)) throw new MonFault('MON_PATCH_FIELD_MISSING');
+    $allowed = ['run_mode', 'base_source_blob_sha', 'base_analysis_run_id', 'fixed_as_of', 'changes', 'new_evidence', 'pending', 'short_reasons', 'view_context', 'state_token'];
+    foreach ($patch as $k => $v) if (!in_array($k, $allowed, true)) throw new MonFault('MON_PATCH_FIELD_INVALID');
+    $c = MonRun::context($patch->view_context);
+    if ($patch->base_source_blob_sha !== $c->source_blob_sha || $patch->base_analysis_run_id !== $data->analysis->run_id) throw new MonFault('MON_ANALYSIS_SOURCE_CONFLICT');
+    if (!is_string($patch->state_token) || !hash_equals(MonRun::token($data, $c), $patch->state_token)) throw new MonFault('MON_STATE_TOKEN_INVALID');
+    foreach (['changes', 'new_evidence', 'pending', 'short_reasons'] as $k) if (!is_array($patch->$k)) throw new MonFault('MON_PATCH_INVALID');
+    if (count($patch->changes) > 1000 || count($patch->new_evidence) > 1000 || count($patch->pending) > 1000 || count($patch->short_reasons) > 3) throw new MonFault('MON_PATCH_INVALID');
+    foreach ($patch->short_reasons as $reason) if (!is_string($reason) || strlen($reason) > 1000) throw new MonFault('MON_PATCH_INVALID');
+    $fixed = MonRun::utc($patch->fixed_as_of);
+    if ($patch->run_mode === 'reuse') {
+        if ($fixed !== MonRun::utc($data->analysis->as_of) || $patch->changes || $patch->new_evidence || $patch->pending || $patch->short_reasons) throw new MonFault('MON_REUSE_HAS_CHANGES');
+        return ['status' => 'no_change', 'write_required' => false, 'files' => [], 'summary' => MonRun::render($data, $c->rendered_at), 'validation' => ['analysis_as_of_preserved' => true, 'collection_preserved' => true, 'payload_unchanged' => true, 'payload_hash_verified' => false, 'selection_reused' => true]];
+    }
+    if ($patch->run_mode !== 'evaluate') throw new MonFault('MON_PATCH_MODE_INVALID');
+    if (MonRun::seconds($fixed) <= MonRun::seconds($data->analysis->as_of) || MonRun::seconds($fixed) < MonRun::seconds($c->rendered_at)) throw new MonFault('MON_PATCH_AS_OF_INVALID');
+    $payload = MonRun::payload($data); MonRun::verifyFacts($data, $payload);
+    $out = mon_decode(MonRun::json($data)); $a = $out->analysis; $watch = MonRun::rows($out->watchlist->symbols);
+    $evidence = MonRun::evidence($data, $payload);
+    if (!(mon_get($payload, 'evidence_archive') instanceof stdClass)) throw new MonFault('MON_PAYLOAD_FACTS_MISSING');
+    foreach ($payload->evidence_archive as $id => $e) if (!isset($evidence[$id])) $evidence[$id] = $e;
+    $newEvidence = [];
+    foreach ($patch->new_evidence as $e) {
+        $id = mon_get($e, 'id'); $url = mon_get($e, 'source_url');
+        if (!($e instanceof stdClass) || !is_string($id) || !preg_match('/^[A-Za-z0-9._:-]{1,180}$/', $id) || !is_string($url) || parse_url($url, PHP_URL_SCHEME) !== 'https' || !parse_url($url, PHP_URL_HOST) || mon_get($e, 'source_kind') !== 'independent' || !is_string(mon_get($e, 'claim')) || trim($e->claim) === '') throw new MonFault('MON_EVIDENCE_INVALID');
+        $checked = MonRun::seconds(mon_get($e, 'checked_at')); $observed = MonRun::seconds($fixed);
+        if ($checked > $observed + 5 || $checked < MonRun::seconds($data->analysis->as_of)) throw new MonFault('MON_EVIDENCE_TIME_INVALID');
+        if (isset($evidence[$id]) && MonRun::json($evidence[$id]) !== MonRun::json($e)) throw new MonFault('MON_EVIDENCE_ID_CONFLICT');
+        if (isset($newEvidence[$id])) throw new MonFault('MON_EVIDENCE_ID_CONFLICT'); $newEvidence[$id] = $e;
+    }
+    $requireNewEvidence = static function ($ids) use ($newEvidence) {
+        if (!is_array($ids) || !$ids) throw new MonFault('MON_EVIDENCE_MISSING');
+        foreach ($ids as $id) if (!is_string($id) || !isset($newEvidence[$id])) throw new MonFault('MON_EVIDENCE_MISSING');
+    };
+    $changeIds = []; $archive = []; $full = $payload->final_results_details;
+    foreach ($patch->changes as $change) {
+        if (!($change instanceof stdClass)) throw new MonFault('MON_PATCH_INVALID');
+        $sid = mon_get($change, 'symbol_id'); MonRun::identity($sid);
+        if (isset($changeIds[$sid])) throw new MonFault('MON_SYMBOL_DUPLICATE'); $changeIds[$sid] = true;
+        if (!isset($watch[$sid]) || !property_exists($full, $sid)) throw new MonFault('MON_PATCH_PREPARATION_REQUIRED');
+        foreach ($change as $k => $v) if (!in_array($k, ['symbol_id', 'price_observation', 'risk_review', 'reason', 'next_check'], true)) throw new MonFault('MON_PATCH_PREPARATION_REQUIRED');
+        $r = $full->$sid; $wr = $watch[$sid]; $archive[$sid] = MonRun::pick($r, ['price', 'price_as_of', 'price_checks', 'risk_checks', 'risk_review', 'reason', 'next_check']);
+        if (property_exists($change, 'price_observation')) {
+            $p = $change->price_observation; $requireNewEvidence(mon_get($p, 'evidence_ids'));
+            if (!($p instanceof stdClass) || mon_get($p, 'symbol_id') !== $sid || mon_get($p, 'currency') !== $wr->currency || mon_get($p, 'venue') !== $wr->exchange || mon_get($p, 'source_kind') !== 'independent') throw new MonFault('MON_PRICE_IDENTITY_INVALID');
+            $price = mon_number(mon_get($p, 'price')); if ($price === null || $price <= 0) throw new MonFault('MON_PRICE_INVALID');
+            $quoteAt = MonRun::utc(mon_get($p, 'quote_at')); $type = mon_get($p, 'price_type'); $basis = mon_get($p, 'timestamp_basis');
+            if (!in_array($type, ['last', 'minute_close', 'close'], true) || !in_array($basis, ['trade', 'bar_end', 'close', 'unknown'], true)) throw new MonFault('MON_PRICE_INVALID');
+            $delay = mon_get($p, 'delay_seconds'); if ($delay !== null && (mon_number($delay) === null || mon_number($delay) < 0)) throw new MonFault('MON_PRICE_INVALID');
+            $r->price = (float)MonRun::decimal6($price); $r->price_as_of = $quoteAt; $r->price_type = $type;
+            $r->price_checks = (object)['timestamp_basis' => $basis, 'delay_seconds' => $delay, 'delay_kind' => $delay === null ? 'unknown' : (mon_number($delay) === 0.0 ? 'realtime' : 'delayed'), 'session_at_analysis' => mon_get($p, 'session', 'unknown'), 'market_date' => mon_get($p, 'market_date'), 'source' => mon_get($p, 'source', 'independent')];
+            $r->evidence_ids = array_values(array_unique(array_merge(mon_get($r, 'evidence_ids', []), $p->evidence_ids)));
+            $payload->independent_price_observations[] = $p;
+        }
+        if (property_exists($change, 'risk_review')) {
+            $review = $change->risk_review; $requireNewEvidence(mon_get($review, 'evidence_ids'));
+            if (!($review instanceof stdClass) || !in_array(mon_get($review, 'status'), ['verified', 'needs_check'], true) || !in_array(mon_get($review, 'trading_status'), ['verified', 'needs_check', 'halted'], true) || !is_string(mon_get($review, 'scope')) || trim($review->scope) === '' || !is_array(mon_get($review, 'pending_items'))) throw new MonFault('MON_RISK_REVIEW_INVALID');
+            if (MonRun::utc(mon_get($review, 'applies_as_of')) !== $fixed || MonRun::seconds(mon_get($review, 'checked_at')) > MonRun::seconds($fixed) + 5 || MonRun::seconds($review->checked_at) < MonRun::seconds($data->analysis->as_of)) throw new MonFault('MON_RISK_REVIEW_TIME_INVALID');
+            if ($review->status === 'verified' && $review->pending_items) throw new MonFault('MON_RISK_REVIEW_INVALID');
+            if ($review->trading_status === 'halted' || mon_get($review, 'confirmed_material_adverse') === true) throw new MonFault('MON_PATCH_PREPARATION_REQUIRED');
+            $review->applies_as_of = $fixed; $r->risk_review = $review;
+            $r->evidence_ids = array_values(array_unique(array_merge(mon_get($r, 'evidence_ids', []), $review->evidence_ids)));
+        }
+        foreach (['reason', 'next_check'] as $k) if (property_exists($change, $k)) {
+            if (!is_string($change->$k) || strlen($change->$k) > 1000 || trim($change->$k) === '') throw new MonFault('MON_PATCH_INVALID'); $r->$k = $change->$k;
+        }
+    }
+    if ($archive) {
+        if (!(mon_get($payload, 'mon_run_archive') instanceof stdClass)) $payload->mon_run_archive = new stdClass();
+        $payload->mon_run_archive->{MonRun::utc($data->analysis->as_of)} = (object)$archive;
+    }
+    foreach ($newEvidence as $id => $e) { $payload->evidence_archive->$id = $e; $a->evidence[] = $e; }
+    $independent = new stdClass(); $slim = []; $used = []; $readyCount = []; $plainBefore = MonRun::rows($data->analysis->results); $periods = MonRun::periods($data, $fixed);
+    $keys = array_keys(get_object_vars($full)); sort($keys, SORT_STRING);
+    foreach ($keys as $sid) {
+        $r = $full->$sid; $review = mon_get($r, 'risk_review', new stdClass());
+        if (!isset($watch[$sid]) || mon_get($r, 'country') !== $watch[$sid]->country || mon_get($r, 'currency') !== $watch[$sid]->currency || !(mon_get($r, 'price_checks') instanceof stdClass)) throw new MonFault('MON_RESULT_IDENTITY_INVALID');
+        $riskCurrent = false; $tradingCurrent = false;
+        try {
+            $checkedAt = MonRun::utc(mon_get($review, 'checked_at')); $riskAge = MonRun::seconds($fixed) - MonRun::seconds($checkedAt); $zone = MonMarket::timezone($r->country);
+            $riskCurrent = $riskAge >= -5 && (new DateTimeImmutable($checkedAt))->setTimezone($zone)->format('Y-m-d') === (new DateTimeImmutable($fixed))->setTimezone($zone)->format('Y-m-d');
+            $tradingCurrent = $riskCurrent && $riskAge <= 300;
+        } catch (MonFault $ignore) {}
+        if (!(mon_get($r, 'risk_checks') instanceof stdClass)) $r->risk_checks = new stdClass();
+        $r->risk_checks->current_corporate_risk_verified = $riskCurrent && mon_get($review, 'status') === 'verified' && !mon_get($review, 'pending_items', []);
+        $r->risk_checks->current_trading_status_verified = $tradingCurrent && mon_get($review, 'trading_status') === 'verified';
+        if ($r->risk_checks->current_corporate_risk_verified || $r->risk_checks->current_trading_status_verified) $r->risk_checks->verified_as_of = $checkedAt;
+        $now = MonRun::current($r, $out->watchlist, $fixed, mon_get($periods[$r->country] ?? null, 'current_period', false)); $r->price_checks->action_price_valid = $now->quote->valid;
+        $r->price_checks->age_seconds = $now->quote->age_seconds; $r->price_checks->session_at_analysis = $now->quote->session;
+        $r->price_checks->readiness_blockers = $now->blockers; $r->readiness = $now->readiness;
+        $r->verification_status = $r->readiness === 'ready' ? 'verified' : 'needs_check';
+        $r->active_plan = $r->readiness === 'ready' ? ($now->matching_plans[0] ?? null) : null;
+        if ($r->active_plan !== null) foreach ($r->entry_plans as $plan) if ($plan->mode === $r->active_plan) { $r->entry_zone = $plan->entry_zone; $r->invalidation = $plan->invalidation; break; }
+        $qTime = new DateTimeImmutable(MonRun::utc($r->price_as_of)); $r->quote_valid_until = $qTime->modify('+300 seconds')->format('Y-m-d\TH:i:s.u\Z');
+        // PHP auxiliary observations do not get promoted into independent facts.
+        $r->collection_check = (object)['status' => 'not_used_this_evaluation', 'used_for_current_price' => false, 'collection_id' => $data->collection->collection_id]; $r->wiki_effect = 'unused';
+        $independent->$sid = mon_decode(MonRun::json($r));
+        $row = clone $plainBefore[$sid];
+        foreach (['price', 'price_as_of', 'price_type', 'quote_valid_until', 'active_plan', 'entry_zone', 'invalidation', 'readiness', 'verification_status', 'evidence_ids', 'reason', 'next_check'] as $k) if (property_exists($row, $k)) $row->$k = mon_get($r, $k);
+        if (property_exists($row, 'price_checks')) $row->price_checks = MonRun::pick($r->price_checks, ['action_price_valid', 'age_seconds', 'delay_kind', 'delay_seconds', 'market_date', 'session_at_analysis', 'timestamp_basis', 'reason']);
+        if (property_exists($row, 'risk_checks')) $row->risk_checks = MonRun::pick($r->risk_checks, ['current_corporate_risk_verified', 'current_trading_status_verified', 'confirmed_material_adverse', 'verified_as_of']);
+        if (property_exists($row, 'collection_check')) $row->collection_check = $r->collection_check;
+        $slim[] = $row;
+        $used[] = MonRun::pick($r, ['symbol_id', 'price', 'price_type', 'price_as_of', 'price_checks', 'risk_checks', 'risk_review', 'plan_valid_until', 'collection_check']);
+        if ($r->action === 'BUY_REVIEW' && $r->readiness === 'ready') $readyCount[$r->country] = ($readyCount[$r->country] ?? 0) + 1;
+    }
+    $payload->independent_results = $independent; $facts = $payload->input_facts;
+    $facts->as_of = $fixed; $facts->used_prices = $used; $facts->collection_id = $data->collection->collection_id; $facts->collection_status = $data->collection->status;
+    $facts->corporate_risk_status = 'needs_check'; $facts->trading_status_check = (object)['status' => 'needs_check', 'feed_current_and_count_verified' => false];
+    $a->as_of = $fixed; $a->analyzed_at = $fixed; $a->run_id = 'mon-' . (new DateTimeImmutable($fixed))->format('Ymd\THisu\Z');
+    $a->collection_id = $data->collection->collection_id; $a->watchlist_version = $data->watchlist->watchlist_version;
+    $a->input_fingerprint = MonRun::digest($facts); $a->result_fingerprint = MonRun::digest(MonRun::business($full)); $a->results = $slim;
+    $a->independent_results = [];
+    foreach ($independent as $sid => $r) $a->independent_results[] = (object)['symbol_id' => $sid, 'rank' => $r->rank, 'action' => $r->action, 'readiness' => $r->readiness, 'result_ref' => 'independent_results:' . $sid];
+    // Pending references are durable facts, not a claim that any background job has started.
+    if (!(mon_get($payload, 'mon_run_metadata_archive') instanceof stdClass)) $payload->mon_run_metadata_archive = new stdClass();
+    $payload->mon_run_metadata_archive->{MonRun::utc($data->analysis->as_of)} = MonRun::pick($data->analysis, ['display', 'limitations', 'maintenance']);
+    $payload->mon_run_metadata_archive->{MonRun::utc($data->analysis->as_of)}->input_snapshot = MonRun::pick($data->analysis->input_snapshot, ['cache_reuse', 'mon_input_state', 'trading_status_check']);
+    $a->input_snapshot->mon_input_state = (object)['run_contract' => MonRun::CONTRACT, 'run_mode' => 'evaluate', 'pending' => $patch->pending, 'preparation_running' => false];
+    $a->input_snapshot->trading_status_check = $facts->trading_status_check;
+    $a->input_snapshot->cache_reuse = (object)['run_contract' => MonRun::CONTRACT, 'run_mode' => 'evaluate', 'previous_run_id' => $data->analysis->run_id, 'used_at' => $fixed, 'reused_candidate_count' => count($a->candidate_audit), 'refreshed_candidate_count' => 0, 'changed_symbol_count' => count($changeIds), 'model_input_bytes' => null, 'tool_round_trips' => null, 'elapsed_seconds' => null, 'stage_seconds' => null, 'timing_basis' => 'caller_end_to_end_timing_not_measured_by_stateless_handler'];
+    $a->input_snapshot->compressed_fields = array_keys(get_object_vars($payload)); sort($a->input_snapshot->compressed_fields, SORT_STRING);
+    $a->input_snapshot->lossless_payload = MonRun::pack($payload, $data->analysis->input_snapshot->lossless_payload->encoding);
+    foreach ($a->coverage as $r) { $r->ready_count = $readyCount[$r->country] ?? 0; $r->price_verified_count = 0; foreach ($full as $row) if ($row->country === $r->country && $row->price_checks->action_price_valid) $r->price_verified_count++; }
+    $a->status = 'partial'; $a->display = (object)['analysis_as_of' => $fixed, 'rendered_at' => $fixed, 'analysis_recomputed' => true, 'selection_recomputed' => false];
+    $a->limitations_as_of = mon_get($data->analysis, 'limitations_as_of', $data->analysis->as_of);
+    $a->changes[] = (object)['at' => $fixed, 'kind' => 'mon_run_patch', 'changed_symbol_ids' => array_keys($changeIds), 'reason' => implode('; ', $patch->short_reasons), 'watchlist_version_before' => $data->watchlist->watchlist_version, 'watchlist_version_after' => $data->watchlist->watchlist_version];
+    MonRun::validate($out); MonRun::verifyFacts($out, $payload);
+    if (!MonRun::storage($out, false)->fits) {
+        // Only compact on an actual capacity failure; retain every full evidence record and original archive.
+        MonRun::compactEvidence($out, $payload);
+        $out->analysis->input_snapshot->lossless_payload = MonRun::pack($payload, $data->analysis->input_snapshot->lossless_payload->encoding);
+        MonRun::evidence($out, $payload); MonRun::verifyFacts($out, $payload);
+    }
+    $storage = MonRun::storage($out, true);
+    if (MonRun::json($out->collection) !== MonRun::json($data->collection) || MonRun::json($out->watchlist) !== MonRun::json($data->watchlist)) throw new MonFault('MON_OWNERSHIP_INVALID');
+    $dataText = MonRun::json($out); $resultText = MonRun::render($out, $fixed, $patch->short_reasons);
+    return ['status' => 'changed', 'write_required' => true, 'files' => [['path' => 'mon_data.json', 'content' => $dataText, 'blob_sha' => MonRun::gitSha($dataText)], ['path' => 'mon_result.md', 'content' => $resultText, 'blob_sha' => MonRun::gitSha($resultText)]], 'summary' => $resultText,
+        'validation' => ['schema_version' => 3, 'criteria_version' => 'MON-P2.0', 'base_source_blob_sha' => $c->source_blob_sha, 'analysis_as_of' => $fixed, 'payload_hash_verified' => true, 'selection_reused' => true, 'selection_fingerprint' => $a->selection_fingerprint, 'input_fingerprint' => $a->input_fingerprint, 'result_fingerprint' => $a->result_fingerprint, 'collection_preserved' => true, 'watchlist_preserved' => true, 'changed_symbols' => count($changeIds), 'storage' => $storage]];
+}
+
+function mon_run_source($request, string $field, string $sha): stdClass {
+    $raw = mon_get($request, $field);
+    if (!is_string($raw) || strlen($raw) > MonRun::MAX_SOURCE || !preg_match('/^[a-f0-9]{40}$/', $sha)) throw new MonFault('MON_SOURCE_INVALID');
+    if (!hash_equals($sha, MonRun::gitSha($raw))) throw new MonFault('MON_SOURCE_SHA_MISMATCH');
+    try { $d = mon_decode($raw); } catch (Throwable $e) { throw new MonFault('MON_SOURCE_JSON_INVALID'); }
+    MonRun::validate($d); return $d;
+}
+function mon_run_web(string $api): int {
+    header('Content-Type: application/json; charset=utf-8'); header('Cache-Control: no-store'); $start = microtime(true);
+    try {
+        if (!in_array($api, ['mon_view', 'mon_patch'], true)) throw new MonFault('MON_API_UNKNOWN');
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') throw new MonFault('MON_METHOD_INVALID');
+        if (strtolower(trim(explode(';', $_SERVER['CONTENT_TYPE'] ?? '')[0])) !== 'application/json') throw new MonFault('MON_CONTENT_TYPE_INVALID');
+        if ((int)($_SERVER['CONTENT_LENGTH'] ?? 0) > MonRun::MAX_BODY) throw new MonFault('MON_BODY_TOO_LARGE');
+        $raw = file_get_contents('php://input', false, null, 0, MonRun::MAX_BODY + 1);
+        if (!is_string($raw) || strlen($raw) > MonRun::MAX_BODY) throw new MonFault('MON_BODY_TOO_LARGE');
+        try { $request = mon_decode($raw); } catch (Throwable $e) { throw new MonFault('MON_REQUEST_JSON_INVALID'); }
+        if (!($request instanceof stdClass)) throw new MonFault('MON_REQUEST_INVALID');
+        $context = $api === 'mon_view' ? mon_get($request, 'context') : mon_get(mon_get($request, 'decision_patch'), 'view_context');
+        $c = MonRun::context($context); if (MonRun::seconds($c->rendered_at) > microtime(true) + 5) throw new MonFault('MON_TIME_FUTURE');
+        $data = mon_run_source($request, 'source_json', $c->source_blob_sha);
+        if ($api === 'mon_view') $result = mon_project_for_mon($data, $context);
+        else {
+            $patch = mon_get($request, 'decision_patch');
+            if (MonRun::seconds(mon_get($patch, 'fixed_as_of')) > microtime(true) + 5) throw new MonFault('MON_TIME_FUTURE');
+            $result = mon_apply_mon_patch($data, $patch);
+            if (property_exists($request, 'latest_source_json')) {
+                $latest = mon_run_source($request, 'latest_source_json', (string)mon_get($request, 'latest_source_blob_sha', ''));
+                if ($result['write_required']) {
+                    $candidate = mon_decode($result['files'][0]['content']); $merged = MonRun::rebase($data, $candidate, $latest); $text = MonRun::json($merged);
+                    $result['files'][0]['content'] = $text; $result['files'][0]['blob_sha'] = MonRun::gitSha($text);
+                    $result['validation']['storage'] = MonRun::storage($merged, true); $result['validation']['rebase_source_blob_sha'] = $request->latest_source_blob_sha;
+                } else MonRun::rebase($data, $data, $latest);
+            }
+        }
+        if ($api === 'mon_view' && mon_get($request, 'all_pages', true) === true) {
+            $result['additional_views'] = [];
+            $cursor = $result['view']['page']['next_cursor'];
+            while ($cursor !== null) {
+                $next = clone $context; $next->cursor = $cursor; $next->state_token = $result['state_token']; $part = mon_project_for_mon($data, $next);
+                $result['additional_views'][] = ['model_input_bytes' => $part['model_input_bytes'], 'view' => $part['view']];
+                $cursor = $part['view']['page']['next_cursor'];
+            }
+        }
+        echo mon_json(['ok' => true, 'api' => $api, 'processor_version' => MON_VERSION, 'handler_seconds' => microtime(true) - $start, 'result' => $result], false); return 0;
+    } catch (MonFault $e) {
+        $code = $e->faultCode;
+        if ($code === 'MON_METHOD_INVALID') { http_response_code(405); header('Allow: POST'); }
+        elseif ($code === 'MON_API_UNKNOWN') http_response_code(404);
+        elseif ($code === 'MON_CONTENT_TYPE_INVALID') http_response_code(415);
+        elseif (in_array($code, ['MON_BODY_TOO_LARGE', 'MON_STORAGE_LIMIT', 'MON_PAYLOAD_TOO_LARGE'], true)) http_response_code(413);
+        elseif (in_array($code, ['MON_ANALYSIS_SOURCE_CONFLICT', 'MON_STATE_TOKEN_INVALID', 'MON_SOURCE_SHA_MISMATCH'], true)) http_response_code(409);
+        elseif (in_array($code, ['MON_XZ_UNAVAILABLE', 'MON_CODEC_UNAVAILABLE', 'MON_CODEC_TIMEOUT', 'MON_CODEC_TEMP_FAILED'], true)) http_response_code(503);
+        else http_response_code(400);
+        echo mon_json(['ok' => false, 'api' => $api, 'processor_version' => MON_VERSION, 'error_code' => $code, 'write_required' => false, 'remote_written' => false, 'handler_seconds' => microtime(true) - $start], false); return 1;
+    } catch (Throwable $e) {
+        http_response_code(500); echo mon_json(['ok' => false, 'api' => $api, 'processor_version' => MON_VERSION, 'error_code' => 'MON_HANDLER_INTERNAL_ERROR', 'write_required' => false, 'remote_written' => false], false); return 1;
+    }
+}
+
 function mon_web(): int {
+    if (isset($_GET['api'])) return mon_run_web((string)$_GET['api']);
     header('Cache-Control: no-store');
     $json=($_GET['view']??'')==='status' || strpos($_SERVER['HTTP_ACCEPT']??'','application/json')!==false;
     $notice='';$ok=true;$data=null;$path='';

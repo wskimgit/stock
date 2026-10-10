@@ -1,12 +1,12 @@
 # mon 지시문 — 한·미·일 종목 선정·매매시점 판단
 
-- 설계 버전: **3.8** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 개정일: **2026-10-10 KST**.
+- 설계 버전: **3.9** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 개정일: **2026-10-10 KST**.
 - 저장소: **wskimgit/stock** / 브랜치: **main** / 아래 파일을 저장소 루트에서 관리한다.
 - 구조: **mon 지시문 1개 + mon.php 1개**. 파일 역할은 **monitor.md=지시문·설계 / mon_data.json=공유 미러 데이터 / mon_result.md=사용자 결과**로 분리한다.
-- mon.php **1.2.4**: `/web/mon.php`와 같은 폴더의 **broker_config.local.php**에서 한국투자증권 `app_key`·`app_secret`을 직접 읽는다. GitHub 키는 기존 sis_private_sync_config.php를 계속 참조한다. 키를 다시 입력하거나 복사할 필요가 없으며 저장 대상은 wskimgit/stock이다.
+- mon.php **1.2.5**: `/web/mon.php`와 같은 폴더의 **broker_config.local.php**에서 한국투자증권 `app_key`·`app_secret`을 직접 읽는다. GitHub 키는 기존 sis_private_sync_config.php를 계속 참조한다. 키를 다시 입력하거나 복사할 필요가 없으며 저장 대상은 wskimgit/stock이다.
 - 지시문 실행 최적화: **짧은 입력 → 필요한 묶음 확인 → 변경분 판단 → 한 번 저장**으로 처리한다. 준비된 일반 판단 **60초**, 제한된 변경분 확인 **120초**, 별도 자료 준비 **300초** 목표다. 도구 왕복4회 목표·필요한 후속 포함6회 목표로 두며 실제 시간을 측정한다. 큰 수집을 일반 판단의 대기로 붙이지 않는다.
 - 이번 개정은 **MON 처리시간 규격 MON-RUN-1.0**이다. 모델에 전체 자료를 넣거나 실행 중 프로그램을 생성하지 않고, 짧은 입력에서 독립 판단과 변경 패치만 작성한다. 12절의 수치 계산 MON-BATCH-1.0과 기존 MON-P2.0·schema_version 3·독립 선정·동등 경쟁은 유지한다.
-- **설계와 배포 구분:** 현재 mon.php 1.2.4는 시세 수집 코드다. 12·13절의 완료 일봉·지수 수집, 계산·MON 입출력 연결 함수와 웹 인터페이스는 구현 예정이며 이번 문서 개정으로 배포·활성화되지 않는다. 일반 MON 실행은 준비된 자료를 사용하고 코드 배포·NAS 재시작·예약 등록·과거 시험 반복을 포함하지 않는다.
+- **구현과 배포 구분:** mon.php 1.2.5의 짧은 조회·재사용/가격/위험 패치·파일 반환·collection 충돌 병합은 구현하고 로컬 웹에서 검증했다. NAS 파일 교체·해당 웹 동작의 실가동·MON 전체 시간은 아직 확인하지 않았다. 완료 일봉·지수 수집과 mon_calc_batch는 여전히12절 설계다. 일반 MON 실행에 배포·재시작·예약 등록·과거 시험 반복을 포함하지 않는다.
 - 기존 코드와 Eagle·SIS·MS7 등은 참고 자료다. 기존의 서로 다른 조건을 필수 조건으로 자동 합산하지 않는다.
 - 공식 명칭: **mon 지시문** / 코드 파일명: **mon.php** / 지시문: **monitor.md** / 미러 데이터: **mon_data.json** / 사용자 결과: **mon_result.md**. 실행 문구: **“mon 지시문을 수행하라.”**
 
@@ -17,7 +17,7 @@
 | monitor.md | mon 실행 지시문·설계·데이터 규격 | 지시문 개정 시 갱신 |
 | mon_data.json | 관찰목록·보유 등록·설정·수집 시세·상세 분석·근거·이력 | mon 지시문과 mon.php가 자기 객체만 갱신 |
 | mon_result.md | 최신 판단 표·가격 조건·주요사항 최대 3개 | mon 지시문 |
-| mon.php | 현재: 웹 운영·상시 시세 수집. 설계: 자료 준비·일괄 계산·MON용 투영/패치 처리 함수 | 데몬은 collection만 갱신. MON 연결 함수는 투영·갱신 파일 반환만 수행 |
+| mon.php | 구현: 웹 운영·상시 시세 수집·MON용 투영/패치 처리. 설계: 완료봉/지수 준비·일괄 계산 | 데몬은 collection만 갱신. MON 연결 함수는 투영·갱신 파일 반환만 수행 |
 
 사용자는 mon_result.md를 확인한다. 상세 자료는 mon_data.json에 보존한다. 판단 기준 MON-P2.0은 유지하며 파일 분리로 인터페이스 버전을 3으로 올린다.
 
@@ -27,13 +27,13 @@
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v3.8 — 짧은 입력·변경분 판단
+# mon 지시문 v3.9 — 짧은 입력·변경분 판단
 명칭: mon 지시문. 기준 MON-P2.0 / schema_version 3 / 실행 규격 MON-RUN-1.0.
 저장소 wskimgit/stock, main, 루트 monitor.md·mon.php·mon_data.json·mon_result.md.
 목적: 한·미·일 종목의 자율적 발굴, 기존·신규 동등 경쟁, 독립 매입·매도 판단. PHP 자료는 보조이며 주문은 실행하지 않는다. 지정 범위가 있으면 우선한다.
 
 1. 읽기 — 한 번
-- 시작시각을 기록한다. 실행 지시문은 이 블록만 읽는다. 검증된 고정 입출력 처리기를 사용해 최신 mon_data.json·SHA를 읽고 MON용 짧은 입력으로 투영한다. 전체 JSON·압축 문자열·봉·후보를 모델 문맥에 출력하지 않는다.
+- 시작시각을 기록한다. 실행 지시문은 이 블록만 읽는다. 검증된1.2.5 고정 입출력 처리기로 최신 mon_data.json·SHA를 읽고 짧은 입력과 중요 사건/보유의 모든 후속 뷰를 함께 받는다. 웹 배포가 확인되지 않았으면 고정 함수의 가용 코드 실행 경로를 사용하거나 준비 필요로 표시한다. 전체 JSON·압축 문자열·봉·후보를 모델 문맥에 출력하지 않는다.
 - 입력은 국가별 완료일·전체 후보 경쟁의 해시와 coverage·상위 매입 검토·보유 변화·중요 사건·가격 계획·현재 가격 상태·미확인 범위다. 계산·자료 준비는 별도 경로다. 새 입력과 고정 처리기가 준비되지 않았으면 검증된 이전 사실을 투영하고 이번 부족 범위를 표시한다. 미배포 기능을 호출하거나 계산 코드를 즉석 재작성하지 않는다.
 
 2. 확인 — 필요한 변경만 묶음 조회
@@ -44,7 +44,7 @@
 3. 판단 — 한 번
 - 고정 MON-P2.0 수치 순위 RS20_pp↓→R20↓→ADV20↓→symbol_id↑와 확인된 기업 FAIL을 적용한다. pass·near는 동등 경쟁, 필수 결측은 unverified, 국가별 관찰 최대10개·비보유 매입 검토 최대3개, 보유분은 별도 유지한다. 신규성·이전 추천·ready에 가산점이나 우선권을 주지 않는다.
 - 검증된 가격 계획을 재사용한다. 가격 나이≤300초·확인된 지연≤300초·미래 오차≤5초·동일 종목/통화/거래소/현지 거래일·정규장·거래 가능/기업 위험 확인을 충족하고 구간 안에 있을 때만 ready다. 부족하면 추천 유지·conditional/needs_data, 만료 관측은 현재 재확인이다. 보유 매도는 기존 등록 손절·추적선, MA20와 직전10일저점 동시 붕괴, 확인된 중대 기업 훼손 규칙을 따른다.
-- as_of와 사용 사실을 고정해 decision_patch만 작성한다. unchanged 선정·계획·근거는 다시 서술·계산하지 않는다. 설명은 판단 변화 이유 중심으로 짧게 쓴다. 확인이 부족한 새 기준일에는 이전 순위를 최신 경쟁 결과로 표시하지 않는다.
+- as_of와 사용 사실을 고정해13.7의 decision_patch만 작성한다. 신규 후보·보유 등록·확인된 FAIL/매도 전환·계획/순위 변경은 자료 준비 경로이며 좁은 가격/위험 패치에 억지로 넣지 않는다. unchanged 선정·계획·근거는 다시 서술·계산하지 않는다. 설명은 판단 변화 이유 중심으로 짧게 쓴다. 확인이 부족한 새 기준일에는 이전 순위를 최신 경쟁 결과로 표시하지 않는다.
 
 4. 저장·보고 — 한 번
 - 고정 저장 처리기가 변경 패치를 병합·정규화·해시·필요한 압축·요약 렌더링한다. 전체 JSON·Base64를 모델이 재작성하지 않는다. MON은 watchlist·analysis만 갱신하며 collection을 보존하고 mon_data.json·mon_result.md를 한 커밋으로 저장한다. 실제 변화가 없는 과거 결과의 재사용 표시는 재커밋하지 않으며 과거 as_of를 유지한다.
@@ -783,7 +783,7 @@ error 폼은 **code, stage, symbol_id 또는 benchmark_id, source, occurred_at, 
 
 ## 13. MON 처리시간 중심 재설계 — MON-RUN-1.0
 
-**상태: 실행 지시문 개정·연결 함수 구현 예정.** 이 절이 일반 MON 실행 경로와 시간 예산의 최신 규격이다. 12절의 MON-BATCH-1.0은 수치 계산 규격으로 유지한다. 이번 개정은 mon.php 배포·자동 예약 생성·현재 종목 재분석을 수행하지 않는다.
+**상태: mon.php 1.2.5의 입출력 핵심 경로 구현·로컬 웹 검증 완료, NAS 교체와 실제 MON 총시간은 미확인.** 이 절이 일반 실행 경로와 시간 예산의 최신 규격이다. 12절의 MON-BATCH-1.0은 수치 계산의 미구현 설계로 유지한다. 이번 코드 개정은 자동 예약 생성·현재 종목 재분석·주문을 수행하지 않는다.
 
 ### 13.1 단축할 대상
 
@@ -839,12 +839,12 @@ error 폼은 **code, stage, symbol_id 또는 benchmark_id, source, occurred_at, 
 
 ### 13.4 고정 입출력 함수와 decision_patch
 
-반복 실행 때 새 프로그램을 만드는 문제를 제거하기 위해, 연결 함수는 한 번 구현·검증한 뒤 버전을 고정한다. 파일은 기존 mon.php 하나를 사용한다. 다음 인터페이스는 **추가 설계이며 mon.php 1.2.4에는 없다.**
+반복 실행 때 새 프로그램을 만드는 문제를 제거하기 위해, 연결 함수는 한 번 구현·검증한 뒤 버전을 고정한다. 파일은 기존 mon.php 하나를 사용한다. 다음 조회·패치 인터페이스는 **mon.php 1.2.5에 구현했다.** 숫자 일괄 계산과 자료 준비까지 구현된 것으로 해석하지 않는다. 실제 요청 폼·지원 범위는13.7을 따른다.
 
 | 고정 함수·웹 계약 | 역할 | 작성 권한 |
 |---|---|---|
 | mon_project_for_mon(data, context), POST /mon.php?api=mon_view | 전체 후보·현재 자료를 확인하여 짧은 입력과 불투명 state_token 반환 | 투영만 수행. analysis·watchlist·원격 파일 쓰기 없음 |
-| mon_calc_batch(normalized_input) | 준비 경로에서 변경된 수치 계산, 전체 후보 정렬 | 기존12절 계약 유지 |
+| mon_calc_batch(normalized_input), 미구현 | 준비 경로에서 변경된 수치 계산, 전체 후보 정렬 | 기존12절 설계 유지 |
 | mon_apply_mon_patch(data, decision_patch), POST /mon.php?api=mon_patch | 패치 검증·기존 사실 보존·정규화·해시·필요한 압축·요약 렌더링 | 업데이트 후보 JSON·요약과 검증 결과 반환. 이 웹 동작이 원격 분석을 직접 쓰지 않음 |
 | MON의 고정 GitHub 저장 절차 | 반환 파일을 최신 SHA와 자기 영역 규칙으로 한 커밋 게시 | watchlist·analysis와 mon_result.md. collection 보존 |
 
@@ -854,7 +854,7 @@ decision_patch의 최소 폼은 run_mode·base_source_blob_sha·base_analysis_ru
 
 MON은 모델 출력으로 수십만 바이트의 전체 JSON·압축 문자열을 쓰지 않는다. 도구 내부에서 원본과 패치를 병합하고 전체 반환 파일은 코드 변수에 보관한 채 GitHub 도구로 전달한다. 모델에 돌려주는 것은 검증 상태·변경 수·사용한 기준시각·최종 요약·저장 응답뿐이다. PHP 데몬은 계속 collection만 소유하며 MON의 analysis를 임의 생성하지 않는다.
 
-프로젝션 또는 저장 함수가 구현되지 않은 상태에서는 가용 코드 도구의 저장된 동일 템플릿으로 기존 평문 결과를 한 번 투영할 수 있다. 새 범용 처리기·계산 프로그램을 일반 실행에서 즉석 작성하지 않는다. 수식·압축·해시 처리가 필요하지만 검증된 처리기가 없으면 그 갱신을 partial·처리기 준비 필요로 표시하고 이전 정상 데이터를 보존한다. 미배포 웹 동작을 반복 시험하지 않는다.
+NAS 웹 교체가 미확인되거나 실행 환경에서 고정 함수를 호출할 수 없으면 가용 코드 도구의 저장된 동일 템플릿으로 기존 평문 결과를 한 번 투영할 수 있다. 새 범용 처리기·계산 프로그램을 일반 실행에서 즉석 작성하지 않는다. 수식·압축·해시 처리가 필요하지만 검증된 처리기가 없으면 그 갱신을 partial·처리기 준비 필요로 표시하고 이전 정상 데이터를 보존한다. 미배포 웹 동작을 반복 시험하지 않는다.
 
 이 인터페이스는 입력·출력 데이터 규격이며 새로운 도구 연결이 이미 등록됐다는 뜻이 아니다. 구현·배포 뒤 실제 가용성이 확인되어야 정상 경로로 사용할 수 있다. 첫 전환에서 기존 XZ payload·참조를 해제해야 하면 준비 경로에서 한 번 검증하며, 서버에 없는 압축 기능을 설치된 것으로 가정하지 않는다.
 
@@ -897,11 +897,101 @@ analysis.input_snapshot.cache_reuse에 run_mode·실제 재사용/갱신 후보 
 
 구현 확인은 변경된 경로에 한정한다. 전체 후보를 코드가 처리하고 모델은 짧은 입력만 받는지, 같은 독립 사실의 선정·계획을 재사용하는지, 신규 후보/보유/중요 사건 변경이 누락되지 않는지, 준비 불가가 현재 완료로 표시되지 않는지, 원자 저장과 실제 시간 기록이 맞는지 확인한다. 이미 검증된 정상 수식·과거 PASS를 일반 실행에서 다시 시험하지 않는다.
 
+
+### 13.7 구현된 요청 폼·지원 범위 — mon.php 1.2.5
+
+추가 운영 파일·비밀번호·설정 폴더는 없다. `/web/mon.php` 하나를 교체하고 기존 웹 시작/중지 화면을 사용한다. 아래 두 동작은 JSON POST이며 자격증명 파일을 읽거나 수집 데몬을 시작하거나 GitHub에 쓰지 않는다. MON 코드 도구가 원본 파일을 변수로 유지한 채 호출한다. 사용자가 CLI를 실행할 필요는 없다.
+
+**짧은 조회**: `POST /mon.php?api=mon_view`, `Content-Type: application/json`.
+
+```json
+{
+  "source_json": "GitHub에서 받은 mon_data.json의 원문 전체(코드 변수에서 전달)",
+  "context": {
+    "source_blob_sha": "원문과 일치하는 40자리 Git blob SHA",
+    "rendered_at": "2026-10-10T00:42:00.000000Z",
+    "countries": ["KR", "US", "JP"],
+    "important_ids": []
+  },
+  "all_pages": true
+}
+```
+
+- 원문 바이트의 Git blob SHA를 대조하고 schema_version3·MON-P2.0을 확인한다. `data`를 모델이 재직렬화한 값으로 원문을 대체하지 않는다. `rendered_at`은 호출자가 고정한 표시시각이며 예시 시각을 재사용하지 않는다.
+- 응답은 `ok, processor_version, handler_seconds, result`다. `result`에는 `state_token, model_input_bytes, view, additional_views`가 있다. 기본적으로 모든 후속 뷰를 한 HTTP 응답에 묶으므로 각 페이지를 별도 모델 왕복으로 읽지 않는다. 전체 응답을 코드 변수에 보존하고 모델에는 이 짧은 뷰들만 출력한다.
+- 첫 뷰의 공통 필드와 모든 후속 카드가 한 입력이다. 각 뷰는12288바이트 이내다. 후속 뷰의 `shared_fields_ref=first_page`는 첫 뷰의 기간·근거·`header.blocker_keys`를 참조한다. 카드의 `current.blocker_ids`는 그 배열의0부터 시작하는 인덱스다. 근거·위험 상세는 `details_ref`로 원본에서 묶음 복원하고 카드에 같은 원문을 복제하지 않는다.
+- `all_pages=false`인 코드 호출만 `context.cursor`와 같은 `state_token`으로 후속 페이지를 요청한다. 표시시각·범위·원본을 바꾸면 이전 토큰을 쓰지 않는다. 단일 중요한 항목이 한 페이지에 들어가지 않으면 `MON_VIEW_ITEM_TOO_LARGE`이며 해당 항목을 삭제하지 않는다.
+- 후보221개 같은 전체 감사 배열을 집계한다. 현재 비교 수와 이전 비교 수를 구분하고, 검증된 달력의 새 일별 최종 마감이 지났으면 이전 기간 순위를 최신으로 표시하지 않는다. 일본 오전 마감만으로 새 일봉 완료를 선언하지 않는다.
+- 비보유 매입 검토 최대3개/국가, 매도 검토, 등록 보유, 미해결·확인된 기업 사건을 포함한다. 평문에 결과 행이 없는 등록 보유·사건도 준비 필요 카드로 남는다. PHP 보조 시세는 목록 버전·종목/원천 코드·통화·거래소·시각이 맞고 사용 가능한 경우만 `php_auxiliary`로 붙인다. 그 값이 독립 선정·현재 위험 확인을 대체하지 않는다.
+- 이 조회는 압축 payload를 해제하지 않는다. `payload_hash_verified=false`가 정상이며 원문 SHA 대조와 전체 수치 재검증을 구분한다. 과거 정상 결과 표시만으로 새로운 해시 검증·신규 탐색 완료·백그라운드 실행을 주장하지 않는다.
+
+**변경 패치·파일 반환**: `POST /mon.php?api=mon_patch`.
+
+```json
+{
+  "source_json": "조회 때 코드 변수에 보관한 같은 원문",
+  "decision_patch": {
+    "run_mode": "reuse",
+    "base_source_blob_sha": "조회 원문의 Git blob SHA",
+    "base_analysis_run_id": "조회 원문의 analysis.run_id",
+    "fixed_as_of": "조회 원문의 analysis.as_of",
+    "view_context": {
+      "source_blob_sha": "조회 원문의 Git blob SHA",
+      "rendered_at": "2026-10-10T00:42:00.000000Z",
+      "countries": ["KR", "US", "JP"],
+      "important_ids": []
+    },
+    "state_token": "조회 응답의 state_token",
+    "changes": [],
+    "new_evidence": [],
+    "pending": [],
+    "short_reasons": []
+  }
+}
+```
+
+`view_context`는 조회 당시 객체 그대로다. 표시시각·국가·중요 종목 범위를 바꾸지 않는다. 날짜·SHA·토큰과 원문은 실제 값을 코드 변수에서 채운다.
+
+| 모드/필드 | 실제 처리 |
+|---|---|
+| reuse | fixed_as_of는 원래 분석시각. changes/new_evidence/pending/short_reasons가 모두 비어야 한다. `no_change, write_required=false, files=[]`와 재사용 요약을 반환하며 기존 세 해시·압축·분석 시각을 바꾸지 않는다 |
+| evaluate | fixed_as_of는 원래 분석시각보다 늦고 최초 rendered_at 이상. 현재 가격 상태와 기록한 위험을 고정 시점에 평가한다. 새 input_fingerprint와 result_fingerprint를 생성하되 선정 사실·계획은 재사용한다. 실제 변화가 없어도 새 평가 시각을 과거 결과 재사용으로 가장하지 않는다 |
+| changes[] | symbol_id별로 한 객체. 지원 필드는 price_observation, risk_review, reason, next_check. 지정하지 않은 사실·봉·후보·근거를 보존한다. PHP는 MON이 선택한 기존 종목의 확인 상태를 검증하며 새 종목을 자율 선정하지 않는다 |
+| price_observation | symbol_id, currency, venue, price, quote_at, price_type, timestamp_basis, delay_seconds, session, market_date, source_kind=independent, evidence_ids. 원천·현지 거래일·정규장·시세 나이/지연을 확인한다. PHP 가격을 수집시각으로 독립 시세처럼 꾸미지 않는다 |
+| risk_review | status=verified/needs_check, scope, checked_at, applies_as_of=이번 fixed_as_of, evidence_ids, pending_items, trading_status=verified/needs_check. verified에는 실제 독립 근거와 확인 범위가 필요하다. 오래된 거래 확인이나 미해결 항목으로 ready를 만들지 않는다 |
+| new_evidence[] | id, source_url(https), source_kind=independent, checked_at, claim. 실제 확인 자료이며 동일 id의 다른 내용을 덮어쓰지 않는다. 필수 증거가 없는 가격/위험 갱신은 거절한다 |
+| pending / short_reasons | 미완료 범위와 짧은 판단 이유. 실제 작업 시작을 뜻하지 않는다. 이유는 최대3개. 이전 설명·위험 기록은 원래 시각으로 구분한다 |
+| 준비 경로에 넘기는 변경 | 신규 후보/보유 등록/호가·계획·순위/확인된 중대 FAIL·거래정지에 따른 선정·매도 전환. 좁은 패치로 자동 확정하지 않고 `MON_PATCH_PREPARATION_REQUIRED`를 반환한다. MON은 사건을 숨기지 않고 해당 준비·독립 판단을 별도 수행한다 |
+
+평가 모드는 기존 압축 payload를 처음 한 번 복원하고 raw SHA-256·selection/input/result 세 업무 해시를 검증한다. 동일 요청 안의 캐시는 실제 압축 내용과 메타데이터의 SHA로 식별한다. 이전 XZ를 gzip으로 임의 변환하지 않는다. 기존 XZ에는 사용 가능한 서버 xz 실행 파일·proc_open이 필요하며, 없으면 `MON_XZ_UNAVAILABLE`로 새 쓰기를 보류한다. 설치됐다고 가정하거나 사용자가 CLI로 직접 실행하도록 요구하지 않는다. 읽기·재사용은 XZ 없이 동작한다. gzip payload도 지원하되 저장 상한을 유지한다.
+
+보유·중요 사실을 지워 압축 공간을 만들지 않는다. 변경 전에 원래 관측·위험/근거와 운영 메타데이터를 payload에 보존하고, 전체 파일524288바이트 및 최소65536바이트의 collection 공간을 검사한다. 실제 용량 실패 때만 analysis.evidence의 모든 원문을 payload.mon_evidence_index에 손실 없이 보존하고 평문에는 id·evidence_ref=mon_evidence_index:ID를 남긴다. 기존 evidence_archive와 기존 봉·후보·보유는 바꾸지 않으며 다음 패치도 이 참조를 복원한다. 다시 검사해도 여유가 부족하면 `MON_STORAGE_LIMIT`이고 원래 정상 파일을 보존한다. 일반 조회나 여유 있는 패치에서는 이 이전을 수행하지 않는다.
+
+평가 응답은 `changed, write_required=true, files[2], summary, validation`이다. `files`의 두 원소는 `path, content, blob_sha`이며 정확히 mon_data.json·mon_result.md다. 전체 content는 코드 변수에서 GitHub 도구로 전달하고 모델 문맥에 출력하지 않는다. 요약은 기준/상태 한 줄·표 하나·주요사항 최대3개다. 과거 미확인 기록은 원래 시각을 표시해 새로운 확인처럼 보이지 않게 한다. 독립 근거의 사실성·판단은 MON이 책임지고, PHP의 형태/시간/해시 검증 통과를 실제 기업 조사 완료로 해석하지 않는다.
+
+**한 번의 GitHub 저장과 충돌 병합**:
+
+1. 읽기 때 확보한 branch head/tree와 source_blob_sha를 유지한다. write_required=false면 공유 파일을 재커밋하지 않고 요약만 보고한다.
+2. write_required=true면 반환된 두 content를 `create_tree`의 두 파일 내용으로 넘기고, `create_commit` 후 `update_ref(expected_sha=사용한 head, force=false)`로 main을 한 번 갱신한다. 성공 반환 tree/commit/ref SHA가 준비한 값과 일치하면 종료한다.
+3. lease가 충돌하면 최신 head·mon_data 원문을 읽는다. `mon_patch`에 동일 원문·동일 패치와 `latest_source_json, latest_source_blob_sha`를 함께 전달한다. collection만 바뀌었으면 최신 collection을 보존해 병합하고 고정 as_of·이미 사용한 판단 사실·업무 해시를 유지한다. 다른 MON이 watchlist/analysis 또는 다른 루트 필드를 바꿨으면 `MON_ANALYSIS_SOURCE_CONFLICT`로 덮어쓰지 않는다. 최대2회이며 독립 조사·모델 판단을 다시 하지 않는다.
+4. HTTP 동작 자체는 GitHub에 쓰지 않는다. 원격 저장은 기존 MON GitHub 도구의 응답으로만 확정한다. 파일이 반환됐다는 사실만으로 반영 완료라고 보고하지 않는다.
+
+잘못된 폼/증거/해시/시각은400, 원문·토큰·다른 MON 충돌은409, 본문/저장 크기 초과는413, 잘못된 Content-Type은415, GET은405, 사용할 수 없는 압축기는503이다. 실패 응답은 `ok=false, error_code, write_required=false, remote_written=false`다. stack trace·원문·키를 출력하지 않는다.
+
+**이번 구현 검증**:
+
+- PHP8.3에서 변경 경로의72개 함수/자료 검사와21개 실제 localhost HTTP 검사 통과. 기존 수집부·연결 설정·브라우저 시작/중지 코드는 버전·API 분기 외에 원문 그대로 유지했다. 기존의 정상 연결 검사·NAS 데몬 조회는 반복하지 않았다.
+- 실제 기존 저장자료474441바이트, 후보221·매입 검토9·기업 사건2를 모두 유지했다. 기본/후속 뷰를 묶어 약14KB로 전달해 원문 대비 약97%를 줄였다. 후속 뷰를 따로 모델 왕복으로 읽지 않았다.
+- 로컬 웹 읽기0.026초·재사용0.015초·평가 파일 반환0.274초를 측정했다. 이는 지시문 읽기·외부 조사·모델 판단·GitHub 저장을 포함한60/120초 달성 증거가 아니다. 전체 시간은 NAS 교체와 실제 다음 MON 실행에서 측정한다. handler_seconds는 이 HTTP 처리기의 구간만, JSON에 아직 미측정한 전체 elapsed_seconds는 null이다.
+- 새 고정 as_of의 파일·모의 정규장 가격/위험 패치를 검증했고, 기존 Python 정규화와 세 해시가 일치했다. 미래/오래된/과도 지연 가격, 위험 확인 결측, 잘못된 식별·증거·해시·토큰, 새 완료일, 보유 누락, collection 병합·타 MON 충돌·용량 초과,9종목 일괄 패치와 조건부 근거 압축 및 다음 패치에서의 복원까지 확인했다. 시험용 변경 결과는 실제 mon_data.json·mon_result.md에 게시하지 않는다.
+- 로컬 구현과 검증 완료는 NAS 배포·현재 API 동작·실제 추천 갱신·실제 예약 등록의 증거가 아니다. mon_calc_batch와 완료 일봉·지수 준비를 이번 버전의 지원 기능으로 표시하지 않는다.
+
 ## 공식 참고
 
 - [GitHub Contents GET의 공개 조회와 PUT의 쓰기 권한](https://docs.github.com/en/rest/repos/contents)
 - [GitHub 익명 요청 한도와 재시도](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
 - [PHP 환경변수 읽기](https://www.php.net/manual/en/function.getenv.php)
+- [PHP7.4부터 지원하는 proc_open 배열 인자와 파일 스트림](https://www.php.net/manual/en/function.proc-open.php)
 
 - [KRX 정규장·시간외·휴장 규칙](https://global.krx.co.kr/contents/GLB/06/0602/0602010201/GLB0602010201T1.jsp)
 - [JPX 정규장·점심 휴장](https://www.jpx.co.jp/english/equities/trading/domestic/01.html)
