@@ -1,1008 +1,278 @@
-# mon 지시문 — 한·미·일 종목 선정·매매시점 판단
+# mon 지시문 — 한·미·일 스윙 종목 선정·매입·매도 판단
 
-- 설계 버전: **3.9** / 판단 기준 버전: **MON-P2.0** / 인터페이스 `schema_version`: **3** / 개정일: **2026-10-10 KST**.
-- 저장소: **wskimgit/stock** / 브랜치: **main** / 아래 파일을 저장소 루트에서 관리한다.
-- 구조: **mon 지시문 1개 + mon.php 1개**. 파일 역할은 **monitor.md=지시문·설계 / mon_data.json=공유 미러 데이터 / mon_result.md=사용자 결과**로 분리한다.
-- mon.php **1.2.5**: `/web/mon.php`와 같은 폴더의 **broker_config.local.php**에서 한국투자증권 `app_key`·`app_secret`을 직접 읽는다. GitHub 키는 기존 sis_private_sync_config.php를 계속 참조한다. 키를 다시 입력하거나 복사할 필요가 없으며 저장 대상은 wskimgit/stock이다.
-- 지시문 실행 최적화: **짧은 입력 → 필요한 묶음 확인 → 변경분 판단 → 한 번 저장**으로 처리한다. 준비된 일반 판단 **60초**, 제한된 변경분 확인 **120초**, 별도 자료 준비 **300초** 목표다. 도구 왕복4회 목표·필요한 후속 포함6회 목표로 두며 실제 시간을 측정한다. 큰 수집을 일반 판단의 대기로 붙이지 않는다.
-- 이번 개정은 **MON 처리시간 규격 MON-RUN-1.0**이다. 모델에 전체 자료를 넣거나 실행 중 프로그램을 생성하지 않고, 짧은 입력에서 독립 판단과 변경 패치만 작성한다. 12절의 수치 계산 MON-BATCH-1.0과 기존 MON-P2.0·schema_version 3·독립 선정·동등 경쟁은 유지한다.
-- **구현과 배포 구분:** mon.php 1.2.5의 짧은 조회·재사용/가격/위험 패치·파일 반환·collection 충돌 병합은 구현하고 로컬 웹에서 검증했다. NAS 파일 교체·해당 웹 동작의 실가동·MON 전체 시간은 아직 확인하지 않았다. 완료 일봉·지수 수집과 mon_calc_batch는 여전히12절 설계다. 일반 MON 실행에 배포·재시작·예약 등록·과거 시험 반복을 포함하지 않는다.
-- 기존 코드와 Eagle·SIS·MS7 등은 참고 자료다. 기존의 서로 다른 조건을 필수 조건으로 자동 합산하지 않는다.
-- 공식 명칭: **mon 지시문** / 코드 파일명: **mon.php** / 지시문: **monitor.md** / 미러 데이터: **mon_data.json** / 사용자 결과: **mon_result.md**. 실행 문구: **“mon 지시문을 수행하라.”**
+- 지시문 **v4.0**, 선정 기준 **MON-P3.0**, 수치 규격 **MON-SWING-1.0**, 저장 규격 **schema_version 3**.
+- 개정일: **2026-10-10 KST**. MACD는 사용자 정정에 따라 **12·26·19**를 적용한다.
+- 저장소 **wskimgit/stock**, 브랜치 **main**. GitHub 관리 문서는 저장소 루트에 둔다. 별도 Wiki 저장소나 `wiki/` 폴더를 만들지 않는다.
+- 파일명 유지: **mon.php**=PHP, **monitor.md**=지시문·설계, **mon_data.json**=공유 데이터, **mon_result.md**=사용자 결과.
+- 최상위 원칙: **ChatGPT가 자율 판단하고 자율적으로 종목을 선정한다. 투자형태는 swing이다. PHP 수치와 참고 순위는 보조자료다.**
+- 추천 자격: **시장보다 강함 AND (MA5 재돌파 OR MACD 골든 OR MACD 골든 전후)**. 기존 추천·신규 후보는 같은 자격으로 경쟁한다.
+- 구현: **mon.php 1.3.0**. 기존 웹 수집·중지·시작·설정 파일 참조를 유지하고 스윙 계산·전환·자율선정 저장 인터페이스를 추가한다. 주문은 실행하지 않는다.
+- 배포 구분: GitHub 코드와 지시문을 바꾸는 것과 NAS `/web/mon.php` 교체·실가동은 별개다. NAS 교체 확인 없이 새 데몬이 가동 중이라고 쓰지 않는다.
 
-## 파일별 역할
+## mon 실행 지시문
 
-| 루트 파일 | 내용 | 작성자 |
-|---|---|---|
-| monitor.md | mon 실행 지시문·설계·데이터 규격 | 지시문 개정 시 갱신 |
-| mon_data.json | 관찰목록·보유 등록·설정·수집 시세·상세 분석·근거·이력 | mon 지시문과 mon.php가 자기 객체만 갱신 |
-| mon_result.md | 최신 판단 표·가격 조건·주요사항 최대 3개 | mon 지시문 |
-| mon.php | 구현: 웹 운영·상시 시세 수집·MON용 투영/패치 처리. 설계: 완료봉/지수 준비·일괄 계산 | 데몬은 collection만 갱신. MON 연결 함수는 투영·갱신 파일 반환만 수행 |
-
-사용자는 mon_result.md를 확인한다. 상세 자료는 mon_data.json에 보존한다. 판단 기준 MON-P2.0은 유지하며 파일 분리로 인터페이스 버전을 3으로 올린다.
-
-## mon 지시문 — 실행용
-
-처음에는 이 파일의 첫 100행 안에 있는 `MON:INSTRUCTION` 블록만 읽어 실행한다. 아래 상세 설계·예시·과거 시험 기록은 필요한 항목만 검색하며, 문서 전체의 재검토는 일반 추천 실행에 포함하지 않는다.
+일반 실행은 아래 블록만 읽는다. 상세 규격은 새 오류나 기준 변경이 있을 때 필요한 항목만 조회한다.
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v3.9 — 짧은 입력·변경분 판단
-명칭: mon 지시문. 기준 MON-P2.0 / schema_version 3 / 실행 규격 MON-RUN-1.0.
-저장소 wskimgit/stock, main, 루트 monitor.md·mon.php·mon_data.json·mon_result.md.
-목적: 한·미·일 종목의 자율적 발굴, 기존·신규 동등 경쟁, 독립 매입·매도 판단. PHP 자료는 보조이며 주문은 실행하지 않는다. 지정 범위가 있으면 우선한다.
+# mon 지시문 v4.0 — 자율 스윙 선정
+기준 MON-P3.0 / MACD(12,26,19) / MON-SWING-1.0 / schema_version 3.
+stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한다.
+최상위: ChatGPT가 자율 판단·자율 종목 선정한다. 투자형태 swing. PHP는 수치·시세 보조이며 최종 추천·주문을 자동 결정하지 않는다.
 
-1. 읽기 — 한 번
-- 시작시각을 기록한다. 실행 지시문은 이 블록만 읽는다. 검증된1.2.5 고정 입출력 처리기로 최신 mon_data.json·SHA를 읽고 짧은 입력과 중요 사건/보유의 모든 후속 뷰를 함께 받는다. 웹 배포가 확인되지 않았으면 고정 함수의 가용 코드 실행 경로를 사용하거나 준비 필요로 표시한다. 전체 JSON·압축 문자열·봉·후보를 모델 문맥에 출력하지 않는다.
-- 입력은 국가별 완료일·전체 후보 경쟁의 해시와 coverage·상위 매입 검토·보유 변화·중요 사건·가격 계획·현재 가격 상태·미확인 범위다. 계산·자료 준비는 별도 경로다. 새 입력과 고정 처리기가 준비되지 않았으면 검증된 이전 사실을 투영하고 이번 부족 범위를 표시한다. 미배포 기능을 호출하거나 계산 코드를 즉석 재작성하지 않는다.
+1. 읽기·계산 — 한 번
+- 시작시각을 기록하고 이 블록과 최신 mon_data.json·Git blob SHA를 한 번 읽는다. 전체 JSON·Base64·일봉을 모델 문맥에 출력하지 않는다.
+- 1.3.0 고정 처리기 mon_swing_prepare를 한 번 호출해 전체 후보의 자격·참고 순위·부족 자료와 짧은 카드의 모든 후속 페이지를 받는다. 웹 미배포 시 검증된 같은 고정 함수의 가용 실행 경로를 사용한다. 새 계산 코드를 실행 중 작성하지 않는다.
+- 동일 입력의 완료봉·수치·원래 검증시각을 재사용한다. 새 봉·정정·분할·후보·보유·기업 사실은 별도 입력으로 기록한다. 확보되지 않은 자료를 확보했다고 표시하지 않는다.
 
-2. 확인 — 필요한 변경만 묶음 조회
-- 새 완료봉·후보·분할·정정·보유·중요 기업 사실을 확인한다. 전체 후보의 수치 경쟁은 고정 처리부에서 유지한다. 이전 추천만으로 경쟁시키지 않는다. 신규 탐색은 해당 시장 거래일별 국가당20개 목표를 유지하며 달성한 범위를 재탐색하지 않는다.
-- 최신 시장·업종 변화는 필요한 국가를 묶어 확인한다. 상세 독립 확인은 상위 매입 검토·보유 변화·중요 사건 대상과 미확인 사항에 집중한다. 직접 확인하지 않은 현재 위험·거래 가능 상태를 확인 완료로 바꾸지 않는다. 큰 신규 탐색·일봉 수집은 자료 준비 경로로 넘기고 일반 판단에서 끝날 때까지 기다리지 않는다.
-- 기존 조회·계산 사실은 원래 시각으로 재사용한다. 같은 원천·완료일의 기록된 실패는 새 근거 없이는 재호출하지 않는다. 필요한 조회는 묶음1회, 해결할 수 있는 중대한 충돌만 추가1회다. 다음 PHP 미러·데몬 상태를 반복 조회하지 않는다.
+2. 후보 자격 — 반드시 적용
+- 현재 목록＋최근20거래일 후보＋새 근거가 있는 과거 강한 후보＋신규 후보를 병합한다. 기존·신규·직전 추천에 가산점이나 자동 배제를 주지 않는다.
+- 시장보다 강함: 같은21완료 종가·같은 거래일·조정 방식으로 계산한 RS20_pp>0. 한국은 해당 KOSPI/KOSDAQ, 미국 S&P500, 일본 TOPIX와 비교한다.
+- MA5 재돌파: 직전10거래일 이상 연속으로 각 일자의 종가<각 일자의 SMA5였고 최신 완료 종가>SMA5이거나, 같은 조건의 완료봉 뒤 검증된 장중 시세가 당일 잠정 SMA5 위로 올라온 경우다. 장중 SMA5=(직전4완료 종가 합＋현재가)/5. equality는 재돌파가 아니다.
+- MACD: EMA12－EMA26, 시그널=MACD의 EMA19. 최신 완료봉에서 직전 MACD≤시그널, 현재 MACD>시그널이면 골든. 골든 후1~3거래일은 양의 히스토그램 유지 시 대상이다.
+- 골든 직전: 최근3개 유효 완료봉 히스토그램이 음수/0 영역에서 엄격하게 상승하고 최신 |히스토그램|/ATR14≤0.10인 근접 상태다. 미래 골든을 확정하거나 날짜를 예측하지 않는다. '골든 직전(근접)'으로 표시한다.
+- 추천은 시장 강도와 위 MA5/MACD 중 하나를 모두 만족한 종목에 한한다. 필수 결측은 미검증, 확인된 거래 불가·중대한 악재는 제외한다. MACD 자료가 부족해도 MA5 조건이 검증되면 OR 자격을 인정한다.
 
-3. 판단 — 한 번
-- 고정 MON-P2.0 수치 순위 RS20_pp↓→R20↓→ADV20↓→symbol_id↑와 확인된 기업 FAIL을 적용한다. pass·near는 동등 경쟁, 필수 결측은 unverified, 국가별 관찰 최대10개·비보유 매입 검토 최대3개, 보유분은 별도 유지한다. 신규성·이전 추천·ready에 가산점이나 우선권을 주지 않는다.
-- 검증된 가격 계획을 재사용한다. 가격 나이≤300초·확인된 지연≤300초·미래 오차≤5초·동일 종목/통화/거래소/현지 거래일·정규장·거래 가능/기업 위험 확인을 충족하고 구간 안에 있을 때만 ready다. 부족하면 추천 유지·conditional/needs_data, 만료 관측은 현재 재확인이다. 보유 매도는 기존 등록 손절·추적선, MA20와 직전10일저점 동시 붕괴, 확인된 중대 기업 훼손 규칙을 따른다.
-- as_of와 사용 사실을 고정해13.7의 decision_patch만 작성한다. 신규 후보·보유 등록·확인된 FAIL/매도 전환·계획/순위 변경은 자료 준비 경로이며 좁은 가격/위험 패치에 억지로 넣지 않는다. unchanged 선정·계획·근거는 다시 서술·계산하지 않는다. 설명은 판단 변화 이유 중심으로 짧게 쓴다. 확인이 부족한 새 기준일에는 이전 순위를 최신 경쟁 결과로 표시하지 않는다.
+3. ChatGPT 자율 판단 — 한 번
+- 참고 순위 RS20_pp↓→R20↓→ADV20↓→symbol_id↑는 자료 정렬일 뿐 자동 추천 명령이 아니다. ChatGPT가 신호·주도성·유동성·이격·추격 위험·기업 근거를 판단해 자격 집합에서 국가별 비보유 최대3개를 선택하고 실제 이유를 남긴다. 자격을 충족해도 추천할 의무는 없다. 관찰은 국가별 최대10개, 보유분은 별도다.
+- 독립 외부 확인은 필요한 후보·중요 사건·보유 변화만 묶음1회, 중대한 충돌 해결만 추가1회다. 국가당 신규20개/거래일 탐색 목표는 유지하고 달성한 범위를 반복 탐색하지 않는다.
+- 최신 지수 비교가 부족한 시장의 이전 순위를 새 추천으로 승계하지 않는다. 같은 원천·완료일의 기록된 실패는 새 근거나 명시적 재확인 요청 없이 반복하지 않는다.
+- 가격 계획은 기존 검증 지지·저항·ATR 규칙을 재사용한다. 신호 자격이 없으면 가격 계획만으로 추천하지 않는다. 현재 가격·신호 유지·거래·기업 위험이 부족하면 조건부/자료 필요다.
+- 보유 매도는 등록 손절·추적선, MA20와 직전10일 저점 동시 붕괴, 확인된 중대한 기업 훼손을 적용한다. 신규 진입 신호 부족만으로 보유를 자동 매도하지 않는다.
 
 4. 저장·보고 — 한 번
-- 고정 저장 처리기가 변경 패치를 병합·정규화·해시·필요한 압축·요약 렌더링한다. 전체 JSON·Base64를 모델이 재작성하지 않는다. MON은 watchlist·analysis만 갱신하며 collection을 보존하고 mon_data.json·mon_result.md를 한 커밋으로 저장한다. 실제 변화가 없는 과거 결과의 재사용 표시는 재커밋하지 않으며 과거 as_of를 유지한다.
-- 같은 고정 입력·기준은 같은 업무 결과다. 새 as_of·실제 사용 시세·검증된 사실은 새 입력 해시다. SHA 충돌만 최신 자기 영역 재병합을 최대2회 수행하고 이미 끝난 조회·판단을 반복하지 않는다. 규격·크기·해시 오류는 쓰기 보류, 일부 실패는 partial과 실제 사유다.
-- 출력은 기준시각·상태 한 줄, 결과 표 하나(국가·종목/판단/가격조건/핵심이유), 주요사항 최대3개다. 결과 링크·저장 여부·실측 총시간을 짧게 보고한다. 재사용 결과는 이전 검증 기준시각과 현재 표시 시각을 구분한다.
+- 자율 선정이 바뀌면 mon_swing_select에 작은 decision을 전달한다. 가격/위험만 바뀌면 mon_patch, 실제 변화 없는 재표시는 reuse를 사용한다. PHP가 정규화·해시·압축·요약을 고정 처리한다.
+- MON은 watchlist·analysis만 갱신하며 collection을 보존한다. mon_data.json·mon_result.md를 같은 커밋으로 저장한다. 바뀌지 않은 과거 결과를 새 시각의 판단으로 재커밋하지 않는다.
+- 결과는 기준시각·상태 한 줄, 표 하나, 주요사항 최대3개다. 종목별 MA5/골든/골든 직전·후 신호와 조건부 여부를 짧게 표시한다. 저장 여부·실측 총시간을 보고한다.
+- 새 기준 전환 시 이전 추천을 이력으로 보존하고 활성 추천에서 제거한다. 새 자격 검증과 ChatGPT 선정이 끝나기 전에는 '새 기준 선정 대기'를 표시한다.
 
-시간 계약: 준비된 일반 판단60초, 제한된 변경분 확인120초, 별도 자료 준비300초 목표. 일반 경로는 읽기→묶음 확인→판단→저장의4단계, 도구 왕복4회 목표·필요한 후속 포함6회 목표다. 종료20초 전부터 저장·보고한다. 강제 시간 보장이나 무조건 성공 조건은 아니다.
-금지: 일반 실행 중 계산 프로그램 생성, 문서·코드 전수 검토, 과거 PASS 재시험, 확보된 기간 전수 재조회, 순위·계획 재서술, 저장 성공 후 반복 확인, NAS 배포·재시작·예약 등록. 실제 변경·장애가 없으면 범위를 늘리지 않는다.
-정확한 수식·해시·오류 규격은 이 문서3·4·6·7·12·13절의 고정 처리부가 따른다. 기준이 바뀌거나 해당 처리부를 처음 준비할 때만 관련 절을 읽는다. 준비 미완료·예약 미등록은 그대로 보고하고 후속 자동 처리를 완료했다고 쓰지 않는다.
+시간 목표: 준비된 일반 판단60초, 제한 확인120초, 별도 자료 준비300초. 실행 중 큰 수집을 붙여 기다리지 않는다. 실제 시간을 숨기거나 강제 보장하지 않는다.
+금지: 일반 실행 중 계산 프로그램 생성·정상 영역 재수정·기존 PASS 재시험·이미 끝난 조회 반복·NAS 배포/재시작·예약 임의 등록·주문. 미완료는 실제 사유와 함께 결과로 보고한다.
 ```
 <!-- MON:INSTRUCTION:END -->
 
-## 1. 모듈별 입력·처리·출력
+## 1. 역할과 저장 위치
 
-| 모듈 | 입력 | 처리 | 출력·작성 권한 |
-|---|---|---|---|
-| mon 지시문 | 짧은 실행 블록·MON용 투영 입력·독립 근거 | 필요한 변경 확인 → 독립 판단 → 변경 패치 → 고정 저장 절차 | mon_data.json의 watchlist·analysis와 mon_result.md |
-| mon.php | mon_data.json의 watchlist. 설계 추가: batch_request와 전체 후보 식별자 참조 | 현재는 시세 수집. 구현 후 변경된 완료봉·지수 보충, 고정 함수 일괄 계산 | mon_data.json의 collection만. 계산용 웹 동작은 결과 응답만 반환 |
-| mon_data.json | 위 두 작성자의 기록 | 관찰목록·시세·상세 판단 교환 | schema_version 3의 JSON 객체 |
-| mon_result.md | 같은 analysis의 최신 결과 | 사용자에게 필요한 내용 표시 | 결과 표 하나·주요사항 최대 3개 |
-
-지시문은 독립적으로 선정·판단하고 PHP 시세로 가격·시간 조건을 보강한다. 신규 종목의 PHP 자료가 없으면 수집대기지만 독립 근거가 충분한 분석은 계속한다.
-
-## 2. 운영 기준 재조정
-
-최우선 원칙은 **같은 후보·자료·판단시점·기준 버전이면 같은 종목·순위·행동·가격 조건을 출력**하는 것이다. 독립 선정 결과를 우선하고 보조자료의 결측·지연으로 선정 목록을 조용히 바꾸지 않는다.
-새로운 후보·완료봉·검증된 기업 근거·시세 또는 판단시점이 들어오면 입력이 달라진 것이므로 결과를 갱신한다. 서로 다른 시장 상황에서도 같은 종목을 고정하거나 기존의 다른 지시문과 무조건 같은 결과가 나온다고 선언하지 않는다.
-
-| 항목 | 재조정된 결정 |
+| 담당·파일 | 역할 |
 |---|---|
-| 관찰·추천 수 | 국가별 관찰 최대 10개, 신규 매입 검토 최대 3개. 부족하면 확보한 수만 표시. 보유종목은 별도 계속 관찰 |
-| 선정·가격 확인 | 상위 후보의 BUY_REVIEW 계획과 ready/conditional을 분리한다. 가격 미확인·지연·위험 확인 부족은 조건부 상태이며 선정 탈락이 아니다 |
-| 후보 범위 | 현재 목록 + 최근 20거래일 후보 + 최신 근거가 있는 과거 강한 후보 + 신규 후보. 기존·신규 가산점 없음 |
-| 신규 탐색 | 거래일별 각국 20종목 탐색 목표. 당일 목표 달성 후 동일 범위의 반복 실행은 실패 후보·새 자료를 우선 갱신 |
-| 완료 일봉 | 60개 확보 목표. 20일 상대강도 비교에는 21개 필요. MA60·RS60은 확보될 때 참고하며 선정 필수 아님 |
-| 부분 자료 | 종가·벤치마크로 순위가 계산되면 OHLC·ATR·가격 일부 부족으로 종목을 탈락시키지 않음. 해당 가격 조건만 미확인 |
-| 시세 유효시간 | 보조 확인 900초, 가격 확인 300초, 알려진 지연 300초. 더 늦은 자료는 종목 추천을 유지하고 현재 가격 조건부로 표시 |
-| 가격점 수 | 유효 가격점 1개로 가격 구간을 확인할 수 있음. 두 가격점과 거래량은 보강 자료 |
-| 시장 약세 | 시장 레짐을 표시하고 지지·돌파 계획을 구분한다. 지수 MA20<MA60만으로 모든 후보를 막지 않음 |
-| 가격 위험 | 임의의 5% 상한으로 종목 삭제하지 않음. 계획상 위험 비율·무효화 근거를 표시. 이미 등록된 실제 손절·추적 기준은 낮추지 않음 |
-| 수집·미러·분석 | 60초 수집, 180초 미러, 분석 60초 전 미러, 09:40·14:00·미국 현지 10:00 유지 |
-| PHP 기술적 처리 예산 | 수집 45초 + 게시 10초, 전체 최대 55초. 연결 2초·시세 요청 5초·GitHub 요청 3초, 요청 시작 간격 1.25초, SHA 충돌 최대 2회 재병합 |
-| 지시문 실행 목표 | 준비된 일반 판단60초 / 제한된 변경분 확인120초 / 별도 자료 준비300초. 일반 경로4단계·짧은 입력12KiB 목표. 종료20초 전부터 저장·보고하며 실측·미완료 범위를 표시 |
+| ChatGPT / mon 지시문 | 독립 후보 발굴·근거 확인·스윙 자격 판단·최종 자율 선정·매입/매도 판단 |
+| mon.php | 기존 최소 시세 수집, 스윙 수치 계산, 작은 입력/변경 처리, 저장 파일 반환 |
+| monitor.md | 최신 실행 지시문·기준·인터페이스·예외 규격 |
+| mon_data.json | 관찰·보유·설정·PHP 시세·전체 후보·스윙 수치·결정 근거·압축 이력 |
+| mon_result.md | 최신 결과 표 하나와 주요사항 최대3개 |
 
-개별 종목의 거래 불가 또는 중대한 부정 사건이 실제로 확인되면 신규 매입 검토에서 제외하고 보유분은 계속 관찰한다. 미확인 상태를 확인된 문제로 취급하지 않는다.
-코드·통화·거래소·시세 날짜가 맞지 않는 자료, 손상 JSON, 만들어낸 가격·시각은 사용하지 않는다. 숫자 문턱 완화와 데이터 오류 허용을 혼동하지 않는다.
-달력이 없거나 만료되어도 모든 분석과 수집을 중단하지 않는다. 표준 거래시간 창에서 수집할 수 있으나 세션은 unknown으로 두고, 공식 달력 또는 공급자의 검증된 장 상태가 확인될 때 가격 확인 완료로 표시한다.
-60초 수집은 매분 AI 판단 생성의 의미가 아니다. 미처리 항목은 순환 커서로 다음 실행을 계속하고, 게시 실패 자료는 실행 환경의 캐시에 보존한다.
+PHP는 KIS API를 우선하고 기존 Naver/Yahoo 대체 경로를 유지한다. `/web/broker_config.local.php`의 기존 KIS 키와 `sis_private_sync_config.php`의 GitHub 설정을 직접 참조한다. 키를 JSON·GitHub·결과에 복사하지 않는다. 별도 암호·폴더·CLI 조작을 사용자에게 요구하지 않는다.
 
-### 분석 시각
+수집 데몬은 **collection만** 갱신한다. MON용 함수는 전체 소스를 고정 입력으로 받아 계산하거나 새 파일을 반환하며 독자적인 GitHub 저장·추천·주문을 하지 않는다. ChatGPT가 반환 파일을 확인하고 저장한다.
 
-| 슬롯 | 대상 | 시간 |
+## 2. 스윙 자격과 수식
+
+### 2.1 시장 대비 강도
+
+\[
+R20=C_t/C_{t-20}-1,\qquad RS20_{pp}=100(R20-R20_{market})
+\]
+
+같은 기간의 **21개 완료 종가**가 필요하다. 종목과 지수의 실제 거래일 배열이 일치해야 한다. 필수 날짜·종가가 부족하면 0이나 이전 값으로 채우지 않는다. 진행 중 일봉은 독립 완료봉 비교에 포함하지 않는다.
+
+**RS20_pp>0**가 추천 자격이다. 시장이 하락한 경우 덜 하락한 종목도 이 조건을 만족할 수 있으므로 시장 상태를 설명한다. 종목의 R20 양수·RS20 +3%p·MA60 상승·RSI/MACD의 다른 설정을 추가 필수 문턱으로 합산하지 않는다.
+
+### 2.2 MA5 장기 하회 후 재돌파
+
+\[
+MA5_t=\frac{C_t+C_{t-1}+C_{t-2}+C_{t-3}+C_{t-4}}{5}
+\]
+
+- 최신 완료봉 직전 **최소10거래일 연속** 각 종가가 **그날의 MA5보다 낮아야** 한다. 최신 MA5 한 값에 과거10종가를 비교하지 않는다.
+- 최신 완료 종가가 최신 MA5보다 높으면 `MA5_RECLAIM_CLOSE`다. 15개 완료 종가로 최소 패턴을 계산할 수 있다. 시장 비교에는 별도로21개가 필요하다.
+- 직전 완료봉까지10일 이상 연속 하회한 상태에서 검증된 당일 현재가가 `(직전4완료 종가 합+현재가)/5`보다 높으면 `MA5_RECLAIM_LIVE`다. 최소14완료 종가＋현재가가 필요하다.
+- 등호는 하회도 재돌파도 아니다. 날짜 누락·종목 식별 불일치·정정·분할 단위 불일치는 미검증으로 남긴다.
+- 장중 신호는 **잠정**이다. 종가 확정 신호와 구분하고 현재가가 다시 이평선 아래로 내려가면 진입 가능으로 표시하지 않는다.
+- 최근 완료봉의 신호는 다음 완료봉을 준비할 때 다시 계산한다. 과거 재돌파를 무기한 현재 신호로 유지하지 않는다.
+
+### 2.3 MACD(12,26,19)
+
+\[
+EMA_N(t)=\frac{2}{N+1}C_t+\left(1-\frac{2}{N+1}\right)EMA_N(t-1)
+\]
+\[
+MACD_t=EMA12_t-EMA26_t,\quad Signal_t=EMA19(MACD)_t,\quad H_t=MACD_t-Signal_t
+\]
+
+EMA 초기값은 첫 N개 유효 입력의 SMA다. MACD의 EMA19는 유효한 MACD 값19개로 초기화한다. 자료의 최초 날짜·조정 방식·전체 값이 계산 입력 해시에 포함되므로 데이터 제공자·초기화 기간이 다르면 같은 수치라고 단정하지 않는다. 60개 완료봉을 기본 확보 목표로 두고, 가능하면 더 긴 이력을 준비한다.
+
+| 신호 | 고정 조건 | 표시 |
 |---|---|---|
-| 오전 | 한국·일본 장중, 미국 직전 완료장 요약 | Asia/Seoul 09:40 |
-| 오후 | 한국·일본 재평가 | Asia/Seoul 14:00 |
-| 미국 | 미국 개장 30분 후 | America/New_York 10:00; 한국시간 서머타임 23:00 / 표준시 다음날 00:00 |
+| MACD_GOLD | 직전 H≤0, 최신 H>0 | 골든크로스 확정 |
+| MACD_AFTER | 확인된 골든 이후1~3거래일, 그동안 H>0 유지 | 골든 후 N거래일 |
+| MACD_BEFORE | 유효 H 3개가 엄격히 증가, 최신 H≤0, 최신 abs(H)/ATR14≤0.10 | 골든 직전(근접), 미확정 |
 
-국가별 휴장·점심 휴장·조기 폐장·서머타임을 구분한다. 장외에도 최신 완료봉으로 조건부 가격 계획을 출력할 수 있으며 장중 현재가 확인과 구분한다.
+첫 시그널 값은44번째 완료 종가부터, 첫 교차 판정은45번째부터 가능하다. 3개 히스토그램 근접 판정·교차 후 기간에는 추가 유효 값이 필요하다. 부족한 MACD는 null/needs_history로 표시한다. **MA5 조건이 검증되면 MACD 부족 때문에 OR 자격을 지우지 않는다.**
 
-## 3. 후보 선정 MON-P2.0 — 탈락 문턱보다 상대 경쟁
+‘골든 전후’의 구체적인 범위는 이번 구현의 기본값이다. **전: 최근3개 히스토그램의 수렴＋ATR 대비10% 이내 / 후: 3거래일 이내**. 이 값은 미래 교차 예측이나 수익 보장이 아니다. 이후 변경하면 기준 버전과 프로필을 함께 바꾼다.
 
-### 동일 후보 집합과 계산
+ATR14는 최근 TR14개의 단순평균이다. TR=max(고가−저가, abs(고가−직전종가), abs(저가−직전종가)). ATR 부족 시 골든 직전 근접 조건을 확정하지 않는다. 지수는 종가만으로 시장 비교가 가능하며 지수의 거래량·OHLC 결측을 종목 MACD 결측으로 오인하지 않는다.
 
-현재 관찰목록·최근 20거래일 후보·과거 강한 후보·이번 신규 후보를 symbol_id로 병합한다. 같은 종목의 최신 사실이 서로 다르면 재확인하고 높은 점수만 골라 취하지 않는다.
-기존·신규 출신, 조회 순서, 이전 순위, HTTP 수집시각은 선정 순위에 가산점·감점으로 넣지 않는다.
+### 2.4 최종 자율 선정
 
-- `R20 = C_t/C_(t-20)−1`, `RS20_pp = 100×(종목 R20−같은 기간 시장 R20)`. 21개 완료 종가가 필요하다.
-- 벤치마크는 KOSPI/KOSDAQ 해당 시장, 미국 S&P 500, 일본 TOPIX. 해당 종목과 비교 지수의 완료 거래일·조정 방식을 맞춘다.
-- MA5·MA10·MA20은 단순평균. MA60, RS60, 기울기는 참고 자료이며 선정의 필수 조건이 아니다.
-- ATR14는 최근 TR 14개 단순평균. TR은 max(고가−저가, abs(고가−직전종가), abs(저가−직전종가)). 가격 계획에 필요한 OHLC가 부족하면 ATR과 계획은 null로 남긴다.
-- ADV20은 최근 20일 원시 거래대금 평균. 공식 거래대금 또는 같은 날 원시 종가×실제 거래량을 사용한다. 조정 가격×원시 거래량은 섞지 않는다.
-- 추세·가격 계획은 현재 가격 단위에 맞춘 일봉을 사용하며 진행 중 일봉은 포함하지 않는다. 결측을 가짜 봉으로 채우지 않는다.
+```text
+추천 자격 = RS20_pp>0
+          AND (MA5_RECLAIM_CLOSE OR MA5_RECLAIM_LIVE
+               OR MACD_GOLD OR MACD_AFTER OR MACD_BEFORE)
+          AND 동일 기간·신원·자료 검증
+          AND 확인된 중대한 위험/거래불가 없음
+최종 추천 = ChatGPT가 위 자격 집합에서 근거를 기록하고 자율적으로 선정
+```
 
-### 선정과 표시 규칙
+PHP의 `rank_hint`는 **RS20_pp↓→R20↓→ADV20↓→symbol_id↑** 참고 정렬이다. 자동 상위3추천이나 최종 종목 지정이 아니다. ChatGPT는 거래대금·업종 주도성·이격·추격 위험·신호의 질·기업 근거를 함께 보고 자격 종목 중 최대3개/국가를 선정할 수 있다. 추천하지 않은 적격 후보도 전체 후보 자료에 남긴다.
 
-| 구분 | 새 규칙 |
+| 상태 | 의미 |
 |---|---|
-| 순위 | **RS20_pp 내림차순 → R20 내림차순 → ADV20 내림차순 → symbol_id 오름차순**, 국가별 계산 |
-| PASS | 비교 가능한 자료에서 R20≥0 및 RS20_pp≥0. 강도 상태 표시이며 강제 선정 문턱 아님 |
-| NEAR | 비교 가능한 자료가 있고 PASS 표시 조건에 못 미침. PASS와 함께 같은 순위표에서 경쟁 |
-| UNVERIFIED | 종목 식별 또는 20일 계산에 필요한 자료가 부족. 실패로 단정하지 않고 추가 관찰·확인 필요로 표시 |
-| FAIL | 확인된 거래 불가·중대한 부정 사건. 신규 진입 계획에서 제외하되 보유 감시는 유지 |
-| 관찰 선정 | 비교 가능한 후보 전체의 상대 순위 상위 10개. PASS 먼저·NEAR 나중 채우기 규칙 제거 |
-| 매입 검토 | 관찰 상위에서 보유분을 제외한 3개에 조건부 가격 계획을 제공. ready인 종목만 골라 후보를 교체하지 않음 |
+| pass | 최신 비교와 시장 강도 및 MA5/MACD 자격 충족. 최종 추천은 별도 |
+| near | 확인된 자료에서 시장 강도 또는 스윙 신호 미충족. 관찰 가능, 추천 불가 |
+| unverified | 필수 자료·최신 지수 비교·필요 신호 이력 부족. 추천으로 승계하지 않음 |
+| fail | 확인된 거래 불가·중대한 부정 사건. 신규 진입 제외, 보유 감시는 유지 |
 
-**삭제한 강제 문턱:** RS20 +3%p, RS60 양수, 종목 20일 수익 양수, MA20>MA60, MA60 상승, 국가별 거래대금 하한, 65봉 일괄 최소, 지수 상승 정렬.
-시장과 업종 주도성·과열·이격·유동성·기업 위험은 설명과 가격 확인 상태에 반영한다. 확인되지 않은 주관적 등급을 임의로 새 순위 가산점으로 만들지 않는다.
-자료가 부족한 후보는 UNVERIFIED로 따로 남긴다. 이전 추천을 최신 비교에서 이긴 것처럼 표시하거나 RS20을 0으로 만들어 경쟁시키지 않는다.
+추천 대상이 부족하면 확보된 수만 제시한다. 이전 추천·신규성·수집 순서·ready에 가산점을 주지 않는다. 모든 추천에는 `autonomous_decision.selector=ChatGPT`와 구체적 선택 이유를 저장한다.
 
-### 후보 기억·당일 반복 실행
+## 3. 매입 계획·현재 가능 여부·매도
 
-`candidate_history`는 실제 발견일과 실제 선정일을 따로 기록한다. `first_seen_market_date`는 최초 확보일, `last_discovered_market_date`는 새 탐색 또는 새 중요 근거로 다시 발견한 날, `last_selected_market_date`는 실제 관찰·추천된 날이다. `last_review_market_date`는 계산을 재확인한 날이며 기억 만료의 기준이 아니다. 과거 날짜가 확인되지 않으면 null로 보존하고 임의로 오늘을 채우지 않는다.
+스윙 신호는 **추천 자격**, 가격 계획은 **진입 검토 범위**다. 두 역할을 혼동하지 않는다. 최신 신호가 없는 종목에 기존 ATR 가격 구간만 붙여 추천하지 않는다.
 
-현재 관찰·보유분을 제외한 후보는 마지막 선정일·발견일 중 최근 날짜가 최신 완료 거래일을 포함한 직전 20개 실제 거래일 안에 있는지 확인한다. 만료된 상세 이력은 이전 GitHub 커밋에 남긴다. 기간 밖의 과거 강한 후보를 새로운 근거로 다시 포함할 때에는 그 근거와 재발견일을 기록한다. 단순 재평가·가격 조회만으로 이력을 계속 연장하지 않는다.
+지지 S는 최신 완료 종가 이하의 MA5·MA10·MA20·최근5일 저점 중 최댓값이다. 저항 R은 최신 완료일을 제외한 직전20일 고가 최댓값이다.
 
-`discovery_state.countries`는 국가·현지 거래일·당일 탐색 목표·새 식별자 확보 수·목표 달성·완료봉 기준일을 기록한다. `retry_queue`는 미검증 식별자 목록이다. 같은 날 이미 국가당20개를 확보했으면 실패 후보 재확인과 새 가격·사건 갱신을 우선한다. 부족하면 탐색을 보충한다. 신규성은 순위 점수에 반영하지 않는다.
-
-봉 캐시 키는 symbol_id·완료봉 기준일·조정 방식·비교 기간이다. 같은 키의 검증된 봉과 지표는 재사용하되 기업행위·정정이 발견되면 무효화한다. 진행 중 봉·오늘 체결가·위험 확인은 과거 완료봉 캐시로 대신하지 않는다. 조회 실패는 남은 예산 안에서 최대1회 재시도 후 실패 시각·원천·사유를 남긴다. 같은 완료일·원천의 실패는 일반 반복 갱신에서 재호출하지 않으며, 새 원천·정정·근거 또는 명시적 재확인 요청에 다시 확인한다.
-
-### 동일 입력·동일 결과를 최우선으로 하는 규격
-
-1. 평가 시작 때 후보 집합·완료봉 기준일·기업 사실·보유 등록·가격점·고정 판단시점 `as_of`를 묶어 입력 스냅샷을 만든다. 평가 중 새 자료는 다음 스냅샷으로 넘긴다.
-2. 가격·지표 비교값은 소수 6자리로 ROUND_HALF_UP 정규화하며 −0은 0으로 통일한다. 호가·가격 구간 계산은 십진 연산을 사용해 이진 부동소수점 오차로 한 호가가 달라지지 않게 한다. JSON 키와 후보 symbol_id를 정렬한다. 해시용 숫자는 소수 6자리 문자열, 시각은 UTC의 `YYYY-MM-DDTHH:mm:ss.ffffffZ`로 직렬화한다. 거래일 YYYY-MM-DD는 거래소 현지 날짜를 유지한다.
-3. `selection_fingerprint`는 기준 버전과 독립 평가 사실에 대한 SHA-256이다. PHP 가격·수집 순서·후보 출신·설명 문장·실행 ID를 넣지 않는다.
-4. `input_fingerprint`는 selection_fingerprint + as_of + 판단에 실제 사용한 가격·자료 상태를 정규화한 SHA-256이다. 무관한 조회 메타데이터를 넣지 않는다.
-5. `result_fingerprint`는 종목·순위·행동·readiness·가격 계획·무효화의 정규 JSON SHA-256이다. 생성형 설명 문구는 비교 대상에서 제외한다.
-6. 같은 input_fingerprint·criteria_version으로 재실행하면 저장한 업무 결과를 재사용한다. 재계산한 결과가 다르면 기존 정상 결과를 덮지 않고 일관성 오류를 기록한다.
-7. 가격 보조자료만 바뀌면 독립 선정 목록과 순위는 유지하며 가격 확인 상태·활성 가격 계획만 갱신한다. 새로운 완료봉·후보·검증된 기업 사실은 독립 입력 갱신으로 기록한다.
-8. 실시간 조회를 다시 실행하여 입력이 달라진 경우를 동일 입력 재실행이라고 부르지 않는다. 데이터·기준이 달라졌는데 결과를 억지로 고정하지 않는다.
-
-기준 버전은 판단 수식·순위·정원·반올림·상태 전환을 포함한다. 이를 바꾸면 버전을 올린다. 생성형 AI의 자유 서술 자체가 매번 동일하다고 보장하는 규격이 아니다.
-
-해시 입력은 참조를 복원한 `input_snapshot`의 `selection_facts`·`input_facts`를 사용한다. 기준 사실의 배열은 symbol_id 등 명시한 식별자로 정렬하고, 모든 객체 키는 사전순으로 정렬한 UTF-8 JSON을 공백 없이 직렬화한다. 유한 숫자만 소수6자리 문자열로 바꾸고 boolean·null은 그대로 유지한다. ISO 시각은 UTC 마이크로초로 정규화하고 현지 거래일은 바꾸지 않는다. 결과 해시는 results를 symbol_id순으로 정렬한 뒤 symbol_id·rank·action·readiness·entry_plans·active_plan·entry_zone·invalidation만 취한다.
-압축 포맷·참조 배치·저장시각·rendered_at·공급자 매핑 유지보수 메타데이터는 업무 해시에 넣지 않는다. 기존 고정 사실을 복원해 세 해시가 일치하는지 확인한다. 유지보수 때 `as_of`, `run_id`, 분석 당시 price_checks 또는 실제 판단을 새 시점의 판단처럼 수정하지 않는다.
-
-## 4. 매입·매도 재조정 — 추천과 현재 가격 확인 분리
-
-### 매입 계획
-
-상위 3개는 `BUY_REVIEW`로 유지하고, 확인이 부족하면 `readiness=conditional`로 기록한다. 이를 즉시 매수 지시로 표시하지 않는다.
-MA20 한 구간만 허용하던 규칙을 없애고 독립 완료봉에서 확인한 가까운 지지와 돌파 가격을 함께 사용한다.
-
-1. `S`는 최근 완료 종가 이하에 있는 MA5·MA10·MA20·최근 5일 저점 중 가장 높은 값이다.
-2. `R`은 최신 완료일을 제외한 직전 20일 고가의 최댓값이다. 최신일을 포함하여 돌파할 수 없는 저항을 만들지 않는다.
-3. 눌림 계획 구간은 **[S−ATR14, S+ATR14]**. 무효화 참고값은 min(최근 5일 저점,S)−0.5×ATR14.
-4. 돌파 계획 구간은 **[R,R+ATR14]**. 무효화 참고값은 R−ATR14.
-5. 실제 호가단위로 하단은 올리고 상단·무효화는 내린다. 양수 무효화<구간하단≤구간상단을 확인한다. 지지·ATR·호가단위가 없으면 계획은 null이며 후보 추천을 삭제하지 않는다.
-6. 같은 종목·통화·거래소의 유효 가격 1개가 어느 계획 구간에 있고 거래 가능·위험 확인이 충족되면 ready다. market_date가 quote_at의 거래소 현지 날짜 및 as_of의 현지 거래일과 같아야 한다. 오프셋 없는 시각·손상 시각·음수 지연은 현재 가격 확인에 쓰지 않는다. 두 구간에 동시에 있으면 눌림 계획을 먼저 선택한다.
-7. 두 가격점 반등, 최신 일봉 양봉, 10일 고점에서 정해진 폭 하락, 거래량 증가, 시장 MA 정렬을 모두 필수로 요구하지 않는다. 확보되면 보강 근거로 표시한다.
-8. 가격이 구간 밖·300초 초과·지연 300초 초과·시세시각 미확인·거래세션 미확인이면 조건부다. 가격 계획과 상위 종목은 유지한다.
-9. 계획상 가격 위험 비율은 표시하되 임의의 5% 제한으로 선정·추천을 탈락시키지 않는다. 실제 진입 후 등록된 손절·추적 기준은 이 완화의 대상이 아니다.
-
-가격 계획은 장중 분석이면 해당 정규장 마감까지, 장외 분석이면 다음 정규장 마감까지 유효하며 독립 근거가 갱신되면 다시 계산한다. 가격 확인의 만료는 `price_as_of+300초`다. 실제 진입 전에는 최신 거래가능 가격과 해당 조건을 확인한다.
-가격 계획은 독립 일봉 사실로 만들고 PHP 가격은 계획의 충족 상태를 보강한다. 늦은 가격 때문에 더 낮은 순위의 종목으로 추천을 교체하지 않는다.
-
-### 보유·매도
-
-- 실제 등록된 initial_stop/trailing_stop 중 유효한 더 높은 기준에 최신 확인 가격이 도달하면 SELL_REVIEW. 등록된 기준을 사후로 낮추거나 과거 매입가를 만들지 않는다.
-- 단순 MA20·MA60 이탈만으로 매도 확정하지 않는다. **최신 완료 종가가 MA20 아래이면서 직전 10완료일 저점보다 낮을 때** 추세 붕괴로 SELL_REVIEW.
-- 확인된 중대한 기업 근거 훼손이면 SELL_REVIEW. 거래정지·가격 미확인 등 실행 가능성이 불분명하면 조건부로 표시하고 보유 감시를 유지한다.
-- 이외에는 HOLD. 최신 가격·OHLC가 부족하면 확인 필요 상태를 함께 표시한다.
-
-### 독립 판단과 PHP 보조자료
-
-지시문의 independent_results를 먼저 기록하고 results에 가격 확인 상태를 보강한다. 선정과 순위는 독립 평가 입력이 변하지 않는 동안 유지한다.
-같은 종목·통화·거래소·세션·거래일에서 120초 이내 시각 차이의 두 가격이 2% 넘게 다르면 가격 확인 충돌이다. 변동·시각 차이를 먼저 확인하고 최대 1회 독립 재조회한다.
-충돌·불명·지연으로 종목을 탈락시키지 않고 conditional과 사유를 남긴다. 오류 가격을 평균내거나 수집시각을 실제 시세시각으로 바꾸지 않는다.
-
-### 기업 위험·거래 상태 확인 범위
-
-모든 과거 공시를 읽었다는 확인을 ready의 전제 조건으로 삼지 않는다. 매입 검토 상위 종목과 등록 보유분에 대해 평가시점의 거래 가능 상태, 최신 관련 중요 공시·사건, 이전 미해결 중대 위험의 후속 확인을 수행한다. 기업 IR·공식 공시·거래소 자료를 우선하고, 보도만 있는 사건은 1차 확인 여부를 구분한다. 이전에 확인된 중대 문제는 공식 해소·후속 근거가 있을 때까지 유지한다. 과거 경고와 현재 거래정지, 파업 종료 보도와 실제 생산 회복을 같은 사실로 취급하지 않는다.
-
-`risk_review`의 권장 폼은 status·scope·checked_at·evidence_ids·reviewed_items·pending_items·trading_status다. reviewed_items에는 최신 중요 공시·사건과 검토 결과를, pending_items에는 확인할 구체 항목을 기록한다. `verified`는 기록한 범위에서 현재 중요 문제와 거래 제한이 확인되지 않았다는 뜻이며 모든 위험의 부재를 보증하는 표현이 아니다. 공식 자료 조회 실패·미해결 중대 사건·현재 거래 가능 상태 미확인은 `needs_check`와 구체 사유로 남긴다.
-
-확인된 중대한 부정 사건·거래 불가는 기존 FAIL/SELL_REVIEW 규칙을 적용한다. 자료 부족만으로 신규 매입 후보를 탈락시키거나 다른 종목으로 교체하지 않고 readiness를 conditional로 남긴다. 기존 `latest_filings_complete=false`라는 전수 확인 메타데이터만으로 계속 conditional을 강제하지 않는다. 이번 유지보수는 위험 조사를 새로 완료한 것이 아니므로 저장된 needs_check 상태를 verified로 바꾸지 않았다.
-
-## 5. 시세 원천과 실제 API 연결 폼
-
-### 최소 수집 방식 결정
-
-PHP는 **타임스탬프를 가진 최근 완료 1분봉 2개**를 기본으로 정규화한다. 날짜·시각·가격·거래량과 출처만 저장하고 분봉 전체를 누적하지 않는다.
-실제 체결가격과 체결시각이 확보된 원천은 `price_type=last`로 저장할 수 있다. 분봉 종가는 `price_type=minute_close`, 시각 기준은 `timestamp_basis=bar_end`로 표시한다.
-분봉에 표시된 시각이 시작시각인지 종료시각인지 공급자별로 검증해야 한다. 시작시각으로 확인된 경우에만 60초를 더해 봉 종료시각을 계산한다. 이를 실제 체결시각이라고 쓰지 않는다.
-시각 의미가 미검증이면 `quote_at=null` 또는 `quality_status=unknown`으로 남긴다. 수집시각으로 시세시각을 채우지 않는다.
-진행 중 봉, 미래 시각, 미체결을 임의로 채운 봉, 잘못된 거래일은 지지 확인에서 제외한다. 국내 API의 첫 분봉 체결량에 이전 봉 체결량이 잠시 보일 수 있으므로 완료봉 기준을 지킨다.
-
-| 국가 | KIS 기본 호출 | 요청 폼·원시 필드 |
+| 계획 | 가격 구간 | 무효화 참고값 |
 |---|---|---|
-| KR | GET /uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice / TR FHKST03010200 | FID_COND_MRKT_DIV_CODE=J, FID_INPUT_ISCD=매핑 코드, FID_INPUT_HOUR_1=현재 현지시각, FID_PW_DATA_INCU_YN=Y, FID_ETC_CLS_CODE 빈 문자열. output2의 stck_bsop_date·stck_cntg_hour·stck_prpr·cntg_vol을 정규화 |
-| US·JP | GET /uapi/overseas-price/v1/quotations/inquire-time-itemchartprice / TR HHDFS76950200 | AUTH 빈 문자열, EXCD=검증된 NAS/NYS/AMS/TSE, SYMB=매핑 코드, NMIN=1, PINC=0, NEXT 빈 문자열, NREC=3, FILL/KEYB 빈 문자열. output2의 xymd·xhms·last·evol을 정규화 |
+| 눌림 | S−ATR14 ~ S＋ATR14 | min(최근5일 저점,S)−0.5×ATR14 |
+| 돌파 이후 검토 | R ~ R＋ATR14 | R−ATR14 |
 
-NREC=3으로 가져온 해외 봉 중 진행 중 봉을 제외하고 최신 두 완료봉을 남긴다. 일반 수집에서는 연속 페이지를 재귀적으로 따라가지 않는다.
-분봉의 거래량은 minute, 당일 누적 거래량이 따로 확인되면 session_cumulative다. 둘을 같은 수치로 교체하거나 직접 비교하지 않는다. 등락률이 없으면 null이며 분석에 필요한 경우 지시문이 기준 종가를 확인하여 계산한다.
-인증은 PHP 실행 환경의 APP Key/Secret과 유효 토큰을 사용한다. 응답 `rt_cd`와 오류를 확인하고 인증 실패를 정상 빈 데이터로 바꾸지 않는다.
+실제 호가단위로 하단은 올리고 상단·무효화는 내린다. 값은 양수이며 무효화<하단≤상단이어야 한다. 필요한 값이 부족하면 계획은 null이다. 계획의 무효화는 등록된 실제 손절가를 자동 변경하지 않는다. 이미 R을 넘은 종목은 ‘돌파 이후’로 설명한다.
 
-### 보완 원천
+`ready`에는 스윙 자격 유지, 정규장, 같은 종목/통화/거래소/현지 날짜, 가격 나이≤300초, 확인된 지연≤300초, 미래 오차≤5초, 거래 가능·기업 위험 확인, 유효한 계획 구간 안의 가격을 모두 요구한다. 현재 가격이 없고 완료 종가만 있는 경우는 **조건부**다. 오래된 위험 확인과 과거 ready를 현재 확인 완료로 바꾸지 않는다.
 
-- KR: KIS → 지원·매핑을 확인한 Naver → 지원·매핑을 확인한 Yahoo.
-- US·JP: KIS → 지원·매핑을 확인한 Yahoo.
-- 일본을 포함한 해외 시세는 서비스 권한과 실제 지연을 확인한다. REST 또는 무료 원천을 사용한다는 이유만으로 realtime이라고 표시하지 않는다.
-- 각 원천은 같은 point 폼으로 변환한다. 날짜·시각·시각 의미를 확인할 수 없으면 unknown이다.
-- 여러 원천이 모두 실패해도 해당 종목의 마지막 확인 가격은 원래 시세시각으로 보존한다. `fetch_status=error`와 마지막 시도 시각을 갱신하며 그 가격을 새 확인 가격으로 사용하지 않는다.
-- 신규 종목은 point=null, fetch_status=pending으로 시작한다. 가격·시각·거래량의 결측을 0 또는 현재 시각으로 채우지 않는다.
+보유 매도는 기존 유효 initial_stop/trailing_stop 중 높은 기준, MA20와 직전10완료일 저점 동시 붕괴, 확인된 중대한 기업 훼손에 따른다. 보유 수량·매입가·손절가를 추정 생성하지 않는다. 신규 신호 미충족만으로 자동 매도하지 않는다. 주문은 하지 않는다.
 
-네이버 국내 매핑은 source_codes.naver.symbol에 6자리 코드를 보존한다. 매 요청의 itemCode·stockExchangeType.code(KS=KOSPI, KQ=KOSDAQ)·zoneId=Asia/Seoul을 대조한다. 코드 설정과 실제 응답 확인은 mapping_status·naver_mapping_check로 구분한다. 이번10개 국내 매핑 중 실제 식별·상장시장 확인은5개, 타임아웃으로 응답 확인 대기는5개다. 확인 대기도 다음 수집에서 검증 후 사용할 수 있으며 확인 완료라고 쓰지 않는다.
+## 4. PHP 웹 운영과 지원 범위
 
-네이버의 stockExchangeType는 상장시장 정보다. provider_venue·venue_basis=listing_market·provider_session을 함께 보존한다. OPEN 응답도 현재 수집 창과 시세시각의 정규장 창·현지 날짜가 맞아야 regular다. 정규장 밖의 시세를 KRX 종가로 바꾸지 않고 session=unknown·price_type=last로 남긴다. 지연은 확인된 설정초만 사용하고 음수는 오류로 처리한다.
+`/web/mon.php`를 브라우저로 열어 **시작·중지·상태**를 사용한다. 데몬은 최소 시세를 주기적으로 수집하고 GitHub에 collection을 미러링한다. 코드 교체 후 웹에서 중지→시작하면 새 버전이 적용된다. 실제 상태 확인 없이 가동 여부를 선언하지 않는다.
 
-야후 응답의 symbol·currency·exchangeName·exchangeTimezoneName을 확인한다. 거래소 대응은 KOSPI=KSC, KOSDAQ=KOE, NASDAQ=NMS/NGM/NCM, NYSE=NYQ, AMEX=ASE, TSE=JPX다. 현재시각과 regularMarketTime이 모두 공급자의 currentTradingPeriod.regular에 들어가야 정규장 가격이다. 현재 장이 열렸다고 어제 가격을 regular로 바꾸지 않는다.
+기존 기본 수집 간격60초·미러180초·회차 예산·순환 커서·KIS 토큰 캐시·Naver/Yahoo 대체·충돌 재병합·중지 응답을 유지한다. 매분 ChatGPT를 호출하거나 새 추천을 생성하지 않는다.
 
-야후의 명시적 지연0은0초다. 양수 필드의 단위를 추정하지 않으며, 확인된 YAHOO_DELAY_SECONDS_국가 설정이 있으면 초 단위로 사용한다. 둘 다 없으면 watchlist.settings.quote_delay_policies.YAHOO의 국가|거래소 정책을 확인한다. 정책 폼은 delay_seconds≥0·provider_venues 배열·공식 help.yahoo.com source_url·verified_at이며 확인시각은 미래 허용5초 및 최근14일 범위다. 거래소가 일치하는 유효 정책만 쓴다. 현재 연결한 공식 안내는 Nasdaq0초·한국/일본1200초다. NYSE까지0초라고 확장하지 않는다. provider_venue·delay_basis·사용한 정책 URL/확인시각을 point에 기록한다. 정책이 만료되면 지시문이 공식 안내를 다시 확인하고 수집 정의 버전을 갱신한다. PHP가 추가 공시·정책 수집기를 운영하지 않는다.
+스윙 함수는 **저장된 검증 완료봉을 한 번의 함수 호출로 계산**한다. 내부 배열 순회는 필요하며 O(1)이라고 주장하지 않는다. 일봉·지수 자동 보충 전체 경로는 이번 버전의 구현 대상이 아니다. 저장 이력이 부족하면 `needs_history`와 대상/필요량을 보고하고 독립 자료 준비 경로로 넘긴다. 미구현 자동 수집을 완료했다고 쓰지 않는다.
 
-## 6. mon_data.json 인터페이스 v3
+MON 분석 슬롯은 오전09:40 KST, 오후14:00 KST, 미국 개장30분 후10:00 America/New_York가 설계 기준이다. 예약 등록 상태와 슬롯 설계는 별개이며 이번 개정은 예약을 생성하지 않는다.
 
-mon_data.json은 UTF-8 JSON 파일이다. 루트 필수 필드는 schema_version=3, watchlist, collection, analysis이며 세 값은 객체다. 각 객체의 schema_version도 3이다. 기존 항목 폼은 유지하고 문서 마커를 JSON 객체 경로로 바꾼다. mon_result.md는 analysis에서 생성한 사용자 요약이다.
-시간은 UTC 오프셋이 있는 ISO 8601, 거래일은 거래소 현지 YYYY-MM-DD다. 가격·비율은 유한 JSON number, 거래량은 0 이상 number 또는 null, 종목코드는 string, 보유 여부는 boolean이다. null은 확인되지 않음을 뜻한다.
-`symbol_id=국가|거래소|코드`이며 공급자 매핑을 별도로 둔다. 한국 코드 앞자리 0과 일본 영문자 코드를 보존한다. 같은 코드가 여러 거래소에 있으면 별개 식별자다.
-필수 객체 누락, JSON 오류, 알려지지 않은 schema_version, 종목 중복 또는 필수 필드 형식 오류가 있으면 자동 쓰기를 멈추고 오류를 남긴다. 기존 데이터를 초기화하지 않는다.
+## 5. 저장·데이터 규격
 
-| mon_data.json 객체 경로 | 필수 필드 |
-|---|---|
-| watchlist (WATCHLIST) | schema_version, criteria_version, watchlist_version, updated_at, run_id, settings, calendar, symbols |
-| collection (COLLECTION) | schema_version, collection_id, watchlist_version, started_at, completed_at, status, next_cursor, quotes |
-| analysis (ANALYSIS) | schema_version, criteria_version, run_id, as_of, analyzed_at, watchlist_version, collection_id, status, selection_fingerprint, input_fingerprint, result_fingerprint, coverage, independent_results, results, candidate_audit, candidate_history, changes, evidence |
+`schema_version=3`를 유지하고 watchlist·analysis의 `criteria_version`을 모두 **MON-P3.0**으로 맞춘다. 새 PHP는 P2.0 데이터를 전환 준비 목적으로 읽을 수 있지만 P2 추천을 P3 추천으로 표시하지 않는다. P2 전용 이전 데몬은 P3 자료를 처리할 수 없으므로 NAS PHP 교체가 필요하다.
 
-### 공통 상태와 항목 폼
-
-| 항목 | 값·필수 내용 |
-|---|---|
-| 실행 status | not_started / complete / partial / failed. 전체 호출 완료와 전체 데이터 정상 여부를 구분하여 실패·미처리 항목이 있으면 partial |
-| fetch_status | ok / error / pending. point가 남아 있어도 이번 조회 실패이면 error |
-| quality_status | normal / delayed / stale / unknown / conflict / pending / failed. 읽는 시점에 경과시간을 다시 계산 |
-| session | regular / break / closed / premarket / afterhours / unknown |
-| price_type | last / minute_close / close |
-| timestamp_basis | trade / bar_end / close / unknown |
-| volume_basis | minute / trade / session_cumulative / daily / unknown |
-| delay_kind | realtime / delayed / unknown. 공급자가 확인한 지연초는 delay_seconds, 없으면 null |
-| eligibility | pass / near / fail / unverified |
-| action | BUY_REVIEW=매입 검토 / HOLD=보유 유지·관찰 / SELL_REVIEW=매도 검토 / WATCH=관찰 / EXCLUDE=이번 후보 제외 |
-| readiness | ready / conditional / needs_data / expired |
-| verification_status | verified / needs_check. 수집 성공과 투자 판단 확인을 구분 |
-| wiki_effect | unused / confirmed / rechecked / changed |
-
-관찰종목의 필수 필드는 symbol_id, country, exchange, symbol, name, currency, purpose, candidate_origin, is_held, position, tick_size, source_codes다.
-position은 null 또는 entry_price·initial_stop·trailing_stop·registered_at을 가진 객체다. 등록이 확인된 보유분에만 is_held=true를 사용한다.
-calendar는 valid_until과 markets 배열이다. 국가별 항목에는 country, timezone, source_url, checked_at, sessions를 넣는다. 각 세션은 market_date, open_at, close_at이며 일본 점심 휴장은 두 세션으로 표현한다. 유효기간은 다음 14일을 넘기지 않는다.
-수집 행은 symbol_id, fetch_status, attempted_at, quality_status, error, point, previous_point다. point/previous_point는 아래 예시와 같은 필드를 갖거나 null이다. error는 null 또는 code·message·source 객체다.
-분석 행은 아래 예시와 같은 필드다. BUY_REVIEW는 등록 보유분을 중복 신규 매입 대상으로 출력하지 않으며, 독립 관찰 순위 상위의 비보유 최대 3개에 적용한다. ready 여부로 추천 종목을 다시 고르지 않는다. entry_plans는 mode·entry_zone·invalidation·planned_risk_pct 객체의 배열 또는 null이다. active_plan은 pullback/breakout/null이다. 기존 entry_zone·invalidation은 활성 계획 또는 첫 조건부 계획의 요약값이며 확인되지 않으면 null이다. 보유 상태와 주식 식별이 맞지 않는 가격을 다른 종목의 행동 판단에 쓰지 않는다.
-candidate_audit에는 평가한 모든 후보의 symbol_id, origin, metrics, eligibility, rank, failed_checks, evidence_ids를 남긴다. 참고 지표 미달은 failed_checks가 아닌 notes에 기록한다. metrics에는 위 계산값과 bars_count·bars_as_of·benchmark·adjustment를 기록한다. 전체 지표를 직접 저장하거나 핵심값과 metrics_ref를 함께 저장할 수 있다. 후자의 전체 값은 반드시 손실 없이 복원돼야 한다. 필수 비교값과 참고값·null을 구분한다.
-evidence는 ANALYSIS 최상위 배열이다. 각 항목은 id, source_url, source_kind, checked_at, data_as_of, claim을 가지며 결과·audit의 evidence_ids로 연결한다. source_kind는 independent 또는 php다. 합성 예시는 운영 근거로 사용하지 않는다.
-coverage에는 국가별 신규 탐색 수·평가 수·PASS/NEAR/미검증 수·실제 추천 수와 complete/partial 사유를 남긴다.
-candidate_history에는 symbol_id·country·last_review_market_date·last_eligibility·last_action·reason·origin과 first_seen_market_date·last_discovered_market_date·last_selected_market_date를 둔다. 실제 날짜가 없으면 null이다. 중복 종목은 최신값 하나만 유지하며 단순 재평가일을 만료 기준으로 쓰지 않는다. changes는 최근20개 변경과 변경 이유를 유지하며 상세 이력은 커밋으로 보존한다.
-
-### 손실 없는 압축·참조 폼
-
-schema_version 3의 기존 전체 행 폼을 읽을 수 있어야 하며 아래 참조 폼도 허용한다. PHP는 분석 압축을 해제하거나 판단하지 않고 최신 분석 객체를 그대로 보존한다. 지시문은 참조를 복원한 값으로 계산·검증한다.
-
-| 경로·참조 | 폼·복원 규칙 |
-|---|---|
-| input_snapshot.lossless_payload | encoding=xz+base64, format=UTF-8 JSON, uncompressed_bytes, sha256, data. base64 해제→XZ 해제 후 원문 바이트 수·SHA-256 확인→JSON 읽기 |
-| input_snapshot.compressed_fields | 압축 JSON에 들어 있는 필드 이름 목록. series·selection_facts·input_facts·candidate_metrics·independent_results 등을 명시 |
-| candidate_audit.metrics | 표시 핵심값 bars_count·bars_as_of·benchmark·adjustment·R20·R20_pct·RS20_pp·ADV20·last_close. 없는 값은 null 또는 기존 명시적 결측 유지 |
-| metrics_ref=candidate_metrics:식별자 | 해제된 payload.candidate_metrics[식별자]에서 전체 지표 복원. 쌍점 다음 문자열 전체가 symbol_id이며 코드의 점을 경로 구분자로 나누지 않음 |
-| metrics_ref=candidate_audit:식별자 | 해당 audit.metrics와 필요한 metrics_ref를 따라 전체 지표 복원 |
-| independent_results | 기존 전체 행 배열 또는 symbol_id·rank·action·readiness·result_ref 인덱스 배열. 후자는 independent_results:식별자로 payload.independent_results[식별자]의 전체 독립 행 복원 |
-| analysis.results | 전체 최종 판단 행 배열. 사용자 표와 업무 결과 해시의 기준 |
-| input_snapshot.evidence_details_note / payload.evidence_details[id] | 평문 evidence의 6개 필수 필드는 유지한다. 상세 claim·선택 provider_name을 이 근거 ID 맵에서 손실 없이 복원하며 URL·조회시각·자료시각을 새로 바꾸지 않는다 |
-| comparison_dates_ref | input_snapshot.comparison_periods의 이름으로 공통 비교 거래일 배열 복원 |
-| analysis.display | rendered_at·analysis_as_of·analysis_recomputed=false·가격 표시 상태. 만료 표시용이며 고정 분석 사실을 수정하는 값이 아님 |
-| analysis.maintenance | 변경시각·코드/설계 버전·실제 분석 목록 버전·현재 수집 정의 버전·재분석 여부. 유지보수와 새 분석을 구분 |
-
-관찰종목·보유분의 완료봉은 확보된 최대60개, 비관찰 후보의 필수 비교봉은21개를 남기며 이미 계산한 전체 지표·가격 계획·기업 사실·근거는 보존한다. 원천에서60봉 확보를 목표로 하는 것과 미러에 비관찰60봉을 모두 보존하는 것을 구분한다. MA60 등 계산 사실을 보존했더라도21봉만 있는 후보의60봉 재계산을 새로 수행했다고 쓰지 않는다. 압축 내용을 변경했을 때 압축 전후 전체 값·세 업무 해시를 한 번 검증한다. 변경 없는 payload는 첫 복원 때 원문 바이트 수·SHA-256을 확인하고 그대로 보존하며 압축 시험을 반복하지 않는다.
-
-### 입력·출력 예시 — 합성 자료, 운영 대상 아님
-
-`example_only=true` 또는 SIM 식별자를 가진 항목은 실제 수집 목록에 넣지 않는다. 아래 예시는 데이터 폼 설명용이다.
-
-지시문 → PHP, symbols 배열의 한 항목:
 ```json
 {
-  "example_only": true,
-  "symbol_id": "KR|KRX|SIM_A",
-  "country": "KR",
-  "exchange": "KRX",
-  "symbol": "SIM_A",
-  "name": "합성 예시 A",
-  "currency": "KRW",
-  "purpose": "상대강도·눌림 관찰",
-  "candidate_origin": [
-    "new"
-  ],
-  "is_held": false,
-  "position": null,
-  "tick_size": 10,
-  "source_codes": {
-    "kis": {
-      "market_code": "J",
-      "symbol": "SIM_A"
-    },
-    "naver": null,
-    "yahoo": null
+  "investment_style": "swing",
+  "swing_profile": {
+    "formula_version": "MON-SWING-1.0",
+    "ma_period": 5,
+    "min_below_days": 10,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 19,
+    "macd_after_days": 3,
+    "macd_before_hist_bars": 3,
+    "macd_before_gap_atr": 0.10,
+    "rs20_min_pp": 0,
+    "rs20_operator": ">",
+    "final_selector": "ChatGPT"
   }
 }
 ```
 
-PHP → 지시문, quotes 배열의 한 항목:
-```json
-{
-  "example_only": true,
-  "symbol_id": "KR|KRX|SIM_A",
-  "fetch_status": "ok",
-  "attempted_at": "2026-10-08T09:39:05+09:00",
-  "quality_status": "normal",
-  "error": null,
-  "point": {
-    "price": 10080,
-    "change_pct": null,
-    "volume": 1000,
-    "volume_basis": "minute",
-    "currency": "KRW",
-    "venue": "KRX",
-    "source": "KIS",
-    "provider_symbol": "SIM_A",
-    "price_type": "minute_close",
-    "timestamp_basis": "bar_end",
-    "quote_at": "2026-10-08T09:39:00+09:00",
-    "fetched_at": "2026-10-08T09:39:05+09:00",
-    "market_date": "2026-10-08",
-    "session": "regular",
-    "delay_kind": "realtime",
-    "delay_seconds": 0,
-    "bar_time_basis_verified": true
-  },
-  "previous_point": {
-    "price": 10050,
-    "change_pct": null,
-    "volume": 1100,
-    "volume_basis": "minute",
-    "currency": "KRW",
-    "venue": "KRX",
-    "source": "KIS",
-    "provider_symbol": "SIM_A",
-    "price_type": "minute_close",
-    "timestamp_basis": "bar_end",
-    "quote_at": "2026-10-08T09:38:00+09:00",
-    "fetched_at": "2026-10-08T09:39:05+09:00",
-    "market_date": "2026-10-08",
-    "session": "regular",
-    "delay_kind": "realtime",
-    "delay_seconds": 0,
-    "bar_time_basis_verified": true
-  }
-}
+위 표는 주요 설정 발췌다. 실제 프로필은 `MonSwing::rules()`의 전체 객체와 일치해야 한다. 다른 프로필을 같은 기준 버전으로 슬쩍 사용하면 MON_SWING_PROFILE_INVALID다.
+
+| 객체·필드 | 저장 내용·작성 권한 |
+|---|---|
+| watchlist | 기존 종목 신원·수집 코드·실제 보유·설정·달력. MON 작성 |
+| collection | 공급자·시세·시세시각·지연·거래 상태·실패 사유. PHP 작성 |
+| analysis.candidate_audit | 전체 후보의 자격·실패 사유·수치/신호 참조. MON 작성 |
+| 압축 payload.swing_signals | 모든 후보의 MA5 연속 하회 수·재돌파·MACD/시그널/히스토그램·골든 일자/경과·RS20·입력 해시 |
+| analysis.results | ChatGPT가 최종 선정한 BUY_REVIEW/SELL_REVIEW 및 보유 판단. 신호·자율 결정 이유 포함 |
+| payload.strategy_archive | 이전 P2 분석·추천·선정 사실·해시 및 후속 전략 이력. 과거 기준시각 유지 |
+| analysis.swing_preparation | 수치 계산 완료 범위와 최종 자율 선정 대기/완료 상태 |
+
+스윙 신호 값에는 `formula_version, bars_as_of, qualifying_signals, eligible, market_strong, ma5_below_days_before_last, ma5_reclaim_close, ma5_reclaim_live, macd_kind, macd_cross_date, macd_cross_age_days, histogram, macd_gap_atr, bar_input_sha256`를 보존한다. `source_kind=independent`의 검증된 실시간 관측만 장중 재돌파의 독립 입력으로 사용한다. PHP 시세를 독립 조사 사실로 재표기하지 않는다.
+
+현재 거래·기업 위험에 직접 확인하지 않은 사실은 verified로 저장하지 않는다. 지연·실패·미검증·자료 준비 대기는 별도 상태다. `preparation_running=false`는 백그라운드 작업이 실행되고 있지 않음을 뜻한다.
+
+숫자는 소수6자리 ROUND_HALF_UP, 해시용 숫자는 소수6자리 문자열, 객체 키·식별자는 정렬, 시간은 UTC 마이크로초로 정규화한다. `selection_fingerprint`에는 자격 사실·기준·ChatGPT의 최종 선정 결정을 포함한다. `input_fingerprint`에는 고정 as_of·실제 사용 시세·자료 상태를 더한다. `result_fingerprint`에는 행동·가격 계획·스윙 신호·자율 결정 기록을 포함한다. 같은 고정 사실과 **같은 선정 결정**은 같은 업무 결과다. 자유로운 AI 서술이 매번 같은 판단을 내린다고 보장하지 않는다.
+
+전체 JSON 상한은 **786,432바이트(768KiB)**, collection 예약공간은 최소65,536바이트다. 새 신호와 무손실 전략 이력을 함께 저장하기 위해 기존512KiB 상한을 조정했다. 압축 원문은 SHA256/바이트 길이를 검증한다. P3 저장은 PHP 기본 gzip을 사용해 NAS 웹에서 xz 명령 실행에 의존하지 않는다. P2의 기존 XZ는 전환 때 가용 고정 처리기로 한 번 해제한다. 크기 부족 때만 근거 전문을 압축 인덱스로 무손실 이동한다. 이전 근거와 과거 추천을 지우지 않는다.
+
+## 6. 고정 인터페이스
+
+아래 웹 API는 모두 **POST JSON**, stateless다. 반환 파일은 GitHub에 자동으로 쓰지 않는다. source_json은 원문 문자열이며 Git blob SHA가 실제 바이트와 일치해야 한다. 응답의 큰 파일 문자열을 모델 문맥에 출력하지 않고 저장 도구로 전달한다.
+
+| 웹 API / 고정 함수 | 목적 |
+|---|---|
+| `?api=mon_view` / mon_project_for_mon | 저장된 선택·가격 계획·현재 상태·중요 사건의 작은 투영. 전체 후속 페이지 확인 |
+| `?api=mon_swing_prepare` / MonSwing::prepare | 전체 후보의 새 스윙 자격·수치·참고 순위 계산. 최종 추천 없음 |
+| `?api=mon_swing_migrate` / MonSwing::migrate | P2→P3 전환, 이전 추천 이력 보존, 새 자격 계산, 선정 대기 상태와 파일 반환 |
+| `?api=mon_swing_select` / MonSwing::select | ChatGPT의 작은 최종 선정 결정을 검증하고 두 저장 파일 반환 |
+| `?api=mon_patch` / mon_apply_mon_patch | 선정·계획을 바꾸지 않는 가격/위험 변경 또는 실제 변화 없는 reuse |
+
+### 6.1 준비 요청·응답
+
+```text
+요청: {source_json, context:{source_blob_sha,rendered_at,countries,important_ids},
+       live_observations?:[독립 검증 시세 행]}
+반환: criteria_version,formula_version,state_token,prepared_fingerprint,
+      candidate_count,counts,rank_hint,cards,additional_card_pages,
+      preparation,auto_selected:false,final_selector:ChatGPT
 ```
 
-지시문 → 사용자·문서, results 배열의 한 항목:
-```json
-{
-  "example_only": true,
-  "symbol_id": "KR|KRX|SIM_A",
-  "eligibility": "pass",
-  "rank": 1,
-  "base_action": "BUY_REVIEW",
-  "action": "BUY_REVIEW",
-  "readiness": "ready",
-  "verification_status": "verified",
-  "wiki_effect": "confirmed",
-  "price": 10080,
-  "price_type": "minute_close",
-  "price_as_of": "2026-10-08T09:39:00+09:00",
-  "entry_plans": [
-    {
-      "mode": "pullback",
-      "entry_zone": [
-        9800,
-        10200
-      ],
-      "invalidation": 9400,
-      "planned_risk_pct": 7.843137
-    },
-    {
-      "mode": "breakout",
-      "entry_zone": [
-        10400,
-        10600
-      ],
-      "invalidation": 10200,
-      "planned_risk_pct": 3.773585
-    }
-  ],
-  "active_plan": "pullback",
-  "entry_zone": [
-    9800,
-    10200
-  ],
-  "invalidation": 9400,
-  "exit_condition": [
-    "등록된 실제 무효화 가격 도달",
-    "MA20 아래이면서 직전10일저점 붕괴",
-    "확인된 기업 근거 훼손"
-  ],
-  "plan_valid_until": "2026-10-08T15:30:00+09:00",
-  "quote_valid_until": "2026-10-08T09:44:00+09:00",
-  "next_check": "실제 진입 전 최신 가격 확인; 다음 정기 분석 14:00",
-  "reason": "합성 예시: 독립 상위 후보, 유효 가격이 눌림 계획 안에 있음",
-  "evidence_ids": [
-    "SIM-INDEPENDENT-01",
-    "SIM-COLLECTION-01"
-  ]
-}
+짧은 카드와 모든 후속 카드 페이지를 함께 읽는다. 각 페이지는 같은 state_token/prepared_fingerprint의 일부다. 모든 후보의 실제 계산 결과는 내부 full_signals에 유지하며 모델에 원문 전체를 출력하지 않는다.
+
+실시간 관측 행은 symbol_id·country·currency·venue·price·price_as_of·price_type(last/minute_close)·price_checks(지연, 현지 날짜, trade/bar_end 기준, 정규장)·source_kind=independent·evidence_ids를 포함한다. 종목 국가·거래소·통화가 일치하고 근거 참조가 있어야 하며, 나이·지연·정규장 검증을 통과하지 못하면 장중 재돌파에 사용하지 않는다. 장중 신호로 선정하면 사용한 현재가와 시각을 결과와 입력 해시에 보존한다.
+
+### 6.2 자율 선정 결정
+
+```text
+{source_json,
+ decision:{view_context,state_token,prepared_fingerprint,fixed_as_of,
+           selected:[{symbol_id,reason,watch_symbol?:검증된신원·수집코드}],
+           live_observations?:[준비시와 동일한 관측]}}
 ```
 
-사용자 출력은 mon_result.md에 **국가·종목(코드) / 판단 / 가격조건 / 핵심이유** 네 열의 표 하나로 생성한다. 가격조건에 확인된 관측가·시세시각, 매입 구간·무효화 또는 매도 기준을 압축한다. 조건부·지연·확인 필요는 해당 행에 짧게 표시한다. 결과가 없으면 실제 사유를 한 줄로 표시한다.
+준비 입력 토큰·전체 자격 해시가 일치해야 하며 selected에는 적격 종목만 최대3개/국가를 넣는다. 모든 적격 후보를 카드와 후속 페이지로 제공하며 관찰 수집 한도10개 때문에 후보를 숨기지 않는다. 참고 정렬 상위3개를 자동 생성하지 않는다. 이유가 없거나 중복·보유분 중복·미검증·신호 없음은 거절한다. 새 관찰 종목이면 검증된 watch_symbol 신원·수집 코드를 함께 제공한다. 부족하면 자료 준비 필요를 반환한다.
 
-## 7. 파일 갱신·목록 버전·부분 실패 처리
+선정 함수는 현재 기업 위험·현재 거래 상태를 자동 verified로 만들지 않는다. 반환된 추천은 기본적으로 조건부이며 기존 mon_patch의 독립 시세/위험 검증으로 보강한다. 보유분은 새 진입 자격과 무관하게 보존한다.
 
-1. GitHub에서 mon_data.json과 mon_result.md의 최신 내용·SHA 및 브랜치 기준을 읽는다. 오래된 raw 캐시를 갱신 기준으로 삼지 않는다.
-2. mon 지시문은 mon_data.json의 watchlist·analysis를 갱신하고 같은 analysis의 요약인 mon_result.md를 한 커밋으로 저장한다. PHP의 collection은 보존한다. monitor.md는 지시문·설계 개정 시 갱신한다.
-3. mon.php는 mon_data.json의 collection만 바꾸고 watchlist·analysis를 보존한다. PHP가 mon_result.md에 투자 판단을 쓰지 않는다.
-4. SHA 또는 브랜치 충돌이면 최신 데이터 재조회·자기 객체 재병합을 최대 2회 한다. 오래된 전체 JSON을 반복 전송하지 않는다.
-5. 목록·공급자 코드·수집 정의가 바뀌면 watchlist_version을 올린다. 표시 시각만 바뀌면 올리지 않는다.
-6. PHP는 시작한 목록 버전을 collection.watchlist_version에 기록한다. 저장 전 목록이 바뀌면 이전 배치를 새 목록의 완료 결과로 게시하지 않는다.
-7. 지시문은 읽은 목록 버전·식별자에 맞는 자료만 보조 확인에 쓴다. 새 종목에 이전 종목 가격을 연결하지 않는다.
-8. 45초 수집 예산·연결 실패 시 완료·미처리·실패 항목과 next_cursor를 저장한다. 목록 버전이 바뀌면 커서를 다시 맞춘다.
-9. PHP 실행 잠금으로 중복 실행을 생략한다. enabled=false 또는 목록이 비었으면 API를 호출하지 않는다. 잠금·토큰 캐시는 실행 환경에 둔다.
-10. 데이터 저장 실패와 사용자 결과 갱신 실패를 분석 완료와 구분해 보고한다. 저장되지 않은 결과를 저장 성공으로 표시하지 않는다.
+### 6.3 파일 반환·저장
 
-mon_data.json은 UTF-8 compact JSON으로 저장하며 마지막 줄바꿈을 포함해524288바이트(512KiB) 이하다. PHP의 GitHub 미러에는 JSON_PRETTY_PRINT를 적용하지 않는다. 로컬 상태·웹 응답의 가독성용 JSON은 별개다.
+`files=[{path:mon_data.json,content,blob_sha},{path:mon_result.md,content,blob_sha}]`, validation에는 기준·세 해시·압축 검증·collection 보존·저장 크기를 넣는다. 두 파일을 같은 Git 커밋으로 반영한다. 원문 SHA·토큰·해시·자료 기간·소유권·크기 오류이면 쓰기하지 않는다.
 
-지시문은 실제 collection을 보존하면서 크기 검사본에서만 collection을 필수 필드를 갖춘 빈 배치로 대체한다. 그 검사본의 크기는 524288−max(65536,4096+2048×관찰·보유 식별자 수)바이트 이하여야 한다. 실제 collection과 최신 두 가격점 배치를 합친 크기도 상한 안인지 확인한다. 종목 수가 증가하면 예약 공간도 늘린다. 30종목이면 최소65536바이트를 남긴다. 이는 배치 공간 예산이며 시세의 정확도·실시간성을 보증하는 수치가 아니다.
+동시 수집 충돌은 최신 collection만 병합하고 watchlist/analysis가 바뀌면 다시 읽어 판단한다. GitHub lease 충돌 재시도는 최대2회다. 완료된 독립 확인·선정은 같은 고정 입력에 대해 반복하지 않는다. 실제 변화 없는 재표시는 기존 as_of를 유지하고 저장하지 않는다.
 
-후보 지표·독립 결과·공통 비교 날짜의 중복은 위 손실 없는 압축·참조 규격으로 줄인다. 동일 단계의 후보·필수 봉·계산 사실·근거를 조용히 삭제하지 않는다. 해제 후 원문 해시·전체 지표·독립 결과·세 업무 해시가 일치하는지 확인한다. 필요한 공간을 남길 수 없으면 쓰기를 보류하고 크기 문제를 보고한다. PHP는 collection만 소유하므로 크기를 맞추려고 analysis나 후보를 지우지 않는다.
+## 7. 오류·예외와 결과 표시
 
-## 8. 재조정 시뮬레이션
-
-**MON-P2.0 합성 시나리오 52건: 52 PASS / 0 FAIL.** 같은 입력 100회 반복과 후보 순서·기존신규 표기·조회 메타데이터 변경 100회에서 동일 업무 결과를 확인했다.
-이는 결정 규칙과 재현성의 검증이다. 기존보다 투자 수익률이 높거나 어떤 시장에서도 같은 종목이 나온다는 검증은 아니다.
-이전 MON-P1.0의 82건은 이전 강제 문턱에 대한 검증이었다. 해당 문턱을 없앤 이번 기준의 통과 근거로 그대로 재사용하지 않는다. 이전 상세 기록은 GitHub 커밋에 보존되어 있다.
-
-| 번호 | 시나리오 | 결과 |
-|---|---|---|
-| 1 | 구기준 탈락 후보도 상대 경쟁 가능 | PASS |
-| 2 | 65봉 대신 21봉이면 20일 상대강도 경쟁 가능 | PASS |
-| 3 | 20일 계산을 못 하는 20봉은 미확인 | PASS |
-| 4 | RS20 1pp와 음수 RS60으로 강제 제외하지 않음 | PASS |
-| 5 | MA20 아래 MA60 관계로 전환 후보를 제외하지 않음 | PASS |
-| 6 | 낮은 거래대금이 선정 탈락 조건이 아님 | PASS |
-| 7 | 음수 시장·종목 수익도 관찰 경쟁 유지 | PASS |
-| 8 | 미확인 위험은 추천 유지·실행 조건부 | PASS |
-| 9 | 단일 최신 가격점으로 가격 확인 가능 | PASS |
-| 10 | 5분 허용 경계 가격 확인 | PASS |
-| 11 | 301초 가격은 추천 삭제 대신 조건부 | PASS |
-| 12 | 15분 지연이어도 추천 종목 유지 | PASS |
-| 13 | 시세시각 누락 시 추천 유지·확인 조건부 | PASS |
-| 14 | 가격 자료가 없으면 매입 검토 계획 유지 | PASS |
-| 15 | 급등 가격을 현재 진입으로 승인하지 않음 | PASS |
-| 16 | 돌파 구간도 같은 지시문에서 검토 | PASS |
-| 17 | 임의 5% 손실컷으로 종목 추천을 삭제하지 않음 | PASS |
-| 18 | 등록한 무효화 가격은 완화하지 않음 | PASS |
-| 19 | 단순 MA20 이탈만으로 매도하지 않음 | PASS |
-| 20 | MA20와 직전10일저점 붕괴를 매도 검토 | PASS |
-| 21 | 확인된 거래정지는 신규 후보 제외 | PASS |
-| 22 | 거래정지 보유종목 관찰 유지 | PASS |
-| 23 | 잘못된 종목 시세로 가격 확인하지 않음 | PASS |
-| 24 | 미래 시세시각 오류 유지 | PASS |
-| 25 | 등록 보유분 신규 추천 중복 없음 | PASS |
-| 26 | 기존·신규 이력은 순위에 영향 없음 | PASS |
-| 27 | 후보 중복 제거 | PASS |
-| 28 | 관찰10·추천3 상한 | PASS |
-| 29 | 후보 순서·기존신규·수집메타 변경 100회 동일 | PASS |
-| 30 | 고정 입력 100회 동일 | PASS |
-| 31 | 다른 숫자 표현을 동일 입력으로 정규화 | PASS |
-| 32 | PHP 가격 변경은 독립 선정 순위를 바꾸지 않음 | PASS |
-| 33 | PHP 가격 변경은 가격 확인 입력 버전 변경 | PASS |
-| 34 | 새 완료봉으로 순위 근거가 바뀌면 결과 갱신 | PASS |
-| 35 | 가격 충돌은 선정 유지·확인 보류 | PASS |
-| 36 | 동점은 식별자 순서로 고정 | PASS |
-| 37 | 보유종목은 10개 관찰 상한 밖에서도 유지 | PASS |
-| 38 | 정수·실수 표기 차이는 같은 해시 | PASS |
-| 39 | 가격 미세 표기 차이는 같은 판단 | PASS |
-| 40 | ATR 부족은 종목 추천 유지·가격 조건부 | PASS |
-| 41 | OHLC 일부 부족은 종목 추천 유지·가격 계획 미확인 | PASS |
-| 42 | UTC 오프셋만 다른 동일 시각은 같은 입력 해시 | PASS |
-| 43 | 시세 거래일 불일치는 현재 가격 확인 불가 | PASS |
-| 44 | 오프셋 없는 시세시각은 현재 가격 확인 불가 | PASS |
-| 45 | 손상된 시세시각은 현재 가격 확인 불가 | PASS |
-| 46 | 호가 경계는 십진 계산으로 손실 없이 반올림 | PASS |
-| 47 | 호가 경계의 미세 숫자 표기는 같은 가격 계획 | PASS |
-| 48 | 같은 종목의 서로 다른 지지 사실은 재확인 | PASS |
-| 49 | 통화 변경은 확인 입력 해시를 바꿈 | PASS |
-| 50 | 판단에 쓰지 않은 다른 종목 시세는 입력 해시 제외 | PASS |
-| 51 | 음수 지연 값은 오류 가격 | PASS |
-| 52 | 음의 영은 같은 숫자로 정규화 | PASS |
-
-기존의 원천 매핑·시세 날짜·JSON·SHA·객체 소유권·실행 예산 규격은 계속 적용한다. 실제 계좌 연결과 실제 시장 백테스트는 아직 수행하지 않았다.
-
-## 9. 실제 배포·API 연결에서 확인할 조건
-
-mon.php 구현과 모의 검증은 완료했다. 다음 조건은 실제 NAS·API에서 확인한다.
-
-- 동일 PHP 안의 나라별 어댑터가 실제 응답의 날짜·봉 시각 의미·코드·권한·지연·거래량 종류를 정확히 정규화하는지 확인.
-- mon_data.json 관찰 기록 → PHP 읽기 → 시세 수집·미러 → 지시문 재조회 → mon_result.md 생성까지 연결하고, 동시 갱신 후 다른 작성자의 객체가 보존되는지 확인.
-- 실제 계좌의 호출 한도·응답 속도와 관찰 수에 따라 partial 빈도를 측정. 60초 주기에서 가능한 범위를 확인한 뒤 활성화.
-- 합성 시뮬레이션과 별도로 실제 과거 자료에서 공통 조건의 추천 빈도·후보 편중·무효화 조건을 평가. 검증 없이 수익률 또는 정확도 개선을 주장하지 않음.
-
-## 10. mon_result.md — 최소 사용자 출력 규격
-
-- 맨 위에 분석 기준시각과 완료/부분 상태를 한 줄로 표시한다.
-- 표 하나의 열: **국가·종목(코드) / 판단 / 가격조건 / 핵심이유**.
-- 매입 검토는 국가별 최대 3개다. 매도 검토와 보유 판단이 바뀐 종목은 함께 표시한다.
-- 판단은 매입 검토·조건부 매입·매도 검토·보유 유지로 짧게 표현한다. 가격조건은 확인된 가격·시세시각·매입 구간·무효화 또는 매도 기준만 압축한다.
-- 변동 없는 보유분은 총수 한 줄로 요약한다. 등록이 없으면 보유 등록 없음을 표시한다.
-- 주요사항은 시장 변화·판단 변경·가격/자료 확인 필요 중 최대 3개다. 결과가 없으면 실제 사유만 한 줄로 표시한다.
-- 상세 후보·근거·계산값·상태·실행 이력·식별값은 mon_data.json에 보존한다.
-
-가격 구간 충족은 분석 당시 확인과 현재 표시를 구분한다. 표시시각이 quote_valid_until을 넘으면 해당 관측을 “만료·현재 재확인”으로 표시하고 현재도 구간을 충족한다고 쓰지 않는다. 새 분석 없이 문서를 보완할 때는 분석 기준시각을 유지하고 표시 보완시각을 따로 적는다. 이미 만료된 정규장 상태를 현재 장 상태라고 다시 보고하지 않는다.
-
-마지막 저장 분석은2026-10-09 00:59 KST 기준 후보181개·비교152개·관찰30개·조건부 매입9개다. PHP 수집부는 not_started이고 비활성 설정을 유지한다. 결과표는 이 분석의 과거 관측과 가격 계획을 표시하며 현재 시세 재확인이 필요하다. 이 절은 관측 기록이며 다음 실행은 최신 mon_data.json을 읽는다.
-
-
-## 11. mon.php 1.2.4 — 웹 화면으로 운영
-
-사용자가 CLI 명령을 입력하지 않고 **브라우저의 mon.php 화면**에서 데몬을 시작·중지하고 상태·연결 설정을 관리한다. 별도 로그인 암호나 전용 폴더를 요구하지 않는다.
-
-### 설치와 사용
-
-1. mon.php를 NAS의 /volume1/web/mon.php로 교체한다. 실제 web 경로가 다르면 해당 웹 폴더에 둔다.
-2. 브라우저에서 NAS 웹 주소의 /mon.php를 연다.
-3. mon.php와 같은 폴더의 **sis_private_sync_config.php**에서 `github_token`, **broker_config.local.php**에서 한국투자증권 `app_key`·`app_secret`을 자동으로 읽는다. 사용자가 지정한 경로는 **/web/broker_config.local.php**다. 기존 파일을 그대로 사용하고 키를 다시 입력하지 않는다. GitHub 키는 stock 저장소 Contents 쓰기 권한이 필요하다. 기존 파일에서 사용할 수 있는 연결값을 찾지 못하면 **연결 설정**의 종전 저장값으로 보완한다. 공개 목록 조회에는 키를 강제하지 않는다.
-4. **시작**을 누르고 운영 상태를 확인한다. 시작 성공은 프로세스 존재이며 실수집 성공은 별도다. 설정 필요·수집 꺼짐·장외 대기·수집 확인 중·부분 수집·수집 중을 구분한다. 새 코드 교체 뒤 기존 프로세스가 남아 있으면 **재시작 필요**로 표시하므로 중지→시작한다.
-5. **중지**로 정상 종료한다. 화면은 3초마다 상태를 확인한다.
-
-시작한 데몬은 브라우저를 닫아도 계속 실행한다. 웹 요청 자체를 무한 실행시키지 않으며, 서버 내부에서 설치된 PHP 실행 환경을 자동 확인해 분리 프로세스로 시작한다. PHP-FPM/CGI 실행 파일을 CLI 실행 환경으로 잘못 인정하지 않고, PHP 7.4 이상·cURL 사용 가능 여부를 확인한다. 사용자는 SSH나 CLI 명령을 입력하지 않는다.
-
-서버가 백그라운드 프로세스 시작을 차단했거나 적절한 PHP 실행 환경이 없으면 화면에 시작 실패 사유를 표시한다. 실제 데몬이 확인되지 않은 상태를 실행 중이라고 표시하지 않는다. 자동 탐색에 실패한 경우에만 연결 설정 안의 **실행 환경**에서 설치된 PHP 실행 파일 위치를 지정할 수 있다.
-
-### 화면 표시와 역할
-
-- **시작·중지** 버튼, 프로세스 존재와 실제 수집 준비·활동 상태를 분리한 표시.
-- 관찰종목 수, 식별·가격·세션·시각·지연 조건을 충족한 최신 가격 수, 최근 GitHub 미러 시각. 조회하지 못한 관찰목록은 0으로 확정하지 않고 —로 표시한다.
-- 오래된 가격·다른 목록 버전·통화·거래소·미확인 시각의 가격은 최신 가격 수에 넣지 않는다. 이는 수집 운영 지표이며 투자 판단 확인을 대신하지 않는다.
-- 상태 요청 실패·오래된 heartbeat·5초를 넘는 미래 heartbeat에서는 이전 정상 표시를 유지하지 않는다. PID만 살아 있는 설정 대기는 정상 수집의 녹색 표시를 켜지 않는다.
-- 연결값 설정 여부와 현재 처리 상태·오류 사유. 설정됨은 인증 성공을 주장하는 표시가 아니다.
-- 웹 화면은 수집기의 운영 화면이다. 종목 선정·매입·매도 판단과 사용자 투자 결과는 기존대로 mon 지시문 및 mon_result.md가 담당한다.
-
-GitHub 반영키가 없으면 공개 목록만 읽고 설정을 기다린다. 익명 조회는 저장소·브랜치·실제 조회시각을 확인한 로컬 캐시를 최대300초 재사용하고 조회 주기를 최소300초로 둔다. 캐시 사용으로 원래 조회시각을 갱신하지 않는다. 반영키 없이 공급자 수집이나 GitHub PUT을 시작하지 않는다. private 저장소는 읽기 권한도 필요하다.
-
-watchlist.settings.enabled=false 또는 빈 관찰목록이면 데몬은 대기한다. GitHub 반영키와 유효한 목록·enabled=true가 갖춰지면 시세 수집·미러를 수행한다. KIS 키가 없거나 조회에 실패하면 기존 네이버·Yahoo 보완을 사용한다. 최신 확인 목록은30개·버전5이며 사용자의 활성화 요청에 따라 enabled=true로 운영 중이다. 이번 코드 개정은 활성화 값·collection·분석을 변경하지 않는다. 수집 설정은 mon 지시문이 소유하므로 PHP 화면에서 임의로 활성화하지 않는다.
-
-### 연결 설정과 자동 파일
-
-설정 저장은 같은 web 폴더에 mon_settings.php를 자동 생성한다. 설정 파일을 사용자가 별도로 만들 필요가 없다. 입력하지 않은 API 연결값은 기존 값을 유지한다. PHP 실행 파일 위치는 비워 두면 자동 탐색을 사용한다. 저장된 API 연결값은 상태 JSON이나 웹 화면에 다시 출력하지 않는다.
-
-GitHub 키는 같은 폴더의 sis_private_sync_config.php가 반환하는 배열의 `github_token`을 최우선 적용한다. `GITHUB_TOKEN`·`SIS_GITHUB_TOKEN` 별칭도 지원한다. 이 파일의 repo·branch·api_base·web_sync_key 등은 MON 설정으로 가져오지 않는다. MON의 기본 저장소는 wskimgit/stock, 브랜치는 main이다. 공유 키를 mon_settings.php에 복사하거나 기존 SIS 파일을 수정하지 않는다.
-
-한국투자증권 키는 **broker_config.local.php가 반환하는 배열**의 `app_key`·`app_secret`을 한 쌍으로 최우선 적용한다. `KIS_APP_KEY`·`KIS_APP_SECRET` 배열 키 별칭도 지원한다. 파일이 없거나 한쪽이 비었거나 형식이 잘못되면 이 파일의 한쪽 키를 다른 출처와 섞지 않고 종전 KIS 설정으로 보완한다. 앱키·앱시크릿은 읽기만 하며 mon_settings.php·mon_data.json·GitHub·로그·화면에 복사하지 않는다. 기존 broker 설정 원본은 수정하지 않는다.
-
-broker 설정의 `mode`·계좌·주문 허용값·자동매매 설정·repo·branch는 MON 설정으로 가져오지 않는다. MON은 기존 시세 조회용 KIS API `https://openapi.koreainvestment.com:9443`을 유지한다. Trade의 `mode=paper`만으로 KIS 시세 API 환경을 바꾸지 않는다. 파일 참조 또는 설정됨 표시는 연결값의 존재이며 실제 인증 성공을 뜻하지 않는다. KIS 설정 파일 오류는 `kis_config_error`로 따로 표시하고 GitHub·웹 시작·중지나 기존 보완 공급자 수집을 막지 않는다.
-
-기존 파일에서 사용할 수 있는 연결값을 얻지 못하면 종전 설정으로 보완한다. 웹에서 직접 저장한 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·PHP_CLI는 해당 웹 저장값을 환경변수보다 우선 적용한다. 나머지 설정은 운영체제 환경변수 → 명시한 --env 파일 → 저장값 → MON_CONFIG 순서를 유지한다. 빈 API 입력은 기존 값을 유지하며 PHP_CLI를 빈 값으로 저장하면 자동 탐색을 사용한다. PHP 문법·읽기 권한·키 형식 오류는 키 값 없이 사유를 표시하며 웹 시작·중지 기능을 막지 않는다.
-
-데몬은 매 주기에 저장값·sis_private_sync_config.php·broker_config.local.php를 다시 읽으며, 대기 중에는5초 단위로 세 파일 내용의 변경을 감지해 장시간 재시도 대기를 끝낸다. 파일이 생성·삭제되거나 동일한 수정시각·길이로 키를 교체해도 내용 변경을 감지한다. KIS 키 쌍이 바뀌면 기존 발급 토큰·공급자 재시도 대기 상태를 새 연결값에 맞춰 초기화한다. 수집·게시 중 변경은 현재 작업을 마친 후 반영한다. PHP 실행 파일 위치는 다음 데몬 시작에 사용한다. 설정 변경과 데몬 코드 교체는 구분한다. 공유 키를 사용할 때 화면은 **GitHub 기존 설정 파일 사용** 또는 **한국투자증권 기존 설정 파일 사용**, 상태 JSON은 `github_token_source=sis_private_sync_config.php` 또는 `kis_credentials_source=broker_config.local.php`로 표시하며 키 값은 출력하지 않는다.
-
-mon.php 옆에 mon_daemon.lock, mon_status.json, mon_stop.json, mon_pending.json, mon_remote_cache.json, mon.log, mon_launcher.log, mon_web_launch.lock, mon_php_runtime.json 및 저장 시 mon_settings.php가 생긴다. 기존 web 폴더의 권한을 변경하지 않고 다른 프로그램의 status.json 등을 덮어쓰지 않는다. KIS 발급 토큰은 실행 중 메모리에 보관한다. 실제 연결값이 담긴 운영 파일은 코드 배포 커밋에 포함하지 않는다.
-
-mon_remote_cache.json의 로컬 전용 _mon_cache는 repository·branch·fetched_at을 기록한다. 실제 원격 조회 때만 갱신하며 공유 mon_data.json에는 쓰지 않는다. mon_status.json은 기존 state 외에 activity_state·last_attempted·last_succeeded를 기록하여 waiting heartbeat가 실제 오류·일시정지 상태를 가리지 않게 한다.
-
-### 웹 입력·출력 인터페이스
-
-| 요청 | 입력 | 출력·효과 |
-|---|---|---|
-| GET mon.php | 없음 | 한글 HTML 제어 화면 |
-| GET mon.php?view=status | 없음 | ok·message·error_code·data JSON. running·heartbeat_fresh·readiness·monitoring_active·restart_required·setup_blockers·fresh_quotes·watchlist_loaded·market_states·github_token_source·kis_credentials_source·kis_config_error. 키 값은 포함하지 않음 |
-| POST mon.php | action=start | PHP 실행 환경 자동 확인 → 데몬 시작 확인 → 상태 |
-| POST mon.php | action=stop | 현재 인스턴스 종료 요청 → 종료·중지 중 상태 |
-| POST mon.php | action=save_settings 및 GITHUB_TOKEN·KIS_APP_KEY·KIS_APP_SECRET·선택 PHP_CLI | 자동 저장 → 대기 중5초 단위 감지 또는 진행 중 작업 완료 후 적용 |
-
-POST가 application/json 응답을 요청하면 같은 상태 JSON을 반환한다. 일반 HTML 폼 요청도 지원한다. 지원하지 않는 요청·잘못된 설정은 오류로 응답하며 기존 저장값을 임의로 초기화하지 않는다.
-
-기본 수집 60초·미러 180초, 분석 직전 미러, 한국투자증권 우선 및 네이버·야후 보완, 부분 수집 이어가기, SHA 충돌 재조회·최대 2회 재시도, collection만 교체하는 동작을 유지한다. 웹에서 프로세스를 시작할 때 웹 서버의 리스닝·요청 연결을 자식에게 남기지 않도록 처리한다.
-
-### 재부팅과 검증 범위
-
-브라우저를 닫는 것은 데몬 종료가 아니다. 웹 서버 재시작 뒤에도 살아 있는 데몬을 다시 확인하고 제어할 수 있다. NAS 자체를 재부팅하면 웹 화면에서 다시 **시작**한다. 부팅 후 웹 요청 없이 자동 실행하려면 NAS의 부팅 작업 등록이 별도로 필요하며 이번 개정에서 자동 등록하지 않았다.
-
-- 이전1.2.0 검증 기록: 모의 API·저장39개, 실제 프로세스 호환성16개, 실제 HTTP·분리 프로세스26개로 총81개 통과. PHP·웹 JavaScript 문법 검사도 통과했다. 이전 검증은 로컬 PHP8.3.6에서 수행한 기록이다.
-- 이전1.2.1 검증: 모의 API·저장 **57개 통과**(기존39개+추가18개), PHP 문법 검사 통과. 당시 실제 분석 크기+30종목×2가격점 게시, compact 형식, 분석/해시 보존, 공간 예약, 초과 크기의 PUT 차단, 네이버 식별·시장·시간대·시간외, 야후 시장·시간대·세션·지연 정책을 확인했다.
-- 후보181개의 전체 지표·전체 독립 결과·기존 압축 사실을 해제 후 대조하고 세 업무 해시·collection·보유 상태·수집 비활성이 보존됨을 확인했다. 새 투자 분석이나 성과 검증이 아니다. 분리 프로세스 로직은 바뀌지 않아 기존 프로세스·웹 시험을 반복 실행하지 않았다.
-- 이전1.2.2 검증: 변경 영향 회귀 **56개 PASS /0 FAIL** — 모의 API·설정·캐시·운영상태36개, 실제 HTTP·분리 프로세스15개, 웹 상태 통신 실패5개. PHP 문법 검사 통과. 공개 GET·익명 PUT 차단·설정 우선순위·동일 수정시각의 설정 변경·대기 중 반영·시세 만료·구버전 재시작 표시·공유 분석 보존을 확인했다. 외부 API 호출은 시험하지 않고 모의 응답을 사용했다. 기존 정상 가격 어댑터·판단 수식의 시험은 반복하지 않았다.
-- 이전1.2.3 검증: 기존 설정 파일 참조에 대한 변경 영향 **38개 PASS /0 FAIL** — 설정·인증 요청·게시 보존26개, 실제 HTTP·분리 프로세스12개. 기존 github_token 읽기, 기존 키 우선순위, stock/main 유지, 다른 웹 설정 저장 시 키 미복사, 동일 수정시각·길이의 키 변경, 대기 중5초 단위 반영, 설정 PHP 출력 제거, 문법 오류 시 상태·중지 동작을 확인했다. PHP와 생성 웹 JavaScript·Python 시험 파일의 문법 검사도 통과했다. 외부 GitHub·시세 API는 모의 응답을 사용했으며 당시 실제 NAS 토큰 권한은 시험하지 않았다. 이미 PASS한 가격 어댑터·판단 수식·일반 상태 시험은 반복하지 않았다.
-- 이번1.2.4 검증: broker 설정 파일 참조에 대한 변경 영향 **34개 PASS /0 FAIL** — 설정·모의 OAuth·시세 요청 헤더25개, 실제 HTTP·분리 프로세스9개. 반환 배열의 키 쌍·출처 우선순위·키 미복사·stock/main 유지·같은 수정시각과 길이의 키 변경·토큰 갱신·대기 중5초 단위 반영·오류 중 웹 중지를 확인했다. PHP·생성 웹 JavaScript·Python 시험 파일 문법 검사도 통과했다. 이미 정상 확인한 가격 어댑터·판단 수식은 반복 시험하지 않았다. 외부 KIS 인증·시세 응답은 시험용이며 실제 키를 사용하지 않았다.
-- 2026-10-09 23:50 KST에는 실제 NAS1.2.3의 배포·데몬·HTTP 상태·heartbeat·30종목·수집 활성화·미국 Yahoo 시세10개와 GitHub 미러를 확인했다. 새1.2.4의 NAS 적용과 실제 KIS 인증·시세 연결은 미확인이다. 회귀 실행 환경은 PHP8.3.6이며 부팅 작업은 등록하지 않았다.
-- 재현용 파일: tests/mon_daemon_test.php, tests/mon_lifecycle_test.py, tests/mon_web_test.py. Python 시험은 cURL을 활성화한 PHP CLI를 MON_TEST_PHP로 지정할 수 있다. 이 실행 방법은 개발 검증용이며 운영 사용자의 CLI 입력을 요구하는 절차가 아니다.
-
-### ERRC 개선 내역
-
-| 기준 | 확인한 문제 | 1.2.2 처리 |
-|---|---|---|
-| Eliminate 제거 | 공개 읽기에도 연결키 강제, PID만으로 정상 수집 표시, 오래된 가격을 최신으로 집계 | GET 인증 선택·PUT 인증 필수, 운영 준비/활동 분리, 최신 가격 조건 직접 확인 |
-| Reduce 축소 | 설정 대기 중 반복 익명 조회, 긴 재시도 대기 때문에 설정 적용 지연 | 300초 공개 캐시·조회 주기, 대기 중5초 설정 변경 감지 |
-| Raise 강화 | 웹 저장값이 환경변수에 가림, 상태 요청 실패 뒤 정상 표시 유지, 대기 heartbeat가 실제 상태 가림 | 명시적 웹 저장 우선, 통신 실패 즉시 미확인 표시, activity_state 유지 |
-| Create 추가 | 파일만 교체한 뒤 구버전 프로세스가 계속 실행되는 것을 확인할 수 없음 | restart_required와 웹 중지→시작 안내; 구조화된 운영 상태 |
-
-추가 회귀 재현 파일: tests/mon_errc_test.php, tests/mon_errc_web_test.py, tests/mon_errc_ui_test.js. 순서대로 PHP 회귀 → 실제 HTTP 회귀 → PHP 회귀가 만든 test_ui.html에 대한 Node 상태 표시 회귀를 실행한다. GitHub 공유 데이터·추천 결과·다른 NAS 프로그램은 이 코드 개정에서 변경하지 않는다.
-
-1.2.3 참조 기능 재현 파일은 tests/mon_private_sync_test.php와 tests/mon_private_sync_web_test.py다. 모든 키와 GitHub 응답은 시험용이며 기존 SIS 설정 원본·실제 키를 시험 파일이나 배포 커밋에 넣지 않는다. ERRC 관점에서 키 중복 입력·복사를 제거하고, 갱신 지연을 줄이며, stock 저장 대상과 오류 중 제어 동작을 검증하고, 기존 키 사용 출처 표시를 추가했다.
-
-1.2.4 broker 참조 기능 재현 파일은 tests/mon_broker_config_test.php와 tests/mon_broker_config_web_test.py다. 실제 /web/broker_config.local.php와 앱키·앱시크릿은 시험 파일이나 코드 배포 커밋에 넣지 않는다. PHP 시험은 test_broker_ui.html을 생성하며 이 화면의 JavaScript 문법을 추가 확인할 수 있다.
-
-
-## 12. 고정 일괄 계산·오류 처리 설계 — MON-BATCH-1.0
-
-**상태: 설계 확정·구현 예정.** 이 절은 mon.php 1.2.4의 현재 기능이나 실제 API 시험 성공을 의미하지 않는다. 구현할 때도 루트의 monitor.md·mon.php·mon_data.json·mon_result.md를 유지한다. 별도 계산 서버·DB·Python 설치·엑셀 파일·GitHub Actions는 기본 구성에 추가하지 않는다. 사용자 운영은 기존 mon.php 웹 화면을 사용한다.
-
-### 12.1 역할과 처리 순서
-
-| 담당 | 입력 | 처리 | 출력·권한 |
-|---|---|---|---|
-| MON | 이전 후보·보유 등록·독립 조사·중요 기업 사실 | 신규 후보 탐색, 기존·신규 후보 집합 확정, 독립 검증과 최종 판단 | watchlist·analysis, mon_result.md |
-| mon.php 수집부 | 관찰목록, 전체 후보 참조, 국가·시장별 완료일 | 시세 수집, 비교 지수 우선 확인, 새 완료 일봉·정정만 보충 | collection.quotes와 설계 추가 collection.batch |
-| mon.php 계산 함수 | 정규화한 종목 봉·지수 봉·검증된 호가 정보 | 지표별 유효성 검사, 고정 수식 일괄 계산, 수치 참고 순위·가격 계획 생성 | 부작용 없는 계산 반환값. 데몬이 호출한 결과만 collection에 반영 |
-| GitHub stock | 두 작성자의 갱신 | 데이터 미러·버전 이력·결과 보존 | 저장소 루트 파일 유지 |
-
-자료 준비 순서는 **후보 집합 확인 → 비교 지수 확인 → 변경된 종목 봉 보충 → 고정 함수 한 번**이다. 일반 MON은 준비된 자료의 **짧은 입력 → 필요한 확인 → 변경분 판단 → 저장** 경로로 처리하며 큰 준비가 끝나기를 기다리지 않는다. 반복 갱신에서는 바뀌지 않은 단계의 실제 결과를 재사용한다. 기업 위험·거래 상태의 새 중요 변화와 현재 가격 유효성은 별도로 확인한다.
-
-계산 함수가 내놓는 것은 수치와 참고 순위다. PHP가 독자적으로 종목을 발굴하거나 기업 위험 확인·최종 BUY_REVIEW/SELL_REVIEW·ready를 확정하지 않는다. MON은 근거의 식별·기간·조정 방식과 중요 기업 사실을 독립 확인하고 기존 MON-P2.0 순위를 적용한다. 수치 재사용을 이유로 독립 판단을 생략하지 않는다.
-
-전체 후보 계산과 시세 관찰 범위는 다르다. 계산 대상은 MON이 확정한 전체 유효 경쟁 후보이며, 정규장 시세는 국가별 관찰 최대10개와 보유분에 우선한다. 이전 추천9개 또는 watchlist.symbols만으로 전체 수치 경쟁을 대체하지 않는다.
-
-### 12.2 두 주기와 변경 감지
-
-| 작업 | 실행 조건 | 캐시·재조회 규칙 |
-|---|---|---|
-| 시세 | 기존 60초 수집·180초 미러 | 현재 두 가격점 유지. 기존 시세 수집 예산·순환 커서 유지 |
-| 완료 일봉·지수 | 새 완료일, 신규 후보, 분할·정정 등 실제 변경 | 첫 확보는 필요한 과거 기간, 이후 새 봉·확인된 정정 구간만 조회 |
-| 고정 수치 계산 | 봉·후보·비교 기간·호가 정보·기준의 내용 해시 변경 | 변경 행의 지표를 계산하고 전체 유효 후보를 같은 규칙으로 다시 정렬. 내용이 같으면 계산 결과 재사용 |
-| MON 판단 | 수동 요청 또는 별도로 등록된 예약 | 최신 기업 사실·보유·현재 가격 상태를 확인하여 최종 결과 생성 |
-
-비교 그룹은 KR의 KOSPI·KOSDAQ, US의 S&P 500, JP의 TOPIX다. 그룹별 지수는 완료일·비교 기간당 한 번 확보해 공유한다. KR의 한 지수만 실패하면 다른 지수 그룹을 함께 중단하지 않는다. 공통 지수 실패는 해당 그룹의 최신 비교를 보류한다. 개별 종목의 자료 부족은 그 종목만 unverified로 두며, 동일 기간의 검증된 후보끼리 경쟁·추천을 계속한다. 이 경우 coverage=partial이며 전체 후보의 최신 갱신이 완료됐다고 표시하지 않는다.
-
-모든 후보의 일봉을 매분 조회하지 않는다. 대량 수집은 기존 수집45초·게시10초·전체55초 예산 안에서 현재 시세를 우선한 뒤 남은 작업을 순환 커서로 이어간다. 계산용 웹 동작은 외부 시세·뉴스 조회를 수행하지 않는다. 모듈 추가를 이유로 요청 간격1.25초·원천의 확인된 호출 한도를 초과하지 않는다. 동시 조회는 지원되는 원천에서 그 한도와 시작 간격을 지키는 범위에만 적용한다.
-
-같은 완료일·원천의 실패는 일반 반복 갱신에서 계속 호출하지 않는다. 새 완료일·새 원천·정정·새 근거·명시적 재확인 요청에 다시 확인한다. 비교 지수 조회는 기본1회와 추가1회까지로 제한한다. 추가1회는 재시도 또는 검증된 차선 원천 조회에 사용하며, 실패하면 해당 그룹의 대량 수집을 보류한다. 이미 확보한 새 봉은 이전 봉과 섞어 계산하지 않고 pending으로 남긴다.
-
-### 12.3 고정 수식과 행렬 표현
-
-행은 symbol_id, 열은 검증된 비교 날짜다. 종목의 완료 종가 행렬을 C, 고가·저가를 H·L, 원시 종가를 P, 실제 거래량을 V, 공식 거래대금을 A라 한다. 지수 종가는 해당 행의 비교 그룹에서 공유한다. 날짜·조정 방식이 다른 값, 진행 중 봉, 중복 봉을 끼워 넣거나 결측을 이전 값·0으로 채우지 않는다. 기존 검증 comparison_dates와 같은 기간을 사용한다.
-
-| 산출값 | 고정 계산 | 결측 처리 |
-|---|---|---|
-| R20 | C_latest / C_20거래일전 − 1 | 필수 비교 종가21개 또는 양수 분모 부족 → null·unverified |
-| RS20_pp | 100 × (반올림 전 종목 R20 − 반올림 전 같은 기간 지수 R20) | 같은 완료일·기간의 지수 부족 → null·unverified |
-| MA5·MA10·MA20 | 각각 최근 5·10·20완료 종가의 행 평균 | 해당 기간 부족 → 해당 값만 null |
-| TR·ATR14 | TR=max(H−L, abs(H−직전 C), abs(L−직전 C)); ATR14=최근14 TR의 단순평균 | 필요한 직전 종가·고가·저가 부족 → ATR14=null. Wilder 평활식으로 바꾸지 않음 |
-| ADV20 | 최근20일 공식 거래대금 A 평균. 없으면 그 날 원시 P×실제 V | 20일 값 부족 → null. 조정 종가×원시 거래량으로 대체하지 않음 |
-| 지지 S | 최신 완료 종가 이하인 MA5·MA10·MA20·최근5일 저점 중 최댓값 | 필요한 값이 없거나 후보값 없음 → S 또는 해당 계획 null |
-| 저항 R | 최신 완료일을 제외한 직전20완료일 고가 최댓값 | 필요한 고가 부족 → R·돌파 계획 null |
-| 가격 계획 | 기존 4절의 눌림·돌파 구간·무효화·호가 올림/내림 | ATR·호가·범위 조건 미확인 → 해당 계획 null. 선정은 유지 |
-| 보유 참고값 | 최근5일 저점·직전10완료일 저점·MA20 등 | 부족한 참고값만 null. 최종 매도 판단은 MON |
-
-MA60·RS60 등 기존 참고 지표는 자료가 있을 때만 추가한다. 수익률은 기존 분할 조정 가격 수익 방식에 맞추며 배당 재투자 총수익률로 바꾸지 않는다. OHLC는 같은 현재 가격 단위로 맞추고, 거래대금은 원시 가격 단위를 따로 보존한다.
-
-수학적으로 R20은 각 행의 마지막 열을 첫 비교 열로 나눈 뒤1을 빼고, RS20은 그룹의 지수 R20을 각 행에 공유하여 뺀 값이다. 평균·최댓값·최솟값·TR도 각 행에 같은 식을 적용한다. 구현은 **한 번의 함수 호출로 전체 변경 행을 처리**하며 내부 배열 순회는 필요하다. 데이터 N행·T열의 처리가 반복 연산 없이 O(1)이 된다고 주장하지 않는다. PHP에 NumPy 수준의 벡터 엔진이나 외부 수학 라이브러리를 필수 설치하지 않는다.
-
-중간 계산은 원래 정밀도를 보존하고 비교·저장값은 마지막에 소수6자리 ROUND_HALF_UP, −0→0으로 정규화한다. RS20 계산 전에 R20을6자리로 잘라 사용하지 않는다. 호가 계산은 십진값으로 수행한다. 특정 PHP 확장 설치가 없는 환경에서도 이 규격을 구현할 수 있어야 하며, 이진 부동소수점 경계 오차를 허용하는 규격으로 완화하지 않는다.
-
-유효 마스크는 지표별이다. rank_valid는 식별·필수 종가·동일 기간 지수가 충분한 행, plan_valid는 필요한 OHLC·ATR·호가 조건이 충분한 계획이다. OHLC가 잘못되어도 별도로 검증된 종가가 유효하면 수익률 계산은 유지할 수 있다. 반대로 종가나 비교 기간이 틀린 행을 OHLC가 있다는 이유로 순위에 넣지 않는다.
-
-참고 순위는 국가별 RS20_pp↓ → R20↓ → ADV20↓ → symbol_id↑다. ADV20=null은0과 구분하고 확인된 값 뒤에 둔다. pass·near는 같은 순위에서 경쟁한다. 확인된 기업 FAIL은 MON이 적용하고 보유 감시는 유지한다. 새로운 임의 점수·강제 탈락 문턱·ready 우선 교체 규칙을 추가하지 않는다.
-
-### 12.4 입력·출력·웹 인터페이스
-
-다음은 schema_version 3의 **선택 확장 규격**이다. 기존 필수 객체와 전체 행·XZ 참조 폼은 계속 읽는다. 새 필드가 없으면 구형 동작이며 새 기능의 성공으로 취급하지 않는다. 현재 mon_data.json을 설계 예시로 덮어쓰지 않는다.
-
-| 인터페이스·경로 | 최소 내용 | 작성·이용 |
-|---|---|---|
-| watchlist.batch_request | formula_version=MON-BATCH-1.0, pool_ref=analysis.candidate_audit, pool_fingerprint, target_dates(비교 지수별 검증된 완료일) | MON이 확정한 전체 경쟁 집합의 요청. 식별자 목록을 중복 복사하지 않음 |
-| pool_ref | candidate_audit의 symbol_id 목록. 관찰·보유분을 합쳐 중복 제거 | MON이 기억 기간을 정리한 집합만 사용. PHP가 발견일·선정일을 임의 연장하지 않음 |
-| 정규화 함수 입력 | formula_version, criteria_version, pool_fingerprint, comparison_periods, symbols, series, benchmarks | 계산 직전 고정한 사실. 변경 도중의 자료를 섞지 않음 |
-| symbols[symbol_id] | country, exchange, currency, benchmark_id, 확인된 호가 정보·조정 방식·근거 참조 | 실제 응답과 식별 대조. 새 공급자 매핑이 미확인인 종목은 pending |
-| series / benchmarks | symbol_id 또는 benchmark_id별 날짜 오름차순 완료 봉과 출처·checked_at·data_as_of | 봉 배열은 date, open, high, low, close, volume. raw_close·turnover는 해당 날짜의 선택 맵으로 추가 |
-| 함수 반환 | formula_version, criteria_version, pool_fingerprint, batch_input_fingerprint, status, coverage, metrics, entry_plans, rank_hint, errors | metrics·계획은 symbol_id 키의 맵. rank_hint는 국가별 식별자 순서 배열, 최종 추천 아님 |
-| collection.batch | 반환값의 메타데이터, 대상 완료일, pending 목록, lossless_payload | PHP만 갱신. 상세 metrics·계획·새 봉은 payload에서 복원 |
-| analysis.input_snapshot | 실제 사용한 사실·계산 근거·batch_input_fingerprint 참조와 기존 세 업무 해시 | MON이 독립 확인하고 사용한 값만 반영. 원래 출처·자료시각 유지 |
-| mon_result.md | 기존 기준시각 한 줄·결과 표 하나·주요사항 최대3개 | 계산 상세·오류 로그를 나열하지 않고 결과에 미치는 영향만 표시 |
-
-benchmarks의 비교 그룹 식별자는 기존 KR|INDEX|^KS11, KR|INDEX|^KQ11, US|INDEX|^GSPC, JP|INDEX|TOPIX와 연결한다. 예를 들어 target_dates의 미국 값은 해당 S&P500의 검증된 완료일이다. 날짜가 미확인인 값은 null로 남기고 임의로 오늘을 넣지 않는다. 오래된 분석·관찰 버전의 요청을 최신 요청과 섞지 않는다.
-
-**계산 함수 계약:** `mon_calc_batch(normalized_input)`은 외부 API·GitHub·시계 조회·파일 쓰기 없이 입력에서만 반환값을 만든다. 현재 가격 만료·ready·기업 사건 판단은 이 순수 계산 함수 밖에서 고정 as_of를 기준으로 수행한다. 시간 측정은 호출부가 수행하여 응답·collection.batch.timing에 붙인다. 함수의 수치 반환에 실행 시각을 섞지 않는다. 내부 계산 오류를 PHP 데몬 전체의 종료로 확장하지 않는다.
-
-**계산용 웹 계약 — 구현 예정:** `POST /mon.php?api=calculate`, UTF-8 application/json 입력·출력. 요청 본문은 위 정규화 함수 입력이다. MON이 별도로 확보한 검증된 독립 봉에도 같은 함수를 한 번 적용할 수 있도록 한다. 웹 응답 자체는 watchlist·analysis·결과 파일을 갱신하지 않는다. 요청 형식·버전 오류는4xx와 오류 객체, 행별 결측은200과 status=partial, 처리 불가인 서버 오류는5xx와 오류 객체로 반환한다. 전송 성공·HTTP200만으로 전체 계산 성공이라고 보고하지 않는다.
-
-데몬도 같은 mon_calc_batch 함수를 호출하여 보조 계산을 준비한다. MON은 준비된 batch의 입력·기준·출처가 일치하면 재사용하고, 독립 사실이 새로 확보되어 계산이 필요할 때만 계산용 웹 동작을 한 번 호출한다. 다음 미러를 기다리는 반복 상태 조회를 추가하지 않는다. 웹 동작이 미배포·미사용 가능이거나 계산 입력이 부족하면 기존 검증 캐시·독립 확인을 사용하고 새 수치는 계산대기로 남긴다.
-
-PHP 수집 봉을 사용했다는 이유만으로 independent 근거로 다시 명명하지 않는다. MON이 원천·식별·기간·조정을 독립 확인한 사실은 그 확인 근거와 함께 채택하며, 확인되지 않은 PHP 수치가 독립 선정 사실·순위를 조용히 덮어쓰지 않는다. 계산 반환의 식별자·기간·내용 해시·기준 버전을 검증하고 예상 외 행·결측·오류 영향을 반영한다.
-
-### 12.5 캐시·해시·저장 크기
-
-- pool_fingerprint는 전체 경쟁 symbol_id·검증된 식별·비교 그룹의 정규 내용 해시다. 요청 시각·조회 순서·기존/신규 출신으로 바뀌지 않는다.
-- batch_input_fingerprint는 함수가 실제 사용한 봉·지수·비교 날짜·조정 방식·호가 정보·기준·formula_version의 정규 SHA-256이다. 수집 시각만 바뀌고 수치 사실이 같으면 같은 계산을 재사용한다. 출처·확인 시각은 근거로 별도 보존한다.
-- 기존 selection_fingerprint·input_fingerprint·result_fingerprint의 정의는 유지한다. 보조 계산 해시가 그 세 해시를 대체하지 않는다. 기업 사실·보유·고정 판단시점·실제 사용한 현재 가격의 변화는 기존 업무 해시에 반영한다.
-- 새 일봉·분할·정정·기준 변경은 해당 캐시를 무효화한다. 같은 batch_input_fingerprint·formula_version으로 다시 계산한 정규 수치가 다르면 RESULT_INCONSISTENT다. 이전 정상 계산을 덮지 않는다.
-- NAS 캐시는 기존 mon_remote_cache.json의 로컬 전용 _mon_cache 안에 일봉·지수·계산 캐시를 확장하는 설계다. 공유 mon_data.json에는 로컬 경로·연결 키를 복사하지 않는다. 캐시와 원격 collection의 기준이 다르면 내용을 확인하기 전 정상 결과로 쓰지 않는다.
-- 공급자는 기존 한국투자증권 우선·확인된 네이버/야후 보완 순서를 따른다. 완료 일봉과 지수는 별도 지원 여부·API 필드·조정 방식·최신 완료일을 확인한 어댑터만 사용한다. 분봉 지원을 일봉·TOPIX 지원으로 간주하거나 확인되지 않은 URL·필드를 만들지 않는다. 같은 지수의 다른 원천은 기간·가격 방식이 같을 때만 보완하고 S&P500 실패를 다른 지수로 대체하지 않는다.
-- collection.batch.lossless_payload는 PHP 기본 압축 기능으로 처리 가능한 gzip+base64, UTF-8 JSON, uncompressed_bytes, sha256, data 폼을 사용한다. 해제한 원문 바이트 수·SHA-256을 검증한다. 이는 **collection의 선택 확장**이며 기존 analysis의 xz+base64 payload를 변경하거나 같은 것으로 오인하지 않는다. 읽는 쪽은 encoding을 구분해야 한다.
-- 구현 시 gzencode·gzdecode 사용 가능 여부와 압축 반환 실패를 확인한다. 해당 기능이 없으면 배치 기능을 준비 완료로 표시하지 않는다. 기존 시세 수집을 중단하거나 XZ를 임의 형식으로 바꾸지 않고 배치 기능 미사용 가능 사유를 남긴다.
-- batch payload에는 이번 변경 봉·공통 지수·전체 후보의 계산값과 참조를 넣고 같은 원시 봉·지표를 여러 배열에 중복 저장하지 않는다. 아직 분석에 반영되지 않은 변경 봉은 pending으로 유지한다. 확정 입력 스냅샷이 나중 collection 교체로 바뀌지 않도록 실제 사용 사실을 analysis의 기존 손실 없는 폼으로 보존한다.
-- compact UTF-8 mon_data.json의 상한524288바이트를 유지한다. n=실제 관찰·보유 종목 수, batch_peak_bytes=압축 batch와 메타데이터의 예상 최대 크기로 두고 수집 예약 공간은 max(65536,4096+2048×n+batch_peak_bytes)바이트다. collection을 빈 객체로 대체한 검사본 크기+예약 공간과 실제 전체 파일 크기가 각각 상한 이하여야 한다. PHP는 analysis를 지우지 않고 MON은 collection을 지우지 않는다.
-- 새 기능 활성화 전, 현재 전체 후보·필수 봉·근거·확정 분석·pending과 batch를 함께 압축·참조했을 때 저장 상한과 수집 여유가 충족되는지 확인해야 한다. 기존 파일의 여유가 작으므로 배치 데이터를 그대로 추가할 수 있다고 가정하지 않는다. 공간 확보 실패는 DATA_SIZE_EXCEEDED로 쓰기를 보류하고 이전 정상 파일을 보존한다. 후보 삭제·초기화·임의 상한 증대로 맞추지 않는다.
-- MON의 watchlist·analysis와 mon_result.md는 같은 판단의 한 커밋으로 저장한다. PHP는 최신 SHA를 읽고 자기 collection만 병합한다. 충돌 시 기존 규격대로 최대2회 최신 파일 재병합 후 실패를 보고한다.
-
-### 12.6 오류·예외 처리
-
-| 오류·상황 | 처리 범위와 출력 | 재시도·이전 결과 |
-|---|---|---|
-| 식별·거래소·통화 불일치 | 해당 원천 행 제외, IDENTITY_MISMATCH·unverified | 검증된 독립 근거가 있으면 그 근거로 계속. 오류 가격을 평균내지 않음 |
-| 완료일·비교 날짜·조정 방식 불일치 | 해당 비교값 null, BAR_PERIOD_MISMATCH | 이전 기간과 혼합하지 않음. 이전 결과는 날짜를 유지한 참고로 보존 |
-| 비교 지수 누락 | 해당 지수 그룹 pending, BENCHMARK_MISSING | 기본+추가 최대2회. 그룹의 대량 종목 조회 보류, 다른 그룹은 계속 |
-| 종가21개 부족·0/음수 분모·NaN/무한대 | 해당 필수 지표 null·unverified, BAR_CLOSE_INVALID/MATH_NONFINITE | 0점으로 순위에 넣지 않음. 다른 정상 행은 계산 |
-| OHLC·거래량·ATR·호가 정보 부족 | 해당 지표·계획만 null, PLAN_DATA_MISSING/TICK_UNKNOWN | 필수 수익률이 유효한 종목의 선정·수치 순위 유지 |
-| API 시간초과·429·5xx | 실패 원천·요청·대상·시각 기록, API_TIMEOUT/API_RATE_LIMIT/API_ERROR | 남은 예산 내 최대1회 추가 시도. Retry-After가 예산보다 길면 다음 회차, 무한 대기 없음 |
-| 공급자 응답 손상·캐시 압축/해시 오류 | 문제 payload 미사용, SOURCE_DATA_INVALID/CACHE_CORRUPT | 이전 검증 캐시가 같은 기간·기준이면 사용. 없으면 needs_data |
-| 같은 고정 입력의 수치·업무 결과 불일치 | RESULT_INCONSISTENT·저장 보류 | 해당 정상 결과 보존, 실제 입력 차이·계산 오류를 확인 |
-| schema/요청 버전 오류 | DATA_SCHEMA_INVALID/REQUEST_INVALID, 손상 영역 쓰기 보류 | 초기화하지 않음. 독립 판단 가능한 범위만 계속 |
-| 크기 초과·쓰기 실패·GitHub SHA 충돌 | DATA_SIZE_EXCEEDED/GITHUB_CONFLICT/기존 저장 오류, 실제 저장 실패 구분 | 크기는 손실 없는 재정리 후 확인. SHA 충돌은 최대2회 병합, 계속 실패하면 이전 원격 파일 유지 |
-| 수집 주기의 예상 외 예외 | 해당 작업 failed/partial, 기존 상태 기록에 단계·오류 표시 | 자원·파일 핸들 정리 후 다음 주기 허용. 프로세스·파일 쓰기 상태가 손상됐으면 중지·실패 표시 |
-
-error 폼은 **code, stage, symbol_id 또는 benchmark_id, source, occurred_at, retryable, attempts, message**다. 해당 없는 식별자는 null이며 원문 응답·키·비밀값을 메시지에 복사하지 않는다. 수집 오류의 occurred_at은 호출부가 붙이고 순수 함수의 행별 오류에는 null로 반환한다. coverage는 국가·비교 그룹별 expected_count·processed_count·pending_count·valid_count·unverified_count와 영향 범위를 남긴다. processed는 이번 고정 입력에 대해 검사한 행(오류 행 포함), pending은 아직 검사하지 못한 행이며 expected=processed+pending이다. 모든 요청 행에 유효한 필수 계산이 있으면 complete, 일부만 있으면 partial, 유효한 계산 결과가 전혀 없으면 failed로 구분한다. complete는 매입 ready나 기업 위험 검토 완료를 의미하지 않는다.
-
-오류는 숫자 마스크만으로 모두 해결되지 않는다. 행별 수치 오류는 마스크·null, 원천 오류는 조회 결과 검사, 캐시 오류는 압축·해시 검사, 파일 오류는 직렬화·상한·SHA·저장 응답 검사로 나눠 처리한다. PHP cURL 다중 요청의 전체 반환이 정상이어도 각 요청의 전송 결과·HTTP 상태·응답 내용을 검사해야 한다. 광범위 catch로 실패를 정상·완료로 바꾸지 않는다.
-
-기록 장소는 collection.batch.errors와 MON이 실제 사용·확인한 analysis의 오류·limitations다. 반복된 동일 오류의 상세는 최신 원인·횟수·대상을 합쳐 보존하고 과거는 커밋 이력으로 남긴다. mon_result.md에는 예를 들어 “미국 지수 미확인: 이전 후보 참고·최신 비교 보류”처럼 사용자 판단에 필요한 영향만 주요사항 최대3개 안에 표시한다.
-
-### 12.7 처리시간과 구현 확인 기준
-
-시간 단축의 우선순위는 **계산 프로그램 재작성 제거 → 동일 입력 재계산·중복 조회 제거 → 지수 먼저 확인 → 변경 봉만 수집 → 고정 함수 한 번 → 결과 한 번 저장**이다. GitHub에 .xlsx를 저장하는 것만으로는 재계산이 실행되지 않는다. 표계산 수식의 역할은 이 고정 함수가 맡고, 별도 Actions 실행 환경은 기본 구성에 넣지 않는다.
-
-고정 함수의 수치 계산은 전체 후보 규모에서1초 이내를 설계 목표로 두되 실제 PHP 환경에서 측정하기 전 달성으로 표시하지 않는다. 앞선 NumPy 실측은201×21 종가 지표 계산 약1ms이며 PHP 구현·API 조회·기업 조사·GitHub 저장·MON 전체 실행시간을 증명하는 값이 아니다. 종목 수가 늘어나는 무제한 규모의1초를 보장하지 않는다.
-
-지시문 시간 예산은 최신13절의 일반 판단60초·변경분 확인120초·별도 자료 준비300초를 따른다. PHP 전체55초 예산은 유지한다. collection.batch.timing에는 실제 fetch·normalize·calculate·publish 경과시간을 남긴다. MON은 요청 시작부터 저장 성공 응답까지의 실제 총시간을 최종 보고한다. mon_data.json 스냅샷 확정 시점까지만 측정한 elapsed_seconds에는 timing_basis를 적어 전체 완료시간과 구분한다. 그 파일 확정 후에 알 수 있는 게시시간을 추정해 저장하지 않고 최종 보고·실행 상태에 남긴다. 측정하지 않은 단계는 null이다.
-
-다음은 **구현 때 확인할 예상 결과이며 실행 완료 시험 기록이 아니다.** 기존 정상 경로의 과거 PASS를 반복하지 않고 변경 모듈과 실제 예외 경로를 확인한다.
-
-| 입력 사례 | 기대 결과 |
+| 상황 | 처리 |
 |---|---|
-| 고정 입력의 후보 순서만 변경 | 정규 지표·순위·가격 계획·계산 해시 동일 |
-| 기존/신규 출신만 다름 | 가산점 없이 같은 수치 순위 |
-| 지수 실패, 일부 종목 새 봉 존재 | 해당 그룹 최신 비교 보류·새 봉 pending·다른 그룹 계속 |
-| 필수 종가 정상, ATR 또는 호가 누락 | 순위 유지·해당 가격 계획 null |
-| 원시 거래대금 미확인, 조정 종가·원시 거래량 존재 | ADV20=null, 잘못된 곱셈·0 대체 없음 |
-|0/음수 종가·NaN·무한대·잘못된 OHLC | 영향 지표별 오류, 정상 행은 처리. 비유한 숫자는 JSON에 저장하지 않음 |
-| 계산 캐시 해시 오류 또는 동일 입력 결과 불일치 | 문제 결과 미사용·이전 정상 결과 보존 |
-| 최신 collection과 MON 저장의 SHA 충돌 | collection 보존·최대2회 재병합·데이터와 요약의 동일 커밋 |
-| 신규 batch 포함 후 용량 초과 | 원격 쓰기 보류·기존 전체 사실 보존·오류 보고 |
-| 계산용 웹 동작 미배포 | 기존 검증 자료로 판단·새 계산대기 표시·배포 성공 주장 없음 |
+| 10일 연속 조건이9일 또는 중간에 MA5 이상 종가 존재 | MA5 자격 미충족. MACD 조건은 별도 계산 |
+| MACD 이력 부족 | needs_history. 확인된 MA5 OR 신호만 사용 가능 |
+| 골든 이후4거래일 이상·중간 데드크로스 | MACD_AFTER 미충족. 다른 신호가 없으면 추천 불가 |
+| 골든 전 히스토그램 감소·간격 과대·ATR 없음 | 골든 직전 자격 미충족/검증 필요 |
+| 같은 기간 시장 지수 없음·거래일 불일치 | 최신 비교 미검증, 이전 추천 자동 승계 금지 |
+| 휴장·장외·오래된 시세·지연 불명 | 완료봉 자격과 가격 계획은 설명, 현재 ready는 금지 |
+| 확인된 악재·거래 불가 | 신규 진입 제외, 보유의 별도 판단 유지 |
+| 소스/토큰/압축/업무 해시 오류 | 쓰기 보류와 실제 오류 코드 |
+| 새 기준에 적격 후보 없음 | 추천 없음과 실제 부족/미충족 사유를 표에 표시 |
+| NAS 이전 버전 가동 | 코드 교체·웹 재시작 필요. 새 기능 실가동으로 오인 금지 |
 
-## 13. MON 처리시간 중심 재설계 — MON-RUN-1.0
+mon_result.md는 기준시각·상태 한 줄, **국가/종목/판단/가격 조건/핵심 이유** 표 하나, 주요사항 최대3개다. `MACD_BEFORE`는 골든 확정으로 쓰지 않는다. 실시간 MA5는 잠정으로 쓴다. 추천 확정 대기와 추천 없음, 데이터 준비 필요를 구분한다.
 
-**상태: mon.php 1.2.5의 입출력 핵심 경로 구현·로컬 웹 검증 완료, NAS 교체와 실제 MON 총시간은 미확인.** 이 절이 일반 실행 경로와 시간 예산의 최신 규격이다. 12절의 MON-BATCH-1.0은 수치 계산의 미구현 설계로 유지한다. 이번 코드 개정은 자동 예약 생성·현재 종목 재분석·주문을 수행하지 않는다.
+## 8. 검증·개정 이력
 
-### 13.1 단축할 대상
+- v3.9 / MON-P2.0은 이전 강도 중심 기준이며 과거 커밋과 strategy_archive에 보존한다. 이전52건·93건 PASS는 새 스윙 기준의 검증 성적으로 재사용하지 않는다.
+- v4.0 / MON-P3.0: 사용자의 스윙·MA5 장기 하회 후 재돌파·MACD 골든 전후 요청 반영. MACD 정정 **12·26·19** 적용. 최종 선정 권한은 ChatGPT에 유지한다.
+- 새 기준 검증은 10일/9일 경계·등호·장중 MA5·MACD 기간/초기화/골든 전후·OR·시장 강도·최신 비교·잘못된 추천 거절·이력/보유/collection 보존·웹 입력/토큰/해시/크기만 대상으로 한다. 정상 수집 기능을 불필요하게 재개발하거나 모든 과거 시험을 반복하지 않는다.
+- 새 구현 검증: **함수66건＋웹 HTTP19건, 총85건 PASS / 0 FAIL**. EMA12·26·시그널19는 독립적인 유리수 가중합 결과와 비교했다. 잘못된 통화·거래소·근거 없는 장중 시세, 시장과 동등/약세인 종목, 관찰 수집 한도 밖 후보 제공도 확인했다. 이 성적은 NAS 교체·운영 확인을 뜻하지 않는다.
+- 배포와 전체 MON 처리시간은 실제 실행 확인 후 별도로 기록한다. 로컬 함수 처리시간을 전체 ChatGPT 실행시간이라고 쓰지 않는다.
 
-이전 실행은 전체 약10분, 측정된 두 일봉 조회52.889초였고 이전 검증 자료의 일괄 수치 계산은 약1ms였다. 나머지 단계의 정확한 시간은 측정되지 않았으므로 전부 모델 추론 시간이라고 단정하지 않는다. 수식 계산만 빨라져도 전체10분이 해결된다고 볼 수 없다.
-
-이번 단축 대상은 **긴 지시문·전체 자료를 반복 읽기, 조회 범위를 매번 재설계, 계산·압축·저장 코드를 즉석 작성, 이미 끝난 작업의 재판단, 여러 도구 왕복, 결과 전체 재작성**이다. 일반 MON은 짧은 입력에서 독립 판단과 변경 이유를 작성한다. 정형 처리는 한 번 구현한 처리기를 반복 사용한다.
-
-| 구간 | 기존 부담 | 새 실행 계약 |
-|---|---|---|
-| 지시문 읽기 | 실행용 블록에 수집·계산·저장 세부 규격 반복 | 첫100행 안의 짧은 실행 블록만 읽기. 상세 규격은 고정 처리기에 적용 |
-| 데이터 읽기 | 전체 공유 JSON·후보·압축 해제 결과를 모델이 해석 | 코드는 전체 범위를 처리하되 모델에는 판단에 필요한 짧은 입력만 전달 |
-| 자료 확보 | 일반 요청 안에서 큰 탐색·수집·수정까지 계속 | 준비된 자료로 먼저 판단. 큰 자료 준비는 분리하고 미완료 범위 명시 |
-| 계산 | 매번 계산 스크립트·해시·압축 절차 작성 | 동일 고정 함수·저장 템플릿 호출, unchanged 부분 재사용 |
-| 판단 | 모든 후보의 숫자·설명을 다시 검토·서술 | 전체 수치 경쟁 결과의 해시·coverage 확인, 변경 판단만 작성 |
-| 저장 | 전체 결과 JSON·본문을 새로 작성하고 재확인 | 변경 패치로 한 번 병합·원자 저장, 반환 SHA 검증 후 종료 |
-
-### 13.2 일반 판단과 자료 준비 분리
-
-| 경로 | 시작 조건 | 수행 범위 | 결과와 목표 |
-|---|---|---|---|
-| 재사용 표시 | 독립 사실·선정·계획에 변화 없고 신규 확인을 완료하지 않음 | 이전 검증 결과와 현재 만료·자료 상태 표시 | 이전 as_of 유지, 재사용·미확인 표시. 준비된 입력에서60초 목표 |
-| 변경분 판단 | 준비 자료가 있고 가격·보유·중요 근거 등 제한된 변경 | 필요한 확인만 묶음 조회하고 이번 고정 as_of로 평가 | 새 입력·결과 해시, 한 번 저장. 전체120초 목표 |
-| 자료 준비 | 신규 거래일·새 후보·분할·정정, 탐색 목표 미달, 지수/봉 미완료 | 독립 신규 탐색·기업 사실 정리, 지수 우선 수집, 변경 봉 보충, 전체 경쟁 계산 | 별도 실행300초 목표. 끝나지 않으면 partial·대상·근거·다음 필요 작업 보존 |
-
-일반 “mon 지시문을 수행하라”는 먼저 짧은 입력으로 판단한다. 필요한 가벼운 변경은 그 실행에서 처리한다. 큰 준비가 필요하면 현재 검증 가능한 국가·종목은 판단하고 나머지는 준비 필요로 표시한다. 준비가 끝날 때까지 기다리거나 수집 실패를 풀기 위해 여러 스크립트를 새로 만들지 않는다. 명시적 신규 범위 탐색·자료 갱신 요청은 자료 준비 경로로 처리한다.
-
-자료 준비도 MON의 자율적 발굴·독립 검증 역할이다. 후보를 PHP가 고정 선정하거나 기존 추천만으로 축소하지 않는다. 시장 거래일별 국가당20개 탐색 목표와 최근20거래일 후보 기억을 유지한다. 목표를 달성한 날에는 같은 요청마다 다시20개를 찾지 않는다. 새 주도 흐름·중요 기업 사건에는 필요한 범위를 자율 갱신한다.
-
-새 완료일의 일부 후보·지수만 준비되면 해당 기간의 검증된 후보로 판단 가능한 범위와 이전 기준일의 참고 후보를 구분한다. 미검증 후보의 값은0으로 만들지 않고 부분 상태를 보존한다. 전체 준비가 완료됐다고 주장하거나 새 기간의 경쟁 없이 과거 추천을 현재의 승자로 표시하지 않는다.
-
-예약이 실제 등록된 경우 기존09:40·14:00·뉴욕10:00 슬롯에서 자료 준비 필요 여부를 확인하고 준비·판단을 이어갈 수 있다. 단순 설정값은 예약 실행의 증거가 아니다. 별도 실행이 없으면 준비 필요 기록만 존재하며, 실제 작업 시작 시각·상태가 없는 항목을 백그라운드 처리 중이라고 표시하지 않는다. 이번 설계 개정으로 예약을 생성하지 않는다.
-
-### 13.3 MON이 받는 짧은 입력
-
-짧은 입력은 mon_data.json의 **일시적 투영 결과**다. 새 저장 파일이나 원본 배열 복사본을 추가하지 않는다. 압축 자료와 전체 후보는 코드 메모리에서 처리하며 모델에는 필요한 값·근거 참조·변경만 보낸다.
-
-| 필드 | 포함할 내용 |
-|---|---|
-| header | run_contract=MON-RUN-1.0, schema_version, criteria_version, source_blob_sha, source_run_id, 원래 분석시각, 현재 표시시각, 내용 해시 |
-| preparation | 국가·비교 그룹별 최신 확인 완료일·목표일·지수 상태·계산 상태·실제 준비 작업 여부·미완료 범위 |
-| competition | 전체 후보 수·현재 기간 비교 수·미검증 수·selection_fingerprint·수치 순위 참조·계산 근거. 현재와 이전 기간 구분 |
-| cards | 각국 매입 검토 최대3개, 매도 검토·보유 변화, 중요 사건 대상. 기존 가격 계획·시세 유효성·현재 위험 확인·실패 이유·근거 참조 |
-| changes | 후보·완료봉·보유·정정·기업 사실·가격 상태 중 실제 바뀐 항목과 이전 값 참조 |
-| discovery | 시장 거래일별 탐색 목표·현재 달성 수·추가 탐색 필요·기억 기간 확인 상태 |
-| pending | 현재 판단에 부족한 구체 항목·이미 실패한 원천/기준일·재확인 허용 근거 |
-| persistence | 자기 영역의 최신 SHA·사용한 collection 기준·마지막 정상 결과·저장 필요 여부·확인한 처리기 버전 |
-
-기본 입력은 **UTF-8 JSON 12KiB 이내 목표**다. 현재 상위 후보의 지표·계획·risk_checks는 기존 평문 행에서 투영하고 꼭 필요한 상세만 참조로 복원한다. 전체 봉·Base64·전체 이력·공시 원문·전체 후보 설명을 넣지 않는다. 작은 입력은 전체 후보를 읽지 않거나 낮은 순위 후보를 경쟁에서 삭제한다는 뜻이 아니다. 전체 수치 처리·등록 보유 감시는 코드가 유지한다.
-
-주요 사건·보유 변화가 많으면 중요한 항목을 삭제해12KiB에 맞추지 않는다. 국가·사건별 짧은 추가 입력으로 나누고 실제 확인 범위·남은 항목을 표시한다. 필요한 상세·확인 자료가 없는 상태를 문장 축약으로 verified로 바꾸지 않는다.
-
-일부 metadata·평문 카드로 과거 결과 표시가 가능하면 압축 전체를 해제하지 않는다. 필요한 payload는 내용 SHA·기준이 변한 경우에만 검증 후 한 번 해제한다. collection 시세만 바뀌고 독립 payload가 같으면 봉·지표·선정 해시를 다시 계산하지 않는다. 코드의 검증 캐시가 없으면 처음 한 번 확인하며 검증되지 않은 해시를 확인 완료로 선언하지 않는다.
-
-### 13.4 고정 입출력 함수와 decision_patch
-
-반복 실행 때 새 프로그램을 만드는 문제를 제거하기 위해, 연결 함수는 한 번 구현·검증한 뒤 버전을 고정한다. 파일은 기존 mon.php 하나를 사용한다. 다음 조회·패치 인터페이스는 **mon.php 1.2.5에 구현했다.** 숫자 일괄 계산과 자료 준비까지 구현된 것으로 해석하지 않는다. 실제 요청 폼·지원 범위는13.7을 따른다.
-
-| 고정 함수·웹 계약 | 역할 | 작성 권한 |
-|---|---|---|
-| mon_project_for_mon(data, context), POST /mon.php?api=mon_view | 전체 후보·현재 자료를 확인하여 짧은 입력과 불투명 state_token 반환 | 투영만 수행. analysis·watchlist·원격 파일 쓰기 없음 |
-| mon_calc_batch(normalized_input), 미구현 | 준비 경로에서 변경된 수치 계산, 전체 후보 정렬 | 기존12절 설계 유지 |
-| mon_apply_mon_patch(data, decision_patch), POST /mon.php?api=mon_patch | 패치 검증·기존 사실 보존·정규화·해시·필요한 압축·요약 렌더링 | 업데이트 후보 JSON·요약과 검증 결과 반환. 이 웹 동작이 원격 분석을 직접 쓰지 않음 |
-| MON의 고정 GitHub 저장 절차 | 반환 파일을 최신 SHA와 자기 영역 규칙으로 한 커밋 게시 | watchlist·analysis와 mon_result.md. collection 보존 |
-
-context는 지정 국가·범위·고정 as_of 또는 rendered_at·원격 SHA·처리기 버전이다. state_token은 짧은 입력을 만든 원본 스냅샷의 참조이며 다른 요청의 최신 데이터로 몰래 교체하지 않는다. 입력이 유지되는 동안 조회 결과·계산·원본 자료는 코드 메모리에 보존한다. 대화 요약만으로 원본을 재구성하지 않는다.
-
-decision_patch의 최소 폼은 run_mode·base_source_blob_sha·base_analysis_run_id·fixed_as_of·changes·new_evidence·pending·short_reasons다. changes에는 실제 확인한 기업/거래 사실, 보유 변경, 신규 후보 또는 변경 판단을 식별자별로 기록한다. unchanged는 원래 행·계획·근거를 참조한다. 수치·호가·가격 만료·동일 입력 검사는 고정 처리기가 수행하고 MON은 독립 판단과 그 근거를 작성한다. 입력 해시가 다른 판단을 같은 스냅샷에 덮어쓰지 않는다.
-
-MON은 모델 출력으로 수십만 바이트의 전체 JSON·압축 문자열을 쓰지 않는다. 도구 내부에서 원본과 패치를 병합하고 전체 반환 파일은 코드 변수에 보관한 채 GitHub 도구로 전달한다. 모델에 돌려주는 것은 검증 상태·변경 수·사용한 기준시각·최종 요약·저장 응답뿐이다. PHP 데몬은 계속 collection만 소유하며 MON의 analysis를 임의 생성하지 않는다.
-
-NAS 웹 교체가 미확인되거나 실행 환경에서 고정 함수를 호출할 수 없으면 가용 코드 도구의 저장된 동일 템플릿으로 기존 평문 결과를 한 번 투영할 수 있다. 새 범용 처리기·계산 프로그램을 일반 실행에서 즉석 작성하지 않는다. 수식·압축·해시 처리가 필요하지만 검증된 처리기가 없으면 그 갱신을 partial·처리기 준비 필요로 표시하고 이전 정상 데이터를 보존한다. 미배포 웹 동작을 반복 시험하지 않는다.
-
-이 인터페이스는 입력·출력 데이터 규격이며 새로운 도구 연결이 이미 등록됐다는 뜻이 아니다. 구현·배포 뒤 실제 가용성이 확인되어야 정상 경로로 사용할 수 있다. 첫 전환에서 기존 XZ payload·참조를 해제해야 하면 준비 경로에서 한 번 검증하며, 서버에 없는 압축 기능을 설치된 것으로 가정하지 않는다.
-
-### 13.5 도구 왕복·조회·저장 제한
-
-일반 흐름은 **읽기 → 필요한 묶음 확인 → 최종 판단 → 저장**의4단계다. 연결 함수를 도구 호출 안에서 조합해 읽기·묶음 확인·패치 준비·저장 응답의4회 왕복을 목표로 한다. 선택 종목마다 도구를 따로 호출하지 않는다. 조회가 필요 없거나 저장할 변화가 없으면 해당 단계를 생략한다.
-
-후속 확인이 필요한 새 중요 사건·가격 충돌·승격 후보의 상세가 있으면 필요한 항목만 한 번 추가하고 총6회 왕복을 목표로 한다. 이는 판단 근거를 삭제할 강제 상한이 아니다. 더 많은 자료가 필요하면 준비 경로로 분리하고 부족 범위를 남긴다. source 단위의 실패 재시도와 GitHub 충돌 재병합은 모델과 반복 대화하지 않고 고정 처리기의 기존 한도 안에서 처리한다.
-
-동일 자료를 독립 조회·PHP 조회·다시 웹 검색으로 세 번 확인하지 않는다. 충분하고 시각·식별이 맞는 근거를 재사용하고 충돌·부족한 부분만 확인한다. 시장 전체의 새 중요 변화는 확인한 출처·범위를 남기며 검색하지 않은 기업의 현재 위험을 없음으로 단정하지 않는다. 장외에는 현재 ready를 만들기 위한 시세 재조회·정규장 확인을 반복하지 않는다.
-
-실제 업무 입력·자료 상태·표시 결과가 바뀌면 기존 규격대로 mon_data.json·mon_result.md를 한 커밋으로 저장한다. 원래 결과를 현재 시점에 재표시하는 것뿐이며 저장 내용이 같으면 no_change로 끝내고 마지막 분석시각을 바꾸지 않는다. 새 as_of로 재평가했으면 새 input_fingerprint·result_fingerprint를 생성해야 하므로 no_change 경로로 가장하지 않는다.
-
-게시 성공 응답의 commit/blob SHA가 준비한 값과 맞으면 종료한다. 성공한 파일의 재다운로드·결과 재서술·다음 PHP 미러 확인을 일반 실행에 붙이지 않는다. SHA 충돌이 collection 변화뿐이면 최신 collection을 보존해 최대2회 다시 병합하며, 고정 판단에 사용한 사실·as_of는 유지한다. 다른 MON 실행이 analysis를 바꿨으면 덮어쓰기보다 해당 스냅샷 충돌을 보고한다.
-
-12절의524288바이트 상한·수집 예약 공간·손실 없는 압축·자료 소유권을 유지한다. 짧은 입력은 일시적 뷰이므로 같은 내용을 공유 파일에 추가 복사하지 않는다. 저장 여유를 확보하기 위해 전체 후보·필수 봉·미해결 근거를 삭제하지 않는다.
-
-### 13.6 시간·오류·확인 기준
-
-| 구간 | 일반60초 경로의 설계 배분 |
-|---|---|
-| 읽기·짧은 입력 | 0~10초 |
-| 필요한 독립 확인 | 10~25초. 필요 없으면 생략 |
-| 변경분 판단·패치 | 25~40초 |
-| 저장·최종 보고 | 40~60초 |
-
-외부 조회가 더 필요하면120초 경로로 전환하고 종료20초 전부터 저장·보고한다. 원천 지연·모델 추론·도구·GitHub가 이 시간을 보장하지 않으므로 실제 달성 여부를 측정한다. 시간 목표를 맞추려고 필요한 독립 근거를 꾸미거나 수행 범위를 숨기지 않는다. 준비300초는 일반 요청의60초에 포함되지 않는 별도 작업이다.
-
-analysis.input_snapshot.cache_reuse에 run_mode·실제 재사용/갱신 후보 수·model_input_bytes·tool_round_trips·elapsed_seconds·timing_basis와 실제 stage_seconds를 기록할 수 있다. 첫 요청부터 저장 응답까지 총시간은 최종 보고에 남긴다. 게시 전에 확정된 JSON에는 그때까지의 시간만 기록하며 미측정 값은 null이다. 이전 재사용 결과에 오늘 검증한 것처럼 시간·근거를 덧붙이지 않는다.
-
-| 예외 | 일반 실행 처리 |
-|---|---|
-| 준비 미완료·지수 누락 | 가능한 국가·종목과 이전 참고를 구분하여 partial. 큰 수집을 기다리지 않음 |
-| 새 중요 기업 사건 | 대상만 독립 확인. 필요하면 추가 입력 한 번, 미해결은 위험 확인 필요 |
-| 현재 시세 만료·장외·공급자 시각 불명 | 추천·계획 유지, 현재 조건부 또는 만료 표시 |
-| 입력 과대·다수 보유 변화 | 필요한 짧은 추가 입력으로 분할, 누락과 남은 범위 표시 |
-| 고정 처리기 부재·XZ/참조 복원 실패 | 미배포/손상 범위 기록, 검증된 이전 결과 사용. 즉석 계산기 생성 없음 |
-| 잘못된 해시·판단 패치·저장 크기 초과 | 신규 쓰기 보류·이전 정상 파일 보존 |
-| GitHub 쓰기 실패·충돌 | 실제 저장 상태 보고. 한도 내 코드 재병합, 조회·판단 재실행 없음 |
-
-구현 확인은 변경된 경로에 한정한다. 전체 후보를 코드가 처리하고 모델은 짧은 입력만 받는지, 같은 독립 사실의 선정·계획을 재사용하는지, 신규 후보/보유/중요 사건 변경이 누락되지 않는지, 준비 불가가 현재 완료로 표시되지 않는지, 원자 저장과 실제 시간 기록이 맞는지 확인한다. 이미 검증된 정상 수식·과거 PASS를 일반 실행에서 다시 시험하지 않는다.
-
-
-### 13.7 구현된 요청 폼·지원 범위 — mon.php 1.2.5
-
-추가 운영 파일·비밀번호·설정 폴더는 없다. `/web/mon.php` 하나를 교체하고 기존 웹 시작/중지 화면을 사용한다. 아래 두 동작은 JSON POST이며 자격증명 파일을 읽거나 수집 데몬을 시작하거나 GitHub에 쓰지 않는다. MON 코드 도구가 원본 파일을 변수로 유지한 채 호출한다. 사용자가 CLI를 실행할 필요는 없다.
-
-**짧은 조회**: `POST /mon.php?api=mon_view`, `Content-Type: application/json`.
-
-```json
-{
-  "source_json": "GitHub에서 받은 mon_data.json의 원문 전체(코드 변수에서 전달)",
-  "context": {
-    "source_blob_sha": "원문과 일치하는 40자리 Git blob SHA",
-    "rendered_at": "2026-10-10T00:42:00.000000Z",
-    "countries": ["KR", "US", "JP"],
-    "important_ids": []
-  },
-  "all_pages": true
-}
-```
-
-- 원문 바이트의 Git blob SHA를 대조하고 schema_version3·MON-P2.0을 확인한다. `data`를 모델이 재직렬화한 값으로 원문을 대체하지 않는다. `rendered_at`은 호출자가 고정한 표시시각이며 예시 시각을 재사용하지 않는다.
-- 응답은 `ok, processor_version, handler_seconds, result`다. `result`에는 `state_token, model_input_bytes, view, additional_views`가 있다. 기본적으로 모든 후속 뷰를 한 HTTP 응답에 묶으므로 각 페이지를 별도 모델 왕복으로 읽지 않는다. 전체 응답을 코드 변수에 보존하고 모델에는 이 짧은 뷰들만 출력한다.
-- 첫 뷰의 공통 필드와 모든 후속 카드가 한 입력이다. 각 뷰는12288바이트 이내다. 후속 뷰의 `shared_fields_ref=first_page`는 첫 뷰의 기간·근거·`header.blocker_keys`를 참조한다. 카드의 `current.blocker_ids`는 그 배열의0부터 시작하는 인덱스다. 근거·위험 상세는 `details_ref`로 원본에서 묶음 복원하고 카드에 같은 원문을 복제하지 않는다.
-- `all_pages=false`인 코드 호출만 `context.cursor`와 같은 `state_token`으로 후속 페이지를 요청한다. 표시시각·범위·원본을 바꾸면 이전 토큰을 쓰지 않는다. 단일 중요한 항목이 한 페이지에 들어가지 않으면 `MON_VIEW_ITEM_TOO_LARGE`이며 해당 항목을 삭제하지 않는다.
-- 후보221개 같은 전체 감사 배열을 집계한다. 현재 비교 수와 이전 비교 수를 구분하고, 검증된 달력의 새 일별 최종 마감이 지났으면 이전 기간 순위를 최신으로 표시하지 않는다. 일본 오전 마감만으로 새 일봉 완료를 선언하지 않는다.
-- 비보유 매입 검토 최대3개/국가, 매도 검토, 등록 보유, 미해결·확인된 기업 사건을 포함한다. 평문에 결과 행이 없는 등록 보유·사건도 준비 필요 카드로 남는다. PHP 보조 시세는 목록 버전·종목/원천 코드·통화·거래소·시각이 맞고 사용 가능한 경우만 `php_auxiliary`로 붙인다. 그 값이 독립 선정·현재 위험 확인을 대체하지 않는다.
-- 이 조회는 압축 payload를 해제하지 않는다. `payload_hash_verified=false`가 정상이며 원문 SHA 대조와 전체 수치 재검증을 구분한다. 과거 정상 결과 표시만으로 새로운 해시 검증·신규 탐색 완료·백그라운드 실행을 주장하지 않는다.
-
-**변경 패치·파일 반환**: `POST /mon.php?api=mon_patch`.
-
-```json
-{
-  "source_json": "조회 때 코드 변수에 보관한 같은 원문",
-  "decision_patch": {
-    "run_mode": "reuse",
-    "base_source_blob_sha": "조회 원문의 Git blob SHA",
-    "base_analysis_run_id": "조회 원문의 analysis.run_id",
-    "fixed_as_of": "조회 원문의 analysis.as_of",
-    "view_context": {
-      "source_blob_sha": "조회 원문의 Git blob SHA",
-      "rendered_at": "2026-10-10T00:42:00.000000Z",
-      "countries": ["KR", "US", "JP"],
-      "important_ids": []
-    },
-    "state_token": "조회 응답의 state_token",
-    "changes": [],
-    "new_evidence": [],
-    "pending": [],
-    "short_reasons": []
-  }
-}
-```
-
-`view_context`는 조회 당시 객체 그대로다. 표시시각·국가·중요 종목 범위를 바꾸지 않는다. 날짜·SHA·토큰과 원문은 실제 값을 코드 변수에서 채운다.
-
-| 모드/필드 | 실제 처리 |
-|---|---|
-| reuse | fixed_as_of는 원래 분석시각. changes/new_evidence/pending/short_reasons가 모두 비어야 한다. `no_change, write_required=false, files=[]`와 재사용 요약을 반환하며 기존 세 해시·압축·분석 시각을 바꾸지 않는다 |
-| evaluate | fixed_as_of는 원래 분석시각보다 늦고 최초 rendered_at 이상. 현재 가격 상태와 기록한 위험을 고정 시점에 평가한다. 새 input_fingerprint와 result_fingerprint를 생성하되 선정 사실·계획은 재사용한다. 실제 변화가 없어도 새 평가 시각을 과거 결과 재사용으로 가장하지 않는다 |
-| changes[] | symbol_id별로 한 객체. 지원 필드는 price_observation, risk_review, reason, next_check. 지정하지 않은 사실·봉·후보·근거를 보존한다. PHP는 MON이 선택한 기존 종목의 확인 상태를 검증하며 새 종목을 자율 선정하지 않는다 |
-| price_observation | symbol_id, currency, venue, price, quote_at, price_type, timestamp_basis, delay_seconds, session, market_date, source_kind=independent, evidence_ids. 원천·현지 거래일·정규장·시세 나이/지연을 확인한다. PHP 가격을 수집시각으로 독립 시세처럼 꾸미지 않는다 |
-| risk_review | status=verified/needs_check, scope, checked_at, applies_as_of=이번 fixed_as_of, evidence_ids, pending_items, trading_status=verified/needs_check. verified에는 실제 독립 근거와 확인 범위가 필요하다. 오래된 거래 확인이나 미해결 항목으로 ready를 만들지 않는다 |
-| new_evidence[] | id, source_url(https), source_kind=independent, checked_at, claim. 실제 확인 자료이며 동일 id의 다른 내용을 덮어쓰지 않는다. 필수 증거가 없는 가격/위험 갱신은 거절한다 |
-| pending / short_reasons | 미완료 범위와 짧은 판단 이유. 실제 작업 시작을 뜻하지 않는다. 이유는 최대3개. 이전 설명·위험 기록은 원래 시각으로 구분한다 |
-| 준비 경로에 넘기는 변경 | 신규 후보/보유 등록/호가·계획·순위/확인된 중대 FAIL·거래정지에 따른 선정·매도 전환. 좁은 패치로 자동 확정하지 않고 `MON_PATCH_PREPARATION_REQUIRED`를 반환한다. MON은 사건을 숨기지 않고 해당 준비·독립 판단을 별도 수행한다 |
-
-평가 모드는 기존 압축 payload를 처음 한 번 복원하고 raw SHA-256·selection/input/result 세 업무 해시를 검증한다. 동일 요청 안의 캐시는 실제 압축 내용과 메타데이터의 SHA로 식별한다. 이전 XZ를 gzip으로 임의 변환하지 않는다. 기존 XZ에는 사용 가능한 서버 xz 실행 파일·proc_open이 필요하며, 없으면 `MON_XZ_UNAVAILABLE`로 새 쓰기를 보류한다. 설치됐다고 가정하거나 사용자가 CLI로 직접 실행하도록 요구하지 않는다. 읽기·재사용은 XZ 없이 동작한다. gzip payload도 지원하되 저장 상한을 유지한다.
-
-보유·중요 사실을 지워 압축 공간을 만들지 않는다. 변경 전에 원래 관측·위험/근거와 운영 메타데이터를 payload에 보존하고, 전체 파일524288바이트 및 최소65536바이트의 collection 공간을 검사한다. 실제 용량 실패 때만 analysis.evidence의 모든 원문을 payload.mon_evidence_index에 손실 없이 보존하고 평문에는 id·evidence_ref=mon_evidence_index:ID를 남긴다. 기존 evidence_archive와 기존 봉·후보·보유는 바꾸지 않으며 다음 패치도 이 참조를 복원한다. 다시 검사해도 여유가 부족하면 `MON_STORAGE_LIMIT`이고 원래 정상 파일을 보존한다. 일반 조회나 여유 있는 패치에서는 이 이전을 수행하지 않는다.
-
-평가 응답은 `changed, write_required=true, files[2], summary, validation`이다. `files`의 두 원소는 `path, content, blob_sha`이며 정확히 mon_data.json·mon_result.md다. 전체 content는 코드 변수에서 GitHub 도구로 전달하고 모델 문맥에 출력하지 않는다. 요약은 기준/상태 한 줄·표 하나·주요사항 최대3개다. 과거 미확인 기록은 원래 시각을 표시해 새로운 확인처럼 보이지 않게 한다. 독립 근거의 사실성·판단은 MON이 책임지고, PHP의 형태/시간/해시 검증 통과를 실제 기업 조사 완료로 해석하지 않는다.
-
-**한 번의 GitHub 저장과 충돌 병합**:
-
-1. 읽기 때 확보한 branch head/tree와 source_blob_sha를 유지한다. write_required=false면 공유 파일을 재커밋하지 않고 요약만 보고한다.
-2. write_required=true면 반환된 두 content를 `create_tree`의 두 파일 내용으로 넘기고, `create_commit` 후 `update_ref(expected_sha=사용한 head, force=false)`로 main을 한 번 갱신한다. 성공 반환 tree/commit/ref SHA가 준비한 값과 일치하면 종료한다.
-3. lease가 충돌하면 최신 head·mon_data 원문을 읽는다. `mon_patch`에 동일 원문·동일 패치와 `latest_source_json, latest_source_blob_sha`를 함께 전달한다. collection만 바뀌었으면 최신 collection을 보존해 병합하고 고정 as_of·이미 사용한 판단 사실·업무 해시를 유지한다. 다른 MON이 watchlist/analysis 또는 다른 루트 필드를 바꿨으면 `MON_ANALYSIS_SOURCE_CONFLICT`로 덮어쓰지 않는다. 최대2회이며 독립 조사·모델 판단을 다시 하지 않는다.
-4. HTTP 동작 자체는 GitHub에 쓰지 않는다. 원격 저장은 기존 MON GitHub 도구의 응답으로만 확정한다. 파일이 반환됐다는 사실만으로 반영 완료라고 보고하지 않는다.
-
-잘못된 폼/증거/해시/시각은400, 원문·토큰·다른 MON 충돌은409, 본문/저장 크기 초과는413, 잘못된 Content-Type은415, GET은405, 사용할 수 없는 압축기는503이다. 실패 응답은 `ok=false, error_code, write_required=false, remote_written=false`다. stack trace·원문·키를 출력하지 않는다.
-
-**이번 구현 검증**:
-
-- PHP8.3에서 변경 경로의72개 함수/자료 검사와21개 실제 localhost HTTP 검사 통과. 기존 수집부·연결 설정·브라우저 시작/중지 코드는 버전·API 분기 외에 원문 그대로 유지했다. 기존의 정상 연결 검사·NAS 데몬 조회는 반복하지 않았다.
-- 실제 기존 저장자료474441바이트, 후보221·매입 검토9·기업 사건2를 모두 유지했다. 기본/후속 뷰를 묶어 약14KB로 전달해 원문 대비 약97%를 줄였다. 후속 뷰를 따로 모델 왕복으로 읽지 않았다.
-- 로컬 웹 읽기0.026초·재사용0.015초·평가 파일 반환0.274초를 측정했다. 이는 지시문 읽기·외부 조사·모델 판단·GitHub 저장을 포함한60/120초 달성 증거가 아니다. 전체 시간은 NAS 교체와 실제 다음 MON 실행에서 측정한다. handler_seconds는 이 HTTP 처리기의 구간만, JSON에 아직 미측정한 전체 elapsed_seconds는 null이다.
-- 새 고정 as_of의 파일·모의 정규장 가격/위험 패치를 검증했고, 기존 Python 정규화와 세 해시가 일치했다. 미래/오래된/과도 지연 가격, 위험 확인 결측, 잘못된 식별·증거·해시·토큰, 새 완료일, 보유 누락, collection 병합·타 MON 충돌·용량 초과,9종목 일괄 패치와 조건부 근거 압축 및 다음 패치에서의 복원까지 확인했다. 시험용 변경 결과는 실제 mon_data.json·mon_result.md에 게시하지 않는다.
-- 로컬 구현과 검증 완료는 NAS 배포·현재 API 동작·실제 추천 갱신·실제 예약 등록의 증거가 아니다. mon_calc_batch와 완료 일봉·지수 준비를 이번 버전의 지원 기능으로 표시하지 않는다.
-
-## 공식 참고
-
-- [GitHub Contents GET의 공개 조회와 PUT의 쓰기 권한](https://docs.github.com/en/rest/repos/contents)
-- [GitHub 익명 요청 한도와 재시도](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)
-- [PHP 환경변수 읽기](https://www.php.net/manual/en/function.getenv.php)
-- [PHP7.4부터 지원하는 proc_open 배열 인자와 파일 스트림](https://www.php.net/manual/en/function.proc-open.php)
-
-- [KRX 정규장·시간외·휴장 규칙](https://global.krx.co.kr/contents/GLB/06/0602/0602010201/GLB0602010201T1.jsp)
-- [JPX 정규장·점심 휴장](https://www.jpx.co.jp/english/equities/trading/domestic/01.html)
-- [NYSE 정규장·휴장·조기 폐장](https://www.nyse.com/trade/hours-calendars)
-- [KIS 국내 1분봉 API와 첫 봉 체결량 주의](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_time_itemchartprice/inquire_time_itemchartprice.py)
-- [KIS 국내 분봉 원시 필드](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_time_itemchartprice/chk_inquire_time_itemchartprice.py)
-- [KIS 해외 1분봉 API 요청 폼](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/overseas_stock/inquire_time_itemchartprice/inquire_time_itemchartprice.py)
-- [Yahoo 거래소별 지연 안내](https://help.yahoo.com/kb/finance/article-exchanges-data-delays-sln2310.html)
-- [PHP JSON 직렬화 옵션](https://www.php.net/manual/en/json.constants.php)
-- [KIS 해외 분봉 날짜·시각·가격·체결량 필드](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/overseas_stock/inquire_time_itemchartprice/chk_inquire_time_itemchartprice.py)
-- [GitHub Contents API와 SHA 갱신](https://docs.github.com/en/rest/repos/contents#create-or-update-file-contents)
-- [PHP cURL 다중 요청과 개별 전송 오류 확인](https://www.php.net/manual/en/function.curl-multi-exec.php)
-- [PHP gzip 압축](https://www.php.net/manual/en/function.gzencode.php)
-- [GitHub Actions의 실행 작업·러너](https://docs.github.com/en/actions/get-started/understand-github-actions)
