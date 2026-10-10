@@ -38,10 +38,10 @@
 
 <!-- REPORT_ONE:STC14:BEGIN -->
 ## STC14
-<!-- STC14_META status=DONE updated_at=2026-10-09T19:13:47+09:00 fingerprint=5c0221e12dbcac40 swing_fingerprint=- -->
+<!-- STC14_META status=DONE updated_at=2026-10-10T19:13:56+09:00 fingerprint=f5b9ac8e670070d1 swing_fingerprint=- -->
 
-- 기준일: KR `2026-10-08` · US `2026-10-08` · JP `2026-10-09`
-- 결과: `DONE` · 품질 `LIMITED` · 후보 **41** · 처리 350/351 (99.72%) · 오류 1
+- 기준일: KR `2026-10-08` · US `2026-10-09` · JP `2026-10-09`
+- 결과: `DONE` · 품질 `LIMITED` · 후보 **43** · 처리 350/351 (99.72%) · 오류 1
 
 | 시장 | 종목 | 코드 | 상태 | D1 K/D | H60 K/D | MS7 |
 |---|---|---|---|---:|---:|---|
@@ -54,6 +54,7 @@
 | KR | LG디스플레이 | `034220` | CROSS | 21.01/34.02 | 28.80/26.24 CROSS | M2 · 분할매입 |
 | KR | 오르비텍 | `046120` | CROSS | 21.63/26.28 | 17.61/16.86 CROSS | M0 · 관찰 |
 | KR | 펄어비스 | `263750` | CROSS | 23.87/28.05 | 15.87/15.64 CROSS | M1 · 매입 검토 |
+| US | Draganfly | `DPRO` | MATCH | 1.53/2.40 | 15.96/11.72 POST_CROSS | M0 · 관찰 |
 | KR | NAVER | `035420` | MATCH | 1.63/3.16 | 3.70/4.63 PRE_CROSS | W · 대기 |
 | KR | HD현대중공업 | `329180` | MATCH | 1.95/4.43 | 10.26/7.92 POST_CROSS | W · 대기 |
 | KR | DL이앤씨 | `375500` | MATCH | 2.10/3.63 | 2.87/3.62 PRE_CROSS | M0 · 관찰 |
@@ -70,6 +71,7 @@
 | KR | 대우건설 | `047040` | MATCH | 10.43/15.20 | 1.95/2.63 PRE_CROSS | M1 · 매입 검토 |
 | KR | GS건설 | `006360` | MATCH | 10.75/13.96 | 16.09/18.39 PRE_CROSS | M0 · 관찰 |
 | KR | BGF리테일 | `282330` | MATCH | 10.85/10.65 | 1.54/2.26 PRE_CROSS | M1 · 매입 검토 |
+| US | Comcast | `CMCSA` | MATCH | 11.30/10.03 | 23.21/23.67 PRE_CROSS | W · 대기 |
 | KR | 한국전력 | `015760` | MATCH | 11.56/11.29 | 9.38/8.62 POST_CROSS | M1 · 매입 검토 |
 | KR | 카카오뱅크 | `323410` | MATCH | 12.78/11.90 | 9.85/10.35 PRE_CROSS | W · 대기 |
 | KR | LG생활건강 | `051900` | MATCH | 13.10/12.83 | 25.00/25.93 PRE_CROSS | W · 대기 |
