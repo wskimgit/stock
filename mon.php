@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.3.1 -- PHP 7.4+ web control / persistent quote daemon.
+ * mon.php 1.3.2 -- PHP 7.4+ web control / persistent quote daemon.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * The daemon writes only collection. Stateless MON adapters return files; MON owns analysis and result.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.3.1';
+const MON_VERSION = '1.3.2';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -411,20 +411,24 @@ final class MonGitHub {
         if (!preg_match('/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/',$repo) || !preg_match('/^[A-Za-z0-9_\/. -]+$/',$branch)) throw new MonFault('REPOSITORY_CONFIG_INVALID');
         $this->url='https://api.github.com/repos/'.$repo.'/contents/mon_data.json';
     }
-    private function headers(bool $writing=false): array {
+    private function headers(bool $writing=false,bool $raw=false): array {
         $token=$this->config->get('GITHUB_TOKEN'); if ($writing && $token==='') throw new MonFault('GITHUB_TOKEN_MISSING');
-        $headers=['Accept: application/vnd.github+json','Content-Type: application/json','X-GitHub-Api-Version: 2022-11-28'];
+        $headers=['Accept: '.($raw?'application/vnd.github.raw+json':'application/vnd.github+json'),'Content-Type: application/json','X-GitHub-Api-Version: 2022-11-28'];
         if($token!=='')$headers[]='Authorization: Bearer '.$token;
         return $headers;
     }
     public function read(float $deadline, float $timeout=3): array {
         $url=$this->url.'?'.http_build_query(['ref'=>$this->config->get('MON_BRANCH','main')]);
-        $d=MonHttp::decode($this->http->request('GET',$url,$this->headers(),null,$deadline,$timeout));
-        if (mon_get($d,'encoding')!=='base64' || !is_string(mon_get($d,'sha')) || !is_string(mon_get($d,'content'))) throw new MonFault('GITHUB_CONTENT_INVALID');
-        $raw=base64_decode(str_replace(["\r","\n"],'',$d->content),true);
-        if ($raw===false || strlen($raw)>MonRun::MAX_SOURCE) throw new MonFault('DATA_SIZE_INVALID');
+        // The Contents API omits base64 content above 1 MiB. Raw media returns
+        // the same file bytes at every supported size, without an extra request.
+        $r=$this->http->request('GET',$url,$this->headers(false,true),null,$deadline,$timeout);
+        if ($r['status']<200 || $r['status']>=300) MonHttp::decode($r);
+        $raw=$r['body'];
+        if (!is_string($raw) || strlen($raw)>MonRun::MAX_SOURCE) throw new MonFault('DATA_SIZE_INVALID');
         try { $data=mon_decode($raw); } catch (Throwable $e) { throw new MonFault('DATA_JSON_INVALID'); }
-        MonData::validate($data); return ['sha'=>$d->sha,'data'=>$data];
+        // The Git blob hash uses the exact downloaded bytes, including whitespace.
+        // PUT still uses this SHA for conflict detection and preserves MON-owned data.
+        MonData::validate($data); return ['sha'=>MonRun::gitSha($raw),'data'=>$data];
     }
     public function publish($batch, string $signature, float $deadline, array $settings): array {
         $headers=$this->headers(true); // Fail before any network work if writes are not configured.
