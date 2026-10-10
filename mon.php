@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.3.0 -- PHP 7.4+ web control / persistent quote daemon.
+ * mon.php 1.3.1 -- PHP 7.4+ web control / persistent quote daemon.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * The daemon writes only collection. Stateless MON adapters return files; MON owns analysis and result.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.3.0';
+const MON_VERSION = '1.3.1';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -321,12 +321,12 @@ final class MonData {
         $w = $d->watchlist;
         $required = ['watchlist'=>['criteria_version','watchlist_version','updated_at','run_id','settings','calendar','symbols'], 'collection'=>['collection_id','watchlist_version','started_at','completed_at','status','next_cursor','quotes'], 'analysis'=>['criteria_version','run_id','as_of','analyzed_at','watchlist_version','collection_id','status','selection_fingerprint','input_fingerprint','result_fingerprint','coverage','independent_results','results','candidate_audit','candidate_history','changes','evidence']];
         foreach ($required as $k=>$fields) foreach ($fields as $field) if (!property_exists($d->$k,$field)) throw new MonFault('DATA_FIELD_MISSING');
-        if (!in_array($d->analysis->criteria_version,['MON-P2.0','MON-P3.0'],true) || !($w->calendar instanceof stdClass)) throw new MonFault('DATA_CRITERIA_INVALID');
+        if (!in_array($d->analysis->criteria_version,['MON-P2.0','MON-P3.0','MON-P3.1'],true) || !($w->calendar instanceof stdClass)) throw new MonFault('DATA_CRITERIA_INVALID');
         if (mon_get($w, 'criteria_version') !== $d->analysis->criteria_version || !is_int(mon_get($w, 'watchlist_version')) || $w->watchlist_version < 0 || !(mon_get($w, 'settings') instanceof stdClass) || !is_bool(mon_get($w->settings, 'enabled')) || !is_array(mon_get($w, 'symbols'))) throw new MonFault('WATCHLIST_INVALID');
         if (!is_array(mon_get($d->collection, 'quotes'))) throw new MonFault('COLLECTION_INVALID');
-        if ($d->analysis->criteria_version === 'MON-P3.0') {
-            if (mon_get($w->settings,'investment_style') !== 'swing' || MonRun::json(mon_get($w->settings,'swing_profile')) !== MonRun::json(MonSwing::rules())) throw new MonFault('MON_SWING_PROFILE_INVALID');
-            foreach (mon_get($d->analysis,'results',[]) as $r) if (mon_get($r,'action') === 'BUY_REVIEW' && !MonSwing::active($r)) throw new MonFault('MON_SWING_RECOMMENDATION_INVALID');
+        if (in_array($d->analysis->criteria_version,['MON-P3.0','MON-P3.1'],true)) {
+            if (mon_get($w->settings,'investment_style') !== 'swing' || MonRun::json(mon_get($w->settings,'swing_profile')) !== MonRun::json(MonSwing::rules($d->analysis->criteria_version))) throw new MonFault('MON_SWING_PROFILE_INVALID');
+            foreach (mon_get($d->analysis,'results',[]) as $r) if (mon_get($r,'action') === 'BUY_REVIEW' && !MonSwing::active($r,$d->analysis->criteria_version)) throw new MonFault('MON_SWING_RECOMMENDATION_INVALID');
         }
         $ids = [];
         foreach ($w->symbols as $s) {
@@ -1101,7 +1101,7 @@ HTML;
 // MON-RUN-1.0: stateless input/output adapters. No credentials or remote writes.
 final class MonRun {
     const CONTRACT = 'MON-RUN-1.0';
-    const MAX_SOURCE = 786432;
+    const MAX_SOURCE = 1572864;
     const MAX_BODY = 4194304;
     const MAX_PAYLOAD = 8388608;
     const VIEW_BYTES = 12288;
@@ -1339,7 +1339,7 @@ final class MonRun {
         ksort($rows, SORT_STRING); return array_values($rows);
     }
     public static function verifyFacts($d, $payload): void {
-        if ($d->analysis->criteria_version === 'MON-P3.0') {
+        if (in_array($d->analysis->criteria_version,['MON-P3.0','MON-P3.1'],true)) {
             if (!(mon_get($payload,'swing_signals') instanceof stdClass) || mon_get(mon_get($payload,'selection_facts'),'candidates_ref') !== 'swing_signals' ||
                 !hash_equals((string)mon_get($payload->selection_facts,'candidate_facts_sha256',''),self::digest(array_values(get_object_vars($payload->swing_signals))))) throw new MonFault('MON_SWING_FACT_HASH_INVALID');
         }
@@ -1403,8 +1403,8 @@ final class MonRun {
         if (!$sameReview || mon_get($risk, 'current_corporate_risk_verified') !== true) $blockers[] = 'corporate_risk_needs_check';
         if (!$tradingCurrent || mon_get($risk, 'current_trading_status_verified') !== true) $blockers[] = 'trading_status_needs_check';
         if (mon_get($risk, 'confirmed_material_adverse') === true) $blockers[] = 'confirmed_material_adverse';
-        if (mon_get($w,'criteria_version') === 'MON-P3.0' && mon_get($r,'action') === 'BUY_REVIEW') {
-            if (!MonSwing::active($r)) $blockers[]='swing_signal_invalid';
+        if (in_array(mon_get($w,'criteria_version'),['MON-P3.0','MON-P3.1'],true) && mon_get($r,'action') === 'BUY_REVIEW') {
+            if (!MonSwing::active($r,mon_get($w,'criteria_version'))) $blockers[]='swing_signal_invalid';
             else {
                 $s=$r->swing_signal; $liveOK=false; $hist=mon_get($s,'histogram'); $kind=mon_get($s,'macd_kind');
                 if ($q->valid && $price!==null) {
@@ -1413,7 +1413,7 @@ final class MonRun {
                         (mon_get($s,'ma5_reclaim_close')===true || mon_get($s,'ma5_reclaim_live')===true)) $liveOK=true;
                     $ef=mon_number(mon_get($s,'ema_fast_last')); $es=mon_number(mon_get($s,'ema_slow_last')); $sig=mon_number(mon_get($s,'signal'));
                     if ($ef!==null && $es!==null && $sig!==null && in_array($kind,['MACD_GOLD','MACD_AFTER','MACD_BEFORE'],true)) {
-                        $m=(2/13*$price+11/13*$ef)-(2/27*$price+25/27*$es); $h=$m-(0.1*$m+0.9*$sig);
+                        $m=(2/13*$price+11/13*$ef)-(2/27*$price+25/27*$es); $alpha=2/(MonSwing::rules(mon_get($w,'criteria_version'))->macd_signal+1); $h=$m-($alpha*$m+(1-$alpha)*$sig);
                         if ($kind==='MACD_BEFORE' && $h>=(float)$hist) $liveOK=true;
                         elseif (in_array($kind,['MACD_GOLD','MACD_AFTER'],true) && $h>0) $liveOK=true;
                     }
@@ -1462,10 +1462,10 @@ final class MonRun {
         $safe = static function ($s) { return str_replace(['|', "\r", "\n", '<', '>'], ['／', ' ', ' ', '＜', '＞'], (string)$s); };
         $num = static function ($n) { if (mon_number($n) === null) return '미확인'; return rtrim(rtrim(MonRun::decimal6($n), '0'), '.'); };
         $same = self::utc($a->as_of) === self::utc($at);
-        $text = ($a->criteria_version === 'MON-P3.0' ? 'MON 스윙 · MON-P3.0 · ' : '') . '기준 ' . $a->as_of . ' · ' . $a->status . ($same ? '' : ' · 재사용 표시 ' . $at) . "\n\n| 국가 | 종목 | 판단 | 가격 조건 | 핵심 이유 |\n|---|---|---|---|---|\n";
+        $text = (in_array($a->criteria_version,['MON-P3.0','MON-P3.1'],true) ? 'MON 스윙 · ' . $a->criteria_version . ' · MACD(12,26,' . MonSwing::rules($a->criteria_version)->macd_signal . ') · ' : '') . '기준 ' . $a->as_of . ' · ' . $a->status . ($same ? '' : ' · 재사용 표시 ' . $at) . "\n\n| 국가 | 종목 | 판단 | 가격 조건 | 핵심 이유 |\n|---|---|---|---|---|\n";
         foreach ($rows as $r) {
             $conditions = [];
-            if ($a->criteria_version === 'MON-P3.0') {
+            if (in_array($a->criteria_version,['MON-P3.0','MON-P3.1'],true)) {
                 $s=mon_get($r,'swing_signal'); $labels=['MA5_RECLAIM_CLOSE'=>'MA5 종가 재돌파','MA5_RECLAIM_LIVE'=>'MA5 장중 재돌파(잠정)','MACD_GOLD'=>'MACD 골든','MACD_AFTER'=>'MACD 골든 후','MACD_BEFORE'=>'MACD 골든 직전(근접)'];
                 $signals=[]; foreach(mon_get($s,'qualifying_signals',[]) as $key) $signals[]=$labels[$key]??$key;
                 if ($signals) $conditions[]=implode('·',$signals);
@@ -1479,14 +1479,14 @@ final class MonRun {
             if ($r->action === 'SELL_REVIEW') $label = '매도 검토'; elseif ($r->action === 'BUY_REVIEW') $label = ($comparisonReady ? '매입 검토 · ' : '이전 후보 참고 · ') . $state; else $label = '보유 관찰';
             $text .= '| ' . $safe($r->country) . ' | ' . $safe(mon_get($r, 'name', $r->symbol_id)) . ' (' . $safe(explode('|', $r->symbol_id)[2]) . ') | ' . $label . ' | ' . $safe($conditions ? implode('; ', $conditions) . ' ' . mon_get($r, 'currency', '') : '계획 확인 필요') . ' | ' . $safe(mon_get($r, 'reason', '확인 필요')) . " |\n";
         }
-        if (!$rows) $text .= '| 한·미·일 | — | 추천 확정 대기 | — | ' . ($a->criteria_version === 'MON-P3.0' ? 'MA5/MACD 신호 검증 후 ChatGPT 자율 선정' : '자료 확인 필요') . " |\n";
+        if (!$rows) $text .= '| 한·미·일 | — | 추천 확정 대기 | — | ' . (in_array($a->criteria_version,['MON-P3.0','MON-P3.1'],true) ? 'MA5/MACD 신호 검증 후 ChatGPT 자율 선정' : '자료 확인 필요') . " |\n";
         $notes = [];
         if ($reasons) $notes[] = implode('; ', array_values(array_unique($reasons)));
         if (!$same) $notes[] = '이전 검증 결과 재사용. 현재 가격·거래·기업 확인은 새로 완료한 것이 아닙니다.';
         $limits = mon_get($a, 'limitations', []); $riskNotes = [];
         $corporate = mon_get(mon_get($a, 'input_snapshot'), 'corporate_risk');
         foreach (['confirmed_current_material_adverse' => '확인된 중대 위험', 'pending_items' => '후속 확인 필요'] as $kind => $label) foreach (mon_get($corporate, $kind, []) as $event) {
-            $sid = mon_get($event, 'symbol_id'); if (!is_string($sid)) continue;
+            $sid = mon_get($event, 'symbol_id'); if (!is_string($sid) || (!isset($known[$sid]) && mon_get($watch[$sid]??null,'is_held')!==true)) continue;
             $riskNotes[] = $label . ': ' . mon_get($watch[$sid] ?? null, 'name', $sid);
         }
         if ($limits || $riskNotes) $notes[] = '기록 기준 ' . mon_get($a, 'limitations_as_of', $a->as_of) . ': ' . implode('; ', array_values(array_unique(array_merge($limits, $riskNotes))));
@@ -1500,16 +1500,19 @@ final class MonRun {
     }
 }
 
-/* MON-SWING-1.0: numerical eligibility support; final selections belong to MON/ChatGPT. */
+/* MON-SWING-1.1: numerical eligibility support; final selections belong to MON/ChatGPT. */
 final class MonSwing {
-    const CRITERIA = 'MON-P3.0';
-    const FORMULA = 'MON-SWING-1.0';
-    public static function rules(): stdClass {
-        return (object)['strategy'=>'swing','formula_version'=>self::FORMULA,'ma_period'=>5,'min_below_days'=>10,
-            'macd_fast'=>12,'macd_slow'=>26,'macd_signal'=>19,'macd_after_days'=>3,
+    const CRITERIA = 'MON-P3.1';
+    const FORMULA = 'MON-SWING-1.1';
+    public static function rules(?string $criteria=null): stdClass {
+        $legacy=$criteria==='MON-P3.0';
+        $r=(object)['strategy'=>'swing','formula_version'=>$legacy?'MON-SWING-1.0':self::FORMULA,'ma_period'=>5,'min_below_days'=>10,
+            'macd_fast'=>12,'macd_slow'=>26,'macd_signal'=>$legacy?19:9,'macd_after_days'=>3,
             'macd_before_hist_bars'=>3,'macd_before_gap_atr'=>0.10,'rs20_min_pp'=>0,'rs20_operator'=>'>',
             'ema_seed'=>'SMA_of_first_N_valid_closes','ema_alpha'=>'2/(N+1)',
             'final_selector'=>'ChatGPT','reference_limit_per_country'=>10,'buy_limit_per_country'=>3];
+        if(!$legacy)$r->history_policy='full_provider_window_no_truncation';
+        return $r;
     }
     public static function bars($rows): array {
         if (!is_array($rows) || count($rows)>20000) throw new MonFault('MON_SWING_BARS_INVALID');
@@ -1570,7 +1573,7 @@ final class MonSwing {
         $atr=count($trs)>=14?array_sum(array_slice($trs,-14))/14:0.0;
         $fast=self::ema($closes,12);$slow=self::ema($closes,26);$macd=[];
         foreach($closes as $i=>$unused)$macd[$i]=$fast[$i]!==null && $slow[$i]!==null?$fast[$i]-$slow[$i]:null;
-        $signal=self::ema($macd,19);$hist=[];
+        $signal=self::ema($macd,9);$hist=[];
         foreach($closes as $i=>$unused)$hist[$i]=$macd[$i]!==null && $signal[$i]!==null?$macd[$i]-$signal[$i]:null;
         $kind=self::classifyMacd($hist,$atr);$qualified=[];
         if($closeReclaim)$qualified[]='MA5_RECLAIM_CLOSE';if($kind['kind']!==null)$qualified[]=$kind['kind'];
@@ -1582,7 +1585,7 @@ final class MonSwing {
             if($liveReclaim)$qualified[]='MA5_RECLAIM_LIVE';
         }
         $round=static function($x){return $x===null?null:(float)MonRun::decimal6($x);};
-        return (object)['formula_version'=>self::FORMULA,'bars_as_of'=>$b[$n-1][0],'bar_count'=>$n,
+        return (object)['formula_version'=>self::FORMULA,'macd_parameters'=>[12,26,9],'bars_as_of'=>$b[$n-1][0],'bar_count'=>$n,
             'qualifying_signals'=>$qualified,'technical_qualified'=>count($qualified)>0,
             'ma5'=> $round($ma[$n-1]),'ma5_below_days_before_last'=>$below,'ma5_below_days_through_last'=>$maEndBelow,
             'ma5_reclaim_close'=>$closeReclaim,'ma5_reclaim_live'=>$liveReclaim,'ma5_projected_live'=>$round($projected),
@@ -1595,9 +1598,10 @@ final class MonSwing {
             'atr14'=>$round($atr),'macd_gap_atr'=>$atr>0 && $hist[$n-1]!==null?$round(abs($hist[$n-1])/$atr):null,
             'macd_status'=>$signal[$n-1]===null?'needs_history':'calculated','price_basis'=>'split_adjusted_completed_daily'];
     }
-    public static function active($r): bool {
+    public static function active($r,?string $criteria=null): bool {
         $s=mon_get($r,'swing_signal');
-        return $s instanceof stdClass && mon_get($s,'formula_version')===self::FORMULA && mon_get($s,'eligible')===true &&
+        $formula=$criteria==='MON-P3.0'?'MON-SWING-1.0':self::FORMULA;
+        return $s instanceof stdClass && mon_get($s,'formula_version')===$formula && mon_get($s,'eligible')===true &&
             mon_get($s,'market_strong')===true && is_array(mon_get($s,'qualifying_signals')) && count($s->qualifying_signals)>0;
     }
     public static function live($r,$w,$at): ?stdClass {
@@ -1640,14 +1644,27 @@ final class MonSwing {
                     $rawRs=100*($stockReturn-$marketReturn);$r->R20=(float)MonRun::decimal6($stockReturn);$r->rs20_pp=(float)MonRun::decimal6($rawRs);
                     $r->market_strong=$rawRs>0;$r->benchmark=$benchId;$r->comparison_dates=$dates;
                     $live=self::live($liveMap[$sid]??null,$d->watchlist,$c->rendered_at);
-                    $s=self::technical($b,$live);foreach($s as $k=>$v)$r->$k=$v;
+                    $s=self::technical($b,$live);
+                    $history=mon_get(mon_get($p,'history_metadata'),$sid);
+                    $complete=$history instanceof stdClass && mon_get($history,'complete_source_window')===true &&
+                        mon_get($history,'bar_count')===$n && mon_get($history,'first_date')===$b[0][0] &&
+                        mon_get($history,'last_date')===$last && mon_get($history,'price_basis')===mon_get($m,'adjustment') &&
+                        hash_equals((string)mon_get($history,'bars_sha256',''),MonRun::digest($b));
+                    $s->history_status=$complete?'complete_source_window':'unverified_window';
+                    if(!$complete && $s->signal!==null){
+                        $s->macd_status='needs_full_history';$s->macd_raw_kind=$s->macd_kind;
+                        $s->macd_kind=null;$s->macd_cross_date=null;$s->macd_cross_age_days=null;
+                        $s->qualifying_signals=array_values(array_filter($s->qualifying_signals,static function($key){return strpos($key,'MACD_')!==0;}));
+                        $s->technical_qualified=count($s->qualifying_signals)>0;
+                    }
+                    foreach($s as $k=>$v)$r->$k=$v;
                     $r->bar_input_sha256=hash('sha256',MonRun::json((object)['bars'=>$bars,'benchmark_id'=>$benchId,'benchmark'=>$bb,'rules'=>self::rules()]));
                     $r->comparison_current=mon_get($periods[$country]??null,'current_period')===true && mon_get($periods[$country]??null,'verified_completed_date')===$last;
                     if(!$r->market_strong)$r->reason_codes[]='not_stronger_than_market';
-                    if(!$r->technical_qualified)$r->reason_codes[]=$r->macd_status==='needs_history'?'macd_history_missing_no_ma_reclaim':'no_swing_signal';
+                    if(!$r->technical_qualified)$r->reason_codes[]=in_array($r->macd_status,['needs_history','needs_full_history'],true)?'macd_history_missing_no_ma_reclaim':'no_swing_signal';
                     if(!$r->comparison_current)$r->reason_codes[]='latest_comparison_pending';
                     $r->eligible=$r->market_strong && $r->technical_qualified && $r->comparison_current;
-                    $missingSignal=$r->market_strong && !$r->technical_qualified && $r->macd_status==='needs_history';
+                    $missingSignal=$r->market_strong && !$r->technical_qualified && in_array($r->macd_status,['needs_history','needs_full_history'],true);
                     $r->eligibility=$r->eligible?'pass':($r->comparison_current && !$missingSignal?'near':'unverified');
                 }
             }catch(MonFault $e){$r->reason_codes[]=$e->getMessage();}
@@ -1674,7 +1691,8 @@ final class MonSwing {
         if(!property_exists($p->strategy_archive,$key))$p->strategy_archive->$key=(object)[
             'analysis'=>MonRun::pick($d->analysis,['criteria_version','run_id','as_of','selection_fingerprint','input_fingerprint','result_fingerprint','results','independent_results','candidate_audit','coverage','limitations','changes']),
             'selection_facts'=>$p->selection_facts,'input_facts'=>$p->input_facts,
-            'final_results_details'=>$p->final_results_details,'independent_results'=>$p->independent_results];
+            'final_results_details'=>$p->final_results_details,'independent_results'=>$p->independent_results,
+            'swing_signals'=>mon_get($p,'swing_signals'),'swing_rules'=>mon_get($d->analysis->input_snapshot,'swing_rules')];
     }
     public static function finalize($base,$out,$p,$context,array $reasons): array {
         $a=$out->analysis;$a->selection_fingerprint=MonRun::digest($p->selection_facts);
@@ -1686,14 +1704,40 @@ final class MonSwing {
         if(!MonRun::storage($out,false)->fits){MonRun::compactEvidence($out,$p);$a->input_snapshot->compressed_fields=array_keys(get_object_vars($p));sort($a->input_snapshot->compressed_fields,SORT_STRING);$a->input_snapshot->lossless_payload=MonRun::pack($p,'gzip+base64');}
         MonRun::validate($out);MonRun::verifyFacts($out,$p);$storage=MonRun::storage($out,true);
         if(MonRun::json($base->collection)!==MonRun::json($out->collection))throw new MonFault('MON_OWNERSHIP_INVALID');
-        $text=MonRun::json($out);$summary=MonRun::render($out,$context->rendered_at,$reasons);
+        $text=MonRun::json($out);$summary=MonRun::render($out,$out->analysis->as_of,$reasons);
         return ['status'=>'changed','write_required'=>true,'files'=>[['path'=>'mon_data.json','content'=>$text,'blob_sha'=>MonRun::gitSha($text)],['path'=>'mon_result.md','content'=>$summary,'blob_sha'=>MonRun::gitSha($summary)]],
             'summary'=>$summary,'validation'=>['criteria_version'=>self::CRITERIA,'collection_preserved'=>true,'payload_hash_verified'=>true,'selection_fingerprint'=>$a->selection_fingerprint,'input_fingerprint'=>$a->input_fingerprint,'result_fingerprint'=>$a->result_fingerprint,'storage'=>$storage]];
     }
-    public static function migrate($d,$context): array {
-        $c=MonRun::context($context);$prepared=self::prepare($d,$context);
-        if($d->analysis->criteria_version===self::CRITERIA)return ['status'=>'no_change','write_required'=>false,'files'=>[],'prepared'=>self::prepareView($prepared)];
-        $p=MonRun::payload($d);self::archive($d,$p);$out=mon_decode(MonRun::json($d));$a=$out->analysis;
+    public static function restoreHistory($p,$updates,$context): void {
+        if($updates===null)return;
+        if(!($updates instanceof stdClass) || count(get_object_vars($updates))>3000)throw new MonFault('MON_HISTORY_UPDATE_INVALID');
+        if(!(mon_get($p,'history_metadata') instanceof stdClass))$p->history_metadata=new stdClass();
+        foreach($updates as $sid=>$u){
+            MonRun::identity($sid);$m=mon_get($p->candidate_metrics,$sid);$old=self::bars(mon_get($p->series,$sid,[]));
+            if(!($m instanceof stdClass) || !$old || !($u instanceof stdClass) || mon_get($u,'price_basis')!==mon_get($m,'adjustment') ||
+                !is_string(mon_get($u,'source_url')) || !preg_match('~^https://[^\s]+$~',$u->source_url) ||
+                !preg_match('/^[a-f0-9]{64}$/',(string)mon_get($u,'source_record_sha256','')) || mon_get($u,'provider_window')!=='6mo')throw new MonFault('MON_HISTORY_UPDATE_INVALID');
+            $checked=MonRun::utc(mon_get($u,'checked_at'));
+            if(MonRun::seconds($checked)>MonRun::seconds($context->rendered_at)+5)throw new MonFault('MON_HISTORY_TIME_INVALID');
+            $bars=self::bars(mon_get($u,'bars',[]));$n=count($bars);
+            if($n<count($old) || !$bars || $bars[0][0]>$old[0][0] || $bars[$n-1][0]!==$old[count($old)-1][0])throw new MonFault('MON_HISTORY_WINDOW_INVALID');
+            $map=[];foreach($bars as $bar)$map[$bar[0]]=$bar;
+            foreach($old as $bar)if(!isset($map[$bar[0]]) || MonRun::json($map[$bar[0]])!==MonRun::json($bar))throw new MonFault('MON_HISTORY_SOURCE_CONFLICT');
+            $p->series->$sid=$bars;$m->bars_count=$n;
+            $p->history_metadata->$sid=(object)['complete_source_window'=>true,'provider_window'=>'6mo_plus_verified_tail',
+                'first_date'=>$bars[0][0],'last_date'=>$bars[$n-1][0],'bar_count'=>$n,'bars_sha256'=>MonRun::digest($bars),
+                'price_basis'=>$u->price_basis,'source_url'=>$u->source_url,'checked_at'=>$checked,
+                'source_record_sha256'=>$u->source_record_sha256,'original_first_date'=>$old[0][0],'original_bar_count'=>count($old)];
+        }
+    }
+    public static function migrate($d,$context,$historyUpdates=null): array {
+        if($historyUpdates!==null && !($historyUpdates instanceof stdClass))throw new MonFault('MON_HISTORY_UPDATE_INVALID');
+        $c=MonRun::context($context);MonRun::validate($d);$p=MonRun::payload($d);MonRun::verifyFacts($d,$p);
+        if($d->analysis->criteria_version===self::CRITERIA && ($historyUpdates===null || count(get_object_vars($historyUpdates))===0))
+            return ['status'=>'no_change','write_required'=>false,'files'=>[],'prepared'=>self::prepareView(self::prepare($d,$context))];
+        self::archive($d,$p);self::restoreHistory($p,$historyUpdates,$c);
+        $working=mon_decode(MonRun::json($d));$working->analysis->input_snapshot->lossless_payload=MonRun::pack($p,'gzip+base64');
+        $prepared=self::prepare($working,$context);$out=mon_decode(MonRun::json($d));$a=$out->analysis;
         $out->watchlist->criteria_version=self::CRITERIA;$out->watchlist->settings->investment_style='swing';$out->watchlist->settings->swing_profile=self::rules();
         if(!(mon_get($out->watchlist->settings,'analysis_storage_policy')instanceof stdClass))$out->watchlist->settings->analysis_storage_policy=new stdClass();
         $out->watchlist->settings->analysis_storage_policy->max_bytes=MonRun::MAX_SOURCE;
@@ -1709,14 +1753,14 @@ final class MonSwing {
         }
         foreach($a->candidate_audit as $row){$s=$p->swing_signals->{$row->symbol_id};$row->previous_eligibility=$row->eligibility;$row->eligibility=$s->eligibility;$row->rank=$s->rank_hint;$row->failed_checks=$s->reason_codes;$row->swing_signal_ref='swing_signals:'.$row->symbol_id;$audit[]=$row;}$a->candidate_audit=$audit;
         $a->swing_preparation=(object)['formula_version'=>self::FORMULA,'prepared_at'=>$c->rendered_at,'prepared_fingerprint'=>$prepared['prepared_fingerprint'],'candidate_count'=>$prepared['candidate_count'],'counts'=>$prepared['counts'],'final_selector'=>'ChatGPT','selection_status'=>'awaiting_autonomous_selection'];
-        foreach($a->coverage as $row){$row->buy_review_count=0;$row->ready_count=0;$row->observed_count=0;$row->price_verified_count=0;$row->pass_count=$prepared['counts'][$row->country]['pass']??0;$row->near_count=$prepared['counts'][$row->country]['near']??0;$row->unverified_count=$prepared['counts'][$row->country]['unverified']??0;$row->fail_count=$prepared['counts'][$row->country]['fail']??0;$row->reason='MON-P3.0 스윙 신호 계산; ChatGPT 자율 최종선정 대기';}
+        foreach($a->coverage as $row){$row->buy_review_count=0;$row->ready_count=0;$row->observed_count=0;$row->price_verified_count=0;$row->pass_count=$prepared['counts'][$row->country]['pass']??0;$row->near_count=$prepared['counts'][$row->country]['near']??0;$row->unverified_count=$prepared['counts'][$row->country]['unverified']??0;$row->fail_count=$prepared['counts'][$row->country]['fail']??0;$row->reason=self::CRITERIA.' MACD(12,26,9) 계산; ChatGPT 자율 최종선정 대기';}
         $p->selection_facts=(object)['criteria_version'=>self::CRITERIA,'rules'=>self::rules(),'candidates_ref'=>'swing_signals','candidate_facts_sha256'=>MonRun::digest(array_values(get_object_vars($p->swing_signals))),'selected'=>[], 'positions'=>mon_get($p->selection_facts,'positions',[]),'corporate_risk'=>mon_get($p->selection_facts,'corporate_risk',new stdClass())];
         $p->input_facts=(object)['criteria_version'=>self::CRITERIA,'as_of'=>$a->as_of,'selection_fingerprint'=>'','collection_id'=>$a->collection_id,'collection_status'=>$d->collection->status,'used_prices'=>[],'corporate_risk_status'=>'needs_check','trading_status_check'=>(object)['status'=>'needs_check']];
         $a->input_snapshot->swing_rules=self::rules();$a->input_snapshot->mon_input_state=(object)['run_contract'=>MonRun::CONTRACT,'run_mode'=>'swing_migration','preparation_running'=>false,'selection_status'=>'awaiting_autonomous_selection'];
         $a->limitations=['새 기준의 수치 자격을 계산했으며 ChatGPT의 최종 자율 선정은 대기 중','실시간 가격·거래 가능 여부·개별 기업 위험 확인 필요','미국10/9 최신 지수 비교 미완료; 이전 추천은 새 추천으로 승계하지 않음'];$a->limitations_as_of=$a->as_of;
-        $a->changes[]=(object)['at'=>$a->as_of,'kind'=>'swing_criteria_migration','from'=>'MON-P2.0','to'=>self::CRITERIA,'old_buy_reviews_archived'=>true,'watchlist_version_before'=>$d->watchlist->watchlist_version,'watchlist_version_after'=>$out->watchlist->watchlist_version];
+        $a->changes[]=(object)['at'=>$a->as_of,'kind'=>'swing_criteria_migration','from'=>$d->analysis->criteria_version,'to'=>self::CRITERIA,'macd'=>[12,26,9],'old_buy_reviews_archived'=>true,'restored_history_count'=>count(get_object_vars(mon_get($p,'history_metadata',new stdClass()))),'watchlist_version_before'=>$d->watchlist->watchlist_version,'watchlist_version_after'=>$out->watchlist->watchlist_version];
         $a->display=(object)['analysis_as_of'=>$a->as_of,'rendered_at'=>$a->as_of,'analysis_recomputed'=>true,'selection_recomputed'=>false];
-        return self::finalize($d,$out,$p,$c,['스윙 기준 적용; 이전 추천은 이력으로 보존하고 새 추천 확정 대기']);
+        return self::finalize($d,$out,$p,$c,['MACD(12,26,9) 적용; 이전 추천은 이력으로 보존하고 새 추천 확정 대기']);
     }
     public static function select($d,$decision): array {
         if(!($decision instanceof stdClass))throw new MonFault('MON_SWING_DECISION_INVALID');
@@ -1743,8 +1787,7 @@ final class MonSwing {
             }
             $wr=$watch[$sid];$r=(object)['symbol_id'=>$sid,'country'=>$wr->country,'name'=>$wr->name,'currency'=>$wr->currency,'rank'=>$s->rank_hint,
                 'action'=>'BUY_REVIEW','base_action'=>'BUY_REVIEW','readiness'=>'conditional','eligibility'=>'pass','swing_signal'=>$s,
-                'entry_plans'=>$s->entry_plans,'active_plan'=>null,'entry_zone'=>is_array($s->entry_plans)&&$s->entry_plans?mon_get($s->entry_plans[0],'entry_zone'):null,
-                'invalidation'=>is_array($s->entry_plans)&&$s->entry_plans?mon_get($s->entry_plans[0],'invalidation'):null,
+                'entry_plans'=>$s->entry_plans,'active_plan'=>null,'entry_zone'=>null,'invalidation'=>null,
                 'price'=>$s->last_close,'price_type'=>'close','price_as_of'=>self::closeTime($out,$wr->country,$s->bars_as_of),
                 'price_checks'=>(object)['action_price_valid'=>false,'delay_seconds'=>null,'market_date'=>$s->bars_as_of,'timestamp_basis'=>'close','session_at_analysis'=>'closed'],
                 'risk_checks'=>(object)['current_corporate_risk_verified'=>false,'current_trading_status_verified'=>false],
@@ -2027,7 +2070,7 @@ function mon_run_web(string $api): int {
         $c = MonRun::context($context); if (MonRun::seconds($c->rendered_at) > microtime(true) + 5) throw new MonFault('MON_TIME_FUTURE');
         $data = mon_run_source($request, 'source_json', $c->source_blob_sha);
         if ($api === 'mon_swing_prepare') $result=MonSwing::prepareView(MonSwing::prepare($data,$context,mon_get($request,'live_observations',[])));
-        elseif ($api === 'mon_swing_migrate') $result=MonSwing::migrate($data,$context);
+        elseif ($api === 'mon_swing_migrate') $result=MonSwing::migrate($data,$context,mon_get($request,'history_updates'));
         elseif ($api === 'mon_swing_select') {
             if(MonRun::seconds(mon_get(mon_get($request,'decision'),'fixed_as_of'))>microtime(true)+5)throw new MonFault('MON_TIME_FUTURE');
             $result=MonSwing::select($data,mon_get($request,'decision'));
