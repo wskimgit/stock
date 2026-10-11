@@ -1,0 +1,31 @@
+{
+  "kind": "restored_release_integrity_check",
+  "checked_at": "2026-10-11T23:02:23.785690+00:00",
+  "processor_version": "1.8.3",
+  "original_141_checks_reused": true,
+  "regression_tests_repeated": false,
+  "checks": {
+    "collection_preserved": true,
+    "original_results_preserved": true,
+    "original_analysis_as_of_preserved": true,
+    "recovery_source_manifest_sha256": true,
+    "recovery_source_manifest_git_sha": true,
+    "recovery_archive_manifest_sha256": true,
+    "recovery_archive_manifest_git_sha": true,
+    "all_100_source_hashes": true,
+    "unique_60_candidate_ids": true,
+    "20_identities_per_country": true,
+    "mon_data_fits_2MiB": true,
+    "original_6_results": true
+  },
+  "verified_source_count": 100,
+  "new_candidate_counts": {
+    "KR": 20,
+    "US": 20,
+    "JP": 20
+  },
+  "analysis_as_of_preserved": "2026-10-11T10:03:55.000000Z",
+  "nas_deployment_verified": false,
+  "remote_written": false,
+  "market_execution_statistics_modified": false
+}

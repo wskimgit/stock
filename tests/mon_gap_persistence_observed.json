@@ -1,0 +1,99 @@
+{
+    "kind": "native_staged_input_preparation_and_unpublished_finalization_simulation",
+    "processor_version": "1.8.3",
+    "php_version": "7.4.33",
+    "checked_at": "2026-10-11T14:33:35Z",
+    "prepare_seconds": 1.488281,
+    "prepare_peak_memory_bytes": 65662976,
+    "total_seconds": 4.930522,
+    "total_peak_memory_bytes": 77254656,
+    "hypothetical_case_counts": {
+        "empty": 0,
+        "maximum_per_country": 9
+    },
+    "new_market_selection_performed": false,
+    "remote_requests": 0,
+    "remote_written": false,
+    "orders": 0,
+    "market_execution_statistics_modified": false,
+    "validation": {
+        "criteria_version": "MON-P3.1",
+        "collection_preserved": true,
+        "payload_hash_verified": true,
+        "selection_fingerprint": "83f2d776afe5d9f4537aa225510f883e0d369784f7fe5b0b1ce37bd489a8f4c2",
+        "input_fingerprint": "9ec47704715884e5888e56dba34905d1927e7e7ba9df6c27e55c76e9df3b4296",
+        "result_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "storage": {
+            "bytes": 1394253,
+            "max_bytes": 2097152,
+            "bytes_without_collection": 1329389,
+            "collection_reserve_bytes": 655360,
+            "remaining_after_reserve": 112403,
+            "fits": true
+        },
+        "prepare_reused": true,
+        "cache_key": "edc1b95319e53a79731a195e1936eb4625342913bef73ed0426ddeec2d32b136"
+    },
+    "maximum_case_validation": {
+        "criteria_version": "MON-P3.1",
+        "collection_preserved": true,
+        "payload_hash_verified": true,
+        "selection_fingerprint": "2f9d304cd57e764ab34822f023eb2a817079ba8198cec641a562b489ed86d4ac",
+        "input_fingerprint": "4bf7d84d96fc90acf1b1d09b1ec71e7ae3d8940f8baffec2adb7ee9364fa3081",
+        "result_fingerprint": "92492a59fe993148465934b0f05b611597b0f7f760d05d5d1b97efdd178e8537",
+        "storage": {
+            "bytes": 1441351,
+            "max_bytes": 2097152,
+            "bytes_without_collection": 1376487,
+            "collection_reserve_bytes": 655360,
+            "remaining_after_reserve": 65305,
+            "fits": true
+        },
+        "prepare_reused": true,
+        "cache_key": "edc1b95319e53a79731a195e1936eb4625342913bef73ed0426ddeec2d32b136"
+    },
+    "maximum_case_counts": {
+        "JP": 3,
+        "KR": 3,
+        "US": 3
+    },
+    "maximum_case_results": 9,
+    "simulation_pending_analysis": false,
+    "simulation_source_recovery_state": "verified_inputs_used_in_autonomous_selection",
+    "simulation_discovery": [
+        {
+            "country": "KR",
+            "discovery_date": "2026-10-11",
+            "completed_bar_date": "2026-10-08",
+            "goal_status": "not_due_prepared",
+            "new_ids_identified_today": 20,
+            "daily_goal_met": false,
+            "quota_identified_count": 0,
+            "next_session_queued_count": 20,
+            "next_trading_date": "2026-10-12"
+        },
+        {
+            "country": "US",
+            "discovery_date": "2026-10-11",
+            "completed_bar_date": "2026-10-09",
+            "goal_status": "not_due_prepared",
+            "new_ids_identified_today": 20,
+            "daily_goal_met": false,
+            "quota_identified_count": 0,
+            "next_session_queued_count": 20,
+            "next_trading_date": "2026-10-12"
+        },
+        {
+            "country": "JP",
+            "discovery_date": "2026-10-11",
+            "completed_bar_date": "2026-10-09",
+            "goal_status": "not_due_prepared",
+            "new_ids_identified_today": 20,
+            "daily_goal_met": false,
+            "quota_identified_count": 0,
+            "next_session_queued_count": 20,
+            "next_trading_date": "2026-10-13"
+        }
+    ],
+    "current_data_unchanged": true
+}

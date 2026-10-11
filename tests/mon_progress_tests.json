@@ -1,0 +1,183 @@
+{
+    "processor_version": "1.8.3",
+    "php_version": "7.4.33",
+    "cases_total": 41,
+    "passed": 41,
+    "failed": 0,
+    "external_API_calls": false,
+    "measurements": {
+        "three_cached_jobs_seconds": 0.01123189926147461,
+        "large_source_bytes": 1237409,
+        "thin_progress_bytes": 2056,
+        "slice_http_calls": [
+            "GET",
+            "PUT"
+        ]
+    },
+    "cases": [
+        {
+            "case": "bulk transport preserves two valid independent requests despite invalid item",
+            "pass": true
+        },
+        {
+            "case": "duplicate symbol within bulk call is rejected without undoing valid items",
+            "pass": true
+        },
+        {
+            "case": "bulk re-transmission reuses IDs and returns no repeated full file",
+            "pass": true
+        },
+        {
+            "case": "PHP 7.4-compatible default caps are bounded",
+            "pass": true
+        },
+        {
+            "case": "three cached symbols finish in one slice without provider calls",
+            "pass": true
+        },
+        {
+            "case": "first symbol is observable before remaining two complete",
+            "pass": true
+        },
+        {
+            "case": "cached source verification time is preserved",
+            "pass": true
+        },
+        {
+            "case": "worker does not change ChatGPT analysis",
+            "pass": true
+        },
+        {
+            "case": "numeric snapshot and MACD input remain unchanged",
+            "pass": true
+        },
+        {
+            "case": "already completed requests are not processed again",
+            "pass": true
+        },
+        {
+            "case": "job cap leaves an independent unfinished request",
+            "pass": true
+        },
+        {
+            "case": "next slice resumes only the remaining request",
+            "pass": true
+        },
+        {
+            "case": "slow first symbol does not block later cached symbols",
+            "pass": true
+        },
+        {
+            "case": "provider timeout is limited by per-symbol budget",
+            "pass": true
+        },
+        {
+            "case": "failed fresh fetch retains previous verified data and its time",
+            "pass": true
+        },
+        {
+            "case": "retry wait does not repeat failed source immediately",
+            "pass": true
+        },
+        {
+            "case": "time criterion never completes a logical retry or bypasses its backoff",
+            "pass": true
+        },
+        {
+            "case": "timeout remains collecting with visible retry and no substitute final decision",
+            "pass": true
+        },
+        {
+            "case": "unchanged progress returns counts with no repeated card body",
+            "pass": true
+        },
+        {
+            "case": "quote-only change does not retrigger detail cards",
+            "pass": true
+        },
+        {
+            "case": "bad request is isolated in progress",
+            "pass": true
+        },
+        {
+            "case": "old request response is not counted as completed",
+            "pass": true
+        },
+        {
+            "case": "thin progress does not decode full history or claim validated signals",
+            "pass": true
+        },
+        {
+            "case": "final detail view still rejects damaged snapshot despite producer progress",
+            "pass": true
+        },
+        {
+            "case": "locally checkpointed result is visible before GitHub publication",
+            "pass": true
+        },
+        {
+            "case": "reading local progress does not mutate remote cache",
+            "pass": true
+        },
+        {
+            "case": "known exact blob permits one optimistic PUT without another full GET",
+            "pass": true
+        },
+        {
+            "case": "optimistic write preserves MON-owned watchlist and analysis",
+            "pass": true
+        },
+        {
+            "case": "known source stays immutable after write",
+            "pass": true
+        },
+        {
+            "case": "identical publication is skipped without a commit or full read",
+            "pass": true
+        },
+        {
+            "case": "conflict re-reads once and re-merges original detail proposal",
+            "pass": true
+        },
+        {
+            "case": "conflict retains current response but drops replaced request",
+            "pass": true
+        },
+        {
+            "case": "conflict preserves newer quote and concurrent ChatGPT decision",
+            "pass": true
+        },
+        {
+            "case": "above-1-MiB source still uses one PUT and preserves complete archive",
+            "pass": true
+        },
+        {
+            "case": "thin progress excludes Base64 and archive and stays below 12 KiB",
+            "pass": true
+        },
+        {
+            "case": "load-limited daemon finishes one job with one GET and one PUT",
+            "pass": true
+        },
+        {
+            "case": "integrated slice exposes separate measured stages",
+            "pass": true
+        },
+        {
+            "case": "integrated checkpoint is cleared only after successful publication",
+            "pass": true
+        },
+        {
+            "case": "publication failure preserves the load-limited local symbol checkpoint",
+            "pass": true
+        },
+        {
+            "case": "failed publication is not hammered again within the same slice",
+            "pass": true
+        },
+        {
+            "case": "expired criterion without prior data attempts recovery and exposes pending shortage",
+            "pass": true
+        }
+    ]
+}

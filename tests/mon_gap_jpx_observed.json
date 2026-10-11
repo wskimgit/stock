@@ -1,0 +1,384 @@
+{
+  "kind": "observed_official_JPX_membership_and_tick_rules",
+  "checked_at": "2026-10-11T12:29:54Z",
+  "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+  "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+  "membership_as_of": "2026-08-31",
+  "membership_http_status": 200,
+  "membership_http_seconds": 6.581322,
+  "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+  "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+  "rules_http_status": 200,
+  "rules_http_seconds": 5.810131,
+  "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+  "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+  "notice_http_status": 200,
+  "notice_http_seconds": 5.319352,
+  "scheduled_review_date": "2026-10-30",
+  "future_rules_effective_date": "2027-03-01",
+  "resolved_rule_count": 19,
+  "sources_are_month_end_membership_and_current_rules": "Latest publicly available membership as of 2026-08-31; current rule table and 2026-10-09 transition notice checked together. Recheck before 2026-10-30; no early application of future membership.",
+  "symbols": [
+    {
+      "symbol_id": "JP|TSE|3436",
+      "official_name": "ＳＵＭＣＯ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|4062",
+      "official_name": "イビデン",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|5333",
+      "official_name": "ＮＧＫ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6323",
+      "official_name": "ローツェ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6471",
+      "official_name": "日本精工",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6473",
+      "official_name": "ジェイテクト",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6479",
+      "official_name": "ミネベアミツミ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6525",
+      "official_name": "ＫＯＫＵＳＡＩ　ＥＬＥＣＴＲＩＣ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6871",
+      "official_name": "日本マイクロニクス",
+      "tick_rule": "JPX_OTHER_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Small 1",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "JPX_TOPIX500_CURRENT_from_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6963",
+      "official_name": "ローム",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|6976",
+      "official_name": "太陽誘電",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8031",
+      "official_name": "三井物産",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Core30",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8035",
+      "official_name": "東京エレクトロン",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Core30",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8053",
+      "official_name": "住友商事",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Large70",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8058",
+      "official_name": "三菱商事",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Core30",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8136",
+      "official_name": "サンリオ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Mid400",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8306",
+      "official_name": "三菱ＵＦＪフィナンシャル・グループ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Core30",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8316",
+      "official_name": "三井住友フィナンシャルグループ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Core30",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    },
+    {
+      "symbol_id": "JP|TSE|8411",
+      "official_name": "みずほフィナンシャルグループ",
+      "tick_rule": "JPX_TOPIX500_CURRENT",
+      "tick_rule_evidence": {
+        "membership_url": "https://www.jpx.co.jp/automation/markets/indices/topix/files/topixweight_j.csv",
+        "membership_sha256": "76222620d4b461e8cbe30796a992821bc87f41db3df23babd88501deacbe1d5a",
+        "rules_url": "https://www.jpx.co.jp/english/equities/trading/domestic/07.html",
+        "rules_sha256": "a6d53db13aef324bbf1f67a4532bf960884b50db1c19f48327d17bb16488aad4",
+        "notice_url": "https://www.jpx.co.jp/english/news/1030/20261009-01.html",
+        "notice_sha256": "daaca8a6d024ce74737879975d4867227d3383f8ff111f300e55e8c52e7adc7b",
+        "checked_at": "2026-10-11T12:29:54Z",
+        "classification": "TOPIX Core30",
+        "membership_as_of": "2026-08-31",
+        "valid_from": "2026-08-31",
+        "valid_until": "2026-10-29"
+      },
+      "scheduled_change": "review_before_2026-10-30"
+    }
+  ]
+}

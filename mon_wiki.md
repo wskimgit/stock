@@ -1,14 +1,34 @@
 # MON 실행·복구·통계 안내
 
-2026-10-11 KST · mon.php **1.8.1** · 지시문 **v4.9** · MON-P3.1 · MACD(12,26,9)
+2026-10-11 KST · mon.php **1.8.3** · 지시문 **v4.11** · MON-P3.1 · MACD(12,26,9)
 
 ChatGPT가 후보를 발굴·비교하고 최종 종목/근거를 판단한다. PHP는 검증 자료·수치·독립 진행·저장을 보조한다. [실행 지시문](monitor.md)의 MON:INSTRUCTION 블록을 먼저 읽는다.
+
+## 신규20개·근접 가격·진행 보강 — 1.8.3
+
+기존 후보 **100개 수치 입력(US80·JP19·KR1)**을 복구하고 공식 신규 **국가별20개·총60개**를23:32:34 KST에 등록했다. 기존6개 판단·19:03:55 KST 기준·collection·운영 통계3표본은 보존했다. 신원 확보와 상세 적격·현재 매입 판단을 구분한다.
+
+| 항목 | 적용한 대안 | 표시/다음 조건 |
+|---|---|---|
+| 신규20개 부족 | KIND/KRX·Nasdaq·JPX 공식 명부에서 기존 ID/코드를 제외; 증거와 서버 실제 최초 시각을 압축 신원 풀에 등록 | 실제 발견20/국가, KR·US10/12·JP10/13 목표 대기20/국가. 과거 미달은 보존 |
+| 종가의 작은 차이 | USD≥1은0.005·USD<1은0.00005·KRW/JPY는0.5 이내 비교 일치 | CRWD 과거30종가0.0005 차이 통과. 계산 원값·원문·날짜·통화·분할 기준·해시는 유지 |
+| 처리 시간 | 저장 종가 근접 대조 우선, 불필요한 추가 조회 생략; 묶음의 전체 검증·복제 한 번, 작은 맵 공간 검사 | 같은 실제 입력/30슬롯에서0.819→0.096초. 출력 SHA와19등록/11공간부족 처리 동일 |
+| 개별 진행 | 조회→출처 확인→자료 보관→지수→지표→중간 보관→실제 GitHub 반영; 현재 종목과 최근6단계 | 작은 단계 조회3초, 전체10초, 한 요청씩. 숨김 시 중지·실패 시 기존 증가 대기 |
+| NAS 접속 | 당시1.8.2 클라이언트7.73초/HTTP200/v1.5.0 | 새1.8.3 실물 교체·수동 재시작·부팅/부하 확인은 별도 |
+
+POST mon_discovery_acquire는 source_json/context/items/evidence를 받아 신원을 실제 서버 시각에 고정한다. 상세30개 슬롯을 늘리지 않는다. 휴장일의 최초 확인시각은 유지하며 다음 검증 거래일 quota_date에만 목표를 인정하고 그다음 날 반복 인정하지 않는다. 달력 미확인은 목표 성공으로 바꾸지 않는다. mon_discovery_plan에 items=null/[]이면 신원 풀을 첫30개와 나머지로 공정 분할한다. 상세 자료·추천 적격은 각각 독립 확인한다. [신규60개와 원천 행](mon_new_candidates.json)에 공식URL·확인시각·자료 SHA를 남겼다.
+
+대체 입력 mon_recovery_inputs.json과 이전 큰 이력 mon_recovery_archive.json은 고정 파일명·Git blob SHA·SHA256·키별 해시로 연결하며 원래 이력을 복원한다.20KiB 운반·주 파일2MiB·collection 예약655,360바이트·NAS96MiB는 유지한다. 동일 원문 중복 복원·순차 변경 해시·저장 전 캐시 해제·진행 캐시 얕은 복제를 사용해 정상 자료의 반복 계산을 줄였다. 조회 실패/부족을 가짜 봉이나 성공 플래그로 바꾸지 않는다.
+
+변경/관련 회귀 **141 PASS/0 FAIL**: 함수48＋HTTP11＋신원/근접24＋단계17＋진행/묶음41. 실제 캡처100개 준비4.054초·76.29MiB, 신규60개 등록0.477초·56.01MiB, 게시 없는 빈/최대9개 확정4.931초·73.68MiB였다. 최대9개 저장도 예약 후65,305바이트 여유다. 이는 로컬 구간 측정으로 전체 MON/외부 수집 시간이나 NAS 부하 보장이 아니다. 이전 PASS나 운영3표본에 합산하지 않았다.
+
+[함수](tests/mon_gap_tests.json)·[HTTP](tests/mon_gap_http_tests.json)·[신원/근접](tests/mon_discovery_precision_tests.json)·[단계](tests/mon_step_tests.json)·[진행 회귀](tests/mon_progress_tests.json)·[원천](tests/mon_gap_observed.json)·[동일 출력 속도](tests/mon_batch_observed.json)·[저장](tests/mon_gap_persistence_observed.json), [해소 보고](mon_gap_resolution.md)에 실제 범위와 중간 실패/대안을 기록했다.
 
 ## 완료 우선 원칙
 
 **시간·조회·재시도·검색·게시 횟수를 넘겼다는 이유로 전체 처리를 끝내지 않는다.** 초과한 작업은 대기/대체 원천/체크포인트/재개로 이어 처리하며 판단과 실제 저장 확인까지 진행한다. 비교 기준은 시작 때 고정해 초과량을 정확히 측정한다. 권한 거절·손상·가격 기준 충돌 같은 실제 미해결을 성공으로 숨기지 않는다. 사용자의 명시 중단은 존중한다.
 
-| 기존 종료 경로 | 1.8.1 동작 |
+| 기존 종료 경로 | 현재 동작 |
 |---|---|
 | 전체100/110/120 또는300초 도달 | guard가 초과 이벤트만 기록하고 준비·판단·확정을 계속 허용 |
 | HTTP30/60회 또는 게시 예약 소진 | 전송을 계속하고 실제 호출/초과 수 기록; 예약은 계획용 |
@@ -47,7 +67,7 @@ NAS에 `GET ?view=bootstrap`과 `Accept: application/json`을 사용한다. 최�
 | 실패 후 간격 | 30→60→120→240→300초 | 이후300초, 더 긴 Retry-After의 초/HTTP 날짜 존중 |
 | 전체 시도/경과 | 종료 상한 없음 | 같은 run ID·원래 접수시각·누적 횟수/실측 유지 |
 | 다음 실행 첫 대기 | 최소10/20초 | 최근60회 성공 응답 전체 소요 p90×1.5, 연결10~60·응답20~120초 |
-| 웹 상태/상세 조회 | 정상10초, 한 번에 하나 | 응답 대기/간격 증가, 새로고침·숨김 해제 후 남은 대기 보존 |
+| 웹 상태/단계 조회 | 전체10초·작은 단계3초, 한 번에 하나 | 응답 대기/간격 증가, 새로고침·숨김 해제 후 남은 대기 보존 |
 
 `MonNasConnection::poll()` 또는 처리 환경의 `--nas-check --run-id=같은ID`는 최대1회 읽기 후 `retry_in_seconds`를 반환한다. 호출자는 그동안 다른 작업을 하고 다음 허용 시각에 같은 ID를 다시 호출한다. 같은 상태 디렉터리의 클라이언트는 잠금으로 중복 전송을 피한다. curl 확장이 없는 CLI는 고정 시스템 curl을 사용하며 shell·키·시작 권한을 전달하지 않는다. 사용자에게 NAS 암호나 CLI 설치를 요구하지 않는다. 원문/키 없이 `mon_nas-<ID 해시>.php`·`mon_nas-connection-stats.php`에 보호 저장하며 최근20회 기록과 누적 횟수는 분리한다. 활성 시장 실행이 있으면 실제 시도 시간을 계측하고, 별도 CLI 호출은 고유 operation_id로 새 시도만 한 번 보고한다.
 
@@ -65,9 +85,12 @@ DNS/연결/TLS/408/425/429/5xx·일시 timeout은 계속 복구한다. 401/403·
 - mon_run_statistics: 운영자 인증으로 조회·검증 병합 가져오기·내보내기.
 - mon_detail_request/requests: 독립 종목 등록. 활성30개는 전송/보관 범위이고 완료 후 다음 후보 묶음을 이어 처리한다.
 - mon_detail_prepare/finalize: 같은 source/token/준비 수치로 자율 결정을 검증. 기준 초과 후에도 호출 가능하다.
+- mon_discovery_acquire: 공식 신원 풀에 실제 최초 시각 고정, 다음 검증 거래일 목표 배정.
+- mon_discovery_plan: 풀의 상세 미등록 후보를30개 이하와 나머지로 분할.
+- mon_gap_plan: 미확인·미달의 독립 대안 작업을 읽기 전용 페이지로 조회.
 - mon_publish_queue/process: 같은 파일 쌍의 영속 저장·재개. mon_artifact_read/mon_card_read는 검증 원문을 모델 밖에서 제공한다.
 
-원시 일봉·Base64·큰 JSON을 채팅에 출력하지 않는다. 진행 GET은4KiB 페이지로 조회하며 시간만 변해도 페이지 토큰을 무효화하지 않는다. 초기→변경 중간→최종으로 의미 있는 결과를 표시한다. 오래 걸리면 새 완료·복구·저장 상태를 추가 보고한다.
+GET ?view=progress&stage=1은 MON-STEP-1.0의 보호 detail_stage.php와 작은 status만 읽어 현재 종목·최근6단계를4KiB 이내로 반환한다. 중간 결과 보관과 원격 저장 확인을 구분하고 오래된 원격 응답을 새 저장 완료로 표시하지 않는다. 단계 기록 실패가 자료 처리를 막지 않는다. 원시 일봉·Base64·큰 JSON을 채팅에 출력하지 않는다. 진행 GET은4KiB 페이지로 조회하며 시간만 변해도 페이지 토큰을 무효화하지 않는다. 초기→변경 중간→최종으로 의미 있는 결과를 표시한다. 오래 걸리면 새 완료·복구·저장 상태를 추가 보고한다.
 
 ## 결과와 저장의 실제 완료
 
@@ -88,8 +111,8 @@ mon_data.json/mon_result.md를 같은 Git 커밋으로 저장하고 ref/두 SHA�
 
 ## 검증과 적용
 
-이번 변경 **48 PASS / 0 FAIL**: PHP7.4 연결 복구20건, 실제 PHP가 렌더링한 JavaScript의 DOM/fetch/시계 모의18건, 로컬 PHP HTTP/CLI10건이다. [연결 결과](tests/mon_nas_connection_tests.json)·[웹 조회 결과](tests/mon_nas_browser_tests.json)·[HTTP/CLI 결과](tests/mon_nas_http_tests.json)에서 범위를 확인한다. 가상356초에4번째 성공,106번째 시도 성공, 재시도 상태 보존, 구버전/로그인 구분, Retry-After, 조회 중복·오래된 페이지 방지, POST 유실 후 GET 확인을 검증했다. 이전 v1.8.0의47 PASS는 이번에 반복·합산하지 않았다.
+이전 v1.8.1 변경 **48 PASS / 0 FAIL**: PHP7.4 연결 복구20건, 실제 PHP가 렌더링한 JavaScript의 DOM/fetch/시계 모의18건, 로컬 PHP HTTP/CLI10건이다. [연결 결과](tests/mon_nas_connection_tests.json)·[웹 조회 결과](tests/mon_nas_browser_tests.json)·[HTTP/CLI 결과](tests/mon_nas_http_tests.json)에서 범위를 확인한다. 가상356초에4번째 성공,106번째 시도 성공, 재시도 상태 보존, 구버전/로그인 구분, Retry-After, 조회 중복·오래된 페이지 방지, POST 유실 후 GET 확인을 검증했다. 이전 v1.8.0의47 PASS는 이번에 반복·합산하지 않았다.
 
-[실제 NAS 관측](tests/mon_nas_connection_observed.json): 연결10/응답20초에서6.42초 후 HTTP200, JSON 조회6.09초, 새 v1.8.1 PHP 클라이언트7.71초 후 HTTP200을 받았다. NAS 응답은 **v1.5.0**이며 JSON에는 실행 중·정상 heartbeat·장외 대기가 표시됐다. 접속 재시도는 실제 성공했지만 NAS에 새 코드를 배포하거나 데몬을 재시작한 것은 아니다. 실물 부하·재부팅·외부 시장 자료 수집 성공도 이번 검증 범위 밖이다. 접속 유지보수 관측/모의 시험을 시장 운영 통계에 넣지 않았다.
+[실제 NAS 관측](tests/mon_nas_connection_observed.json): 연결10/응답20초에서6.42초 후 HTTP200, JSON 조회6.09초, 당시 v1.8.1 PHP 클라이언트7.71초 후 HTTP200을 받았다. 당시 v1.8.2 클라이언트도 [별도 관측](tests/mon_gap_connection_observed.json)에서7.73초/HTTP200/v1.5.0을 확인했다. NAS 응답은 **v1.5.0**이며 JSON에는 실행 중·정상 heartbeat·장외 대기가 표시됐다. 접속 재시도는 실제 성공했지만 NAS에 새 코드를 배포하거나 데몬을 재시작한 것은 아니다. 실물 부하·재부팅·외부 시장 자료 수집 성공도 이번 검증 범위 밖이다. 접속 유지보수 관측/모의 시험을 시장 운영 통계에 넣지 않았다.
 
-[mon.php](mon.php)를 기존 NAS /web/mon.php에 교체한 뒤 웹에서 중지→수동 시작으로1.8.1을 적용한다. 교체/가동이 확인되기 전에는 NAS가 새 버전이라고 표시하지 않는다. 처리 계약/processor_version이1.8.0 미만이면 이번 MON은 최신 Git 코드의 고정 함수 경로에서 진행한다. 이후 재부팅 때에도 수동 시작한다. [접속 설계·검증](mon_nas_connection_design.md), [기존 설계 변경](mon_reinforcement_design.md), [기존 구현/검증](mon_reinforcement_implementation.md)을 참조한다.
+[mon.php](mon.php)를 기존 NAS /web/mon.php에 교체한 뒤 웹에서 중지→수동 시작으로1.8.3을 적용한다. 대체 입력/이력 파일을 같은 폴더에 두거나 고정 Git blob 조회가 가능해야 하며 큰 이력 조회는 필요한 때만 수행한다. 교체/가동이 확인되기 전에는 NAS가 새 버전이라고 표시하지 않는다. 처리 계약/processor_version이1.8.0 미만이면 이번 MON은 최신 Git 코드의 고정 함수 경로에서 진행한다. 이후 재부팅 때에도 수동 시작한다. [접속 설계·검증](mon_nas_connection_design.md), [기존 설계 변경](mon_reinforcement_design.md), [기존 구현/검증](mon_reinforcement_implementation.md)을 참조한다.
