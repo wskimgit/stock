@@ -1,12 +1,12 @@
 # mon 지시문 — 한·미·일 스윙 종목 선정·매입·매도 판단
 
-- 지시문 **v4.6**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
+- 지시문 **v4.7**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
 - 개정일: **2026-10-11 KST**. MACD는 사용자 정정에 따라 **12·26·9**를 적용한다.
 - 저장소 **wskimgit/stock**, 브랜치 **main**. GitHub 관리 문서는 저장소 루트에 둔다. 별도 Wiki 저장소나 `wiki/` 폴더를 만들지 않는다.
 - 파일명 유지: **mon.php**=PHP, **monitor.md**=지시문·설계, **mon_data.json**=공유 데이터, **mon_result.md**=사용자 결과.
 - 최상위 원칙: **ChatGPT가 자율 판단하고 자율적으로 종목을 선정한다. 투자형태는 swing이다. PHP 수치와 참고 순위는 보조자료다.**
 - 추천 자격: **시장보다 강함 AND (MA5 재돌파 OR MACD 골든 OR MACD 골든 전후)**. 기존 추천·신규 후보는 같은 자격으로 경쟁한다.
-- 구현: **mon.php 1.6.2**. 웹의 부팅별 일회용 시작 권한으로 자동 실행을 차단하고 데몬 우선순위·메모리 한도·과부하 대기·분할 수집·조건부 조회·대기 쓰기를 보강했다. v1.6.1의 작은 기존 결과·대체 원천·성공자료 재개, 기존 절대 마감·수치 준비·페이지·파일 쌍 게시·스윙 자격을 유지한다. 주문은 실행하지 않는다.
+- 구현: **mon.php 1.7.0**. 접수 이후 시간·조회/재시도/표시 횟수·실패·미완료를 보호 통계에 기록하고 최근 통계로 다음 실행의 시간/횟수 한도를 자동 조정한다. 현재 실행의 한도는 최초에 고정한다. 부팅별 수동 시작·NAS 부하 상한과 MON-P3.1 선정 기준은 유지한다. 주문은 실행하지 않는다.
 - 배포 구분: GitHub 코드와 지시문을 바꾸는 것과 NAS `/web/mon.php` 교체·실가동은 별개다. NAS 교체 확인 없이 새 데몬이 가동 중이라고 쓰지 않는다.
 
 ## mon 실행 지시문
@@ -15,16 +15,16 @@
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v4.6 — 수동 시작·NAS 부하 제어·기존 자료와 마감 보존
+# mon 지시문 v4.7 — 실행 통계·다음 한도 자동 조정·미완료 보존
 기준 MON-P3.1 / MACD(12,26,9) / MON-SWING-1.1 / MON-RUN-1.1 / MON-DETAIL-1.0 / MON-PROGRESS-1.0 / schema_version 3.
 stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한다. 처리/표시 wiki는 mon_wiki.md다.
 최상위: ChatGPT가 후보 발굴·최종 판단·종목 선정을 자율 수행한다. 투자형태 swing. PHP는 자료와 수치 보조만 담당한다.
 
 1. 실행 예산과 초기 결과
-- 접수시각 received_at·첫 제어 first_control_at·모드와 마감을 먼저 고정한다. 일반은 원래 접수+100초 수집 종료, +110초 판단·최종 표시, +120초 게시 확인이다. 추가 준비 사유가 있을 때만 최초 extended 모드로 +280/+290/+300초를 사용한다. 표시·재시도·재개로 시작을 바꾸거나 일반 모드를 뒤늦게 연장하지 않는다. 정확한 접수 계측이 없으면 partial_timing=true/미측정으로 기록한다.
+- 접수시각 received_at·첫 제어 first_control_at를 기록하고 mode=auto로 MonExecution::start/mon_run_start가 반환하는 adaptive_policy의 시간·횟수를 먼저 고정한다. 통계가 없으면 +100/+110/+120초, 자동 전체 한도는120~300초다. 최근30일·최대60회 통계의 p90·25% 여유·마감 초과·재시도 복구율을 적용한다. 최근 확인된183초 하한1회로는 다음 +210/+220/+230초를 제안하며 충분한 실측 p90라고 쓰지 않는다. 명시 normal은100/110/120, 사유 있는 extended는280/290/300이다. 현재 실행은 표시·재시도·재개/통계 변경으로 연장하지 않는다. 정확한 접수 계측이 없으면 partial_timing=true다.
 - 첫 제어에서 시각·모드를 고정하고 작은 기존 결과를 먼저 확보한다. 최신 실행 블록은 범위만 추출해 읽는다. 최신 Git head/mon_result.md와 NAS GET ?view=bootstrap(접근 예산 최대2초, 1회)을 가능한 한 독립 묶음으로 확인한다. 눈앞에 검증된 이전 결과가 있으면 그 원래 시각·자료 날짜·잠정 상태부터 표시한다. 큰 mon_data.json 해제·외부 시장 조사·전체 wiki·이전 시험 조회를 첫 표시의 선행 조건으로 만들지 않는다.
-- NAS bootstrap은 건강 조회를 겸하며 외부 수집·지표 계산·저장 없이 기존 결과만 반환한다. 정상 운영자 인증 경로가 있으면 mon_run_start에 같은 run_id·received_at를 등록하고 initial_result/단계별 잔여시간을 사용한다. 인증/접근 불가이면 GitHub 작은 기존 결과 표시→정확한 SHA의 고정 소스 함수/커넥터 순서로 진행하며 access_unconfirmed를 기록한다. 같은 실패 주소를 반복하지 않는다. 접속 시간 초과를 NAS 정지라고 단정하지 않으며 새 암호·CLI·데몬을 요구하지 않는다.
-- 외부 호출 timeout은 기존 한도와 해당 단계 잔여시간 중 작은 값이다. 취소 불가 도구/생성 대기가 넘치면 deadline_missed와 실제 경과를 기록하고 제어가 돌아오면 새 수집을 중단한다. 서버 마감 기능으로 전체 ChatGPT120초 완료를 보장하지 않는다.
+- NAS bootstrap은 건강 조회를 겸하며 최대2초·1회다. 정상 인증이면 mon_run_start에 같은 run_id·received_at·mode=auto를 등록하고 initial_result/잔여 시간·횟수를 사용한다. NAS 불가/인증 미설정이면 작은 Git 결과와 mon_execution_stats.json을 먼저 확보하고, 검증된 고정 mon.php의 MonRunStatistics::validate/save 및 MonExecution::start를 로컬 보호 상태에 적용한 뒤 기존 준비/확정 함수를 호출한다. 별도 계산 프로그램을 생성하지 않는다. 모든 고정 함수 호출 전에 실행 문맥을 활성화해 마감 검사를 적용한다. access_unconfirmed를 기록하며 같은 실패 주소·사용자 암호/CLI/새 데몬을 요구하지 않는다.
+- 외부 호출 timeout은 기존 한도와 해당 단계 잔여시간 중 작은 값이다. 취소 불가 도구/생성 대기가 넘치면 deadline_missed와 실제 경과를 기록하고 제어가 돌아오면 새 수집을 중단한다. 서버 마감 기능으로 모델·취소 불가 커넥터·최종 채팅 전달까지 전체 시간을 보장하지 않는다.
 - 초기 표시 뒤 최신 mon_data.json과 정확한 Git blob SHA를 한 번 확보해 고정 함수에 전달한다. 큰 JSON·Base64·일봉·전체 wiki를 모델 문맥에 출력하지 않는다. 전체 후보 자격 검증·동등 경쟁은 작은 초기 표시와 별개다. 일반 실행에서 코드 생성·개선·과거 PASS 재시험을 하지 않는다.
 - 초기 결과를 먼저 표시한다: 현재 확보한 검증자료의 종목별 상태/자료 기준일/확인된 가격 조건과 부족자료를 짧게 제시하고 이번 조회 대상과 남은 시간을 밝힌다. 전체 후보 경쟁 전에는 잠정 검토·이전자료 참고이며 최종 추천 순위를 확정하지 않는다. 자료가 없으면 그 상태와 확인 대상을 표시한다.
 - 출력은 기본3회(초기→변경 중간→최종)다. 사용자가 n회를 지정하면 최대5회 범위에서 유의미한 변경을 묶어 표시한다. 같은 내용 반복·빈 중간 결과·매번 전체 표 재출력은 금지한다. 새 자료가 없으면 초기와 최종2회로 끝낸다. 초기 표시10~20초는 목표이며 실측을 숨기거나 보장하지 않는다.
@@ -33,7 +33,7 @@ stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한
 - 현재 목록·최근20거래일 후보·새 근거가 있는 과거 강한 종목·신규 후보에서 상세 확인 종목을 자율 선정한다. 기존·신규·직전 추천을 동등하게 판단하며 PHP 점수 상위를 자동 채택하지 않는다.
 - 신원·국가·거래소·통화·공급자 코드가 확인된 종목에 개별 request_id를 준다. 기존 mon_detail_request 또는 mon_detail_requests(items)를 사용한다. 여러 독립 요청은 한 전송·한 파일·한 커밋으로 저장해 왕복을 줄인다. 유효 요청과 오류를 종목별로 구분하며 전체 성공을 요구하지 않는다.
 - 같은 요청은 같은 ID다. 새 종목/새 완료봉/정정/강제 재수집이면 새 ID다. wait_seconds는 이번 수집 마감까지 남은 시간 이하로 설정한다. 활성 요청 최대30개, 국가별 상세 관찰 기본10개이며 이 한도가 전체 후보 판단 범위를 제한하지 않는다.
-- mon.php 1.6.2의 NAS 데몬은 국가별·신규/이전별 기회를 교차 배정하며 상세 회차1종목·8초, 전체 회차25초로 제한한다. 직접 호출하는 상세 함수의 기존 최대3종목·25초·전체55초 설정은 유지하며 데몬 실행 때만 낮은 한도를 적용한다. 종목 예산35%(최대3초)를 지수에 남기고 종목/지수 각각의 첫 KIS 원천은 해당 잔여구간45%만 사용한다. 종목별 성공/실패/이전자료를 즉시 보존하고 첫 응답 우선 미러를 유지한다. 기본 시세60초·일반 미러180초와 구분한다. 과부하 대기로 원래 마감이 지나면 자료 부족/이전자료로 표시하며 마감을 늘리지 않는다. 마감 뒤 원문을 이번 판단에 몰래 넣지 않는다.
+- mon.php 1.7.0의 NAS 데몬은 국가별·신규/이전별 기회를 교차 배정하며 상세 회차1종목·8초, 전체 회차25초로 제한한다. 직접 호출하는 상세 함수의 기존 최대3종목·25초·전체55초 설정은 유지하며 데몬 실행 때만 낮은 한도를 적용한다. 종목 예산35%(최대3초)를 지수에 남기고 종목/지수 각각의 첫 KIS 원천은 해당 잔여구간45%만 사용한다. 종목별 성공/실패/이전자료를 즉시 보존하고 첫 응답 우선 미러를 유지한다. 기본 시세60초·일반 미러180초와 구분한다. 과부하 대기로 원래 마감이 지나면 자료 부족/이전자료로 표시하며 마감을 늘리지 않는다. 마감 뒤 원문을 이번 판단에 몰래 넣지 않는다.
 - DNS/연결/TLS·HTTP429 공통 장애는 같은 원천을30초(429는 Retry-After에 따라 최대300초) 잠시 건너뛰고 다른 원천/종목/기존 검증자료를 활용한다. 단일 시간 초과/5xx는 그 요청 주소만 차단하며30초 내 서로 다른 주소의 실패2건이 있을 때 원천 전체를 차단한다. 특정 종목404는 다른 종목까지 막지 않는다. Git 저장 확인은 이 차단과 분리한다. 성공한 종목 원문은 같은 request_hash·종목·목표 완료일·원문 해시·원래 요청 기한의 보호 체크포인트로 보존한다. 지수 실패의 다음 허용 재시도는 종목을 다시 받지 않고 지수부터 재개하며 원래 검증시각을 유지한다.
 - 가능하면 /mon.php?view=progress&since=<이전 snapshot_token>을 확인한다. 4KiB 이하 페이지의 next_cursor가 있으면 같은 토큰으로 이어 읽으며 누락·새 소스 혼합을 하지 않는다. 새 수집/계산/저장을 시작하지 않는다. 서버 불가이면 GitHub 변경분을 이용한다. 기존 버전/중지/접근 미확인이면 반복 대기하지 않고 이전 검증자료·필요한 독립 확인으로 진행한다.
 - 토큰이 같으면 완료 카드·계산·외부 확인을 반복하지 않는다. 시세 collection_id만 바뀌면 상세 카드를 다시 준비하지 않는다. 실제 새 응답/원문 해시/자료 기준/오류·저장 상태가 바뀔 때만 해당 내용을 반영한다. 진행 정보는 생산자 메타정보이며 추천 자격 검증을 대신하지 않는다.
@@ -43,14 +43,14 @@ stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한
 - 요청과 응답의 request_id·request_hash·symbol_id·기준·기간·원문 해시가 일치해야 한다. 교체 전 요청·다른 종목·손상된 응답은 격리한다. 진행 조회의 usable_reported와 collection_complete를 검증 완료·최종 추천으로 해석하지 않는다.
 - 최신 완료 거래일 자료는 주말/휴일에도 현재 완료봉 자료다. 마지막 검증시각을 새 조회시각으로 바꾸지 않는다. 새 완료일 누락이면 이전 검증자료·과거 신호를 표시한다. 실패만으로 기존 자료가 있는 종목을 자동 탈락시키지 않는다.
 - 성공 가격과 이전 검증 지표는 각각 활용한다. 날짜·분할 기준·지수 기간이 다르면 현재 신호/RS20를 합성하지 않는다. 부분 가격은 참고이며 신호 확정은 별도다. 가격 기준 충돌은 현재 추천 자격을 보류하고 이전자료 참고로 구분한다.
-- 접속·429/5xx 등 일시 오류만 종목별 최대2회·30초 이상/Retry-After 뒤 재시도한다. 그 사이 다른 종목을 처리한다. 매핑 누락·가격 기준 충돌·완료일 불일치·지수 날짜/이력 부족은 같은 입력을 반복 조회하지 않고 부족 필드와 다음 확인을 남긴다. 재시도보다 원래 전체/요청 마감이 먼저 오면 확보자료로 끝낸다. 종목 자료와 같은21거래일·정확한 지수인 검증 저장 지수가 있으면 종목의 과거 완료일과 무관하게 재사용한다. 다른 지수로 대체하거나 누락 봉을 생성하지 않는다.
+- 접속·429/5xx 등 일시 오류만 요청에 고정된 execution_limits.attempts(기본2, 통계에 따라1~3회)·30초 이상/Retry-After 뒤 재시도한다. 5회 이상 재시도 기록의 복구율<10%면1회, ≥40%이고 전체 예산≥180초면3회다. 그 사이 다른 종목을 처리한다. 매핑 누락·가격 기준 충돌·완료일 불일치·지수 날짜/이력 부족은 같은 입력을 반복 조회하지 않고 부족 필드와 다음 확인을 남긴다. 재시도보다 원래 전체/요청 마감이 먼저 오면 확보자료로 끝낸다. 종목 자료와 같은21거래일·정확한 지수인 검증 저장 지수가 있으면 종목의 과거 완료일과 무관하게 재사용한다. 다른 지수로 대체하거나 누락 봉을 생성하지 않는다.
 - 고정 소스의 mon_detail_prepare로 한 번 병합·계산한다. 이미 준비했으면 새 입력이 수치/판단을 실제 바꾸는 때만 갱신한다. 모든 카드 페이지와 reference_cards를 읽고 빠른/느린/이전/신규 후보를 같은 기준으로 경쟁시킨다.
 - 추천 자격 = 시장보다 강함 AND (MA5 재돌파 OR MACD 골든 OR 골든 직전/후). 동일21완료 종가·거래일·분할 조정의 RS20_pp>0; KR=해당 KOSPI/KOSDAQ, US=S&P500, JP=TOPIX. 지수를 임의 대체하지 않는다.
 - MA5: 직전10거래일 이상 연속으로 각 종가가 그날 SMA5 미만이고 최신 완료 종가가 SMA5 초과; 또는 동일 하회 조건 뒤 독립 검증 현재가가 당일 잠정 SMA5 초과. 잠정 SMA5=(직전4완료 종가 합+현재가)/5. 등호는 재돌파가 아니다. 장중은 잠정이다.
 - MACD=EMA12−EMA26, Signal=EMA9(MACD). 직전 MACD≤Signal·현재 MACD>Signal이면 완료봉 골든. 골든 후1~3거래일 양의 히스토그램 유지도 대상이다. 골든 직전은 최근3유효 완료봉 H가 음수/0에서 엄격 상승하고 최신 abs(H)/ATR14≤0.10인 근접 상태다. 미래 교차를 확정하지 않는다.
 - 전체 원천 구간이 부족하면 MACD 미검증으로 남기되 검증된 MA5 OR 자격은 인정한다. ChatGPT가 시장·신호·유동성·이격·추격 위험·기업 근거를 비교한다. RS20↓→R20↓→ADV20↓는 참고 정렬이다. 국가별 비보유 추천/이전자료 참고 합계 최대3개, 관찰10개, 보유 별도다.
 - 최신 자격 확인은 selected(매입 검토), 과거 강도·신호만 확인한 종목은 이유를 명시해 references(이전자료 참고·재확인)로 선택할 수 있다. 과거 신호를 오늘 골든/현재 매입 가능으로 쓰거나 이전 추천을 무조건 승계하지 않는다.
-- 외부 독립 확인은 필요한 후보·중요 사건·보유 변화·누락 지수/봉과 신규 탐색을 초반 묶음1회, 중요한 충돌만 추가1회다. 국가당 신규20개/거래일 목표를 유지한다. 최초 발견일·신원 독립 근거가 확인된 고유 ID, 상세 확보, 적격 검증 수를 별도로 기록한다. 오래된 new_in_mon 표시·중복·신원 추정으로 목표를 채우지 않는다. 광범위 재검색·전체 후보 반복 검증으로 시간을 늘리지 않는다.
+- 외부 독립 확인은 필요한 후보·중요 사건·보유 변화·누락 지수/봉과 신규 탐색을 초반 묶음1회, 중요한 충돌만 추가한다. 외부 검색 묶음 한도는 adaptive_policy.external_search_batches(기본2, 충분한 통계에서 최대4)이며 호출 전에 잔여 횟수와 의미 있는 추가 확인 여부를 검사한다. 국가당 신규20개/거래일 목표를 유지한다. 최초 발견일·신원 독립 근거가 확인된 고유 ID, 상세 확보, 적격 검증 수를 별도로 기록한다. 오래된 new_in_mon 표시·중복·신원 추정으로 목표를 채우지 않는다. 광범위 재검색·전체 후보 반복 검증으로 시간을 늘리지 않는다.
 - 가격 계획은 검증 지지·저항·ATR과 실제 호가단위로 계산한다. 시세·신호 유지·거래·기업 위험이 부족하면 조건부/자료 필요다. 보유 매도는 등록 손절/추적선, MA20와 직전10일 저점 동시 붕괴, 확인된 중대한 기업 훼손을 따르며 신규 신호 부족만으로 자동 매도하지 않는다.
 
 4. 최종 표시와 저장
@@ -61,12 +61,32 @@ stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한
 - 최종 판단을 먼저 표시하고 두 파일을 같은 Git 커밋으로 저장한다. 정상 인증 NAS는 response_mode=manifest와 publish_mode=queue를 우선해 파일명·크기·SHA256·Git SHA만 받고 기존 데몬이 게시한다. 직접 저장이면 보호 artifact의 최대64KiB 청크를 모델 밖에서 바이트로 연결하고 전체 해시를 확인해 커넥터로 전달한다. NAS 불가/인증 미설정은 inline 함수·기존 커넥터 경로를 쓰며 큰 JSON/Base64를 모델에 출력하지 않는다.
 - 수집만 추가됐으면 한 번 병합하고 판단시각을 보존한다. 늦은 상세 수치는 pending_analysis로 후속 판단 필요를 표시하며 현재 자격에 합성하지 않는다. 다른 판단/설정은 덮어쓰지 않는다. 같은 수치·선정·근거·위험·계획은 재커밋하지 않는다. 표시시각만으로 새 판단을 만들지 않는다.
 - final_available·new_analysis_complete·analysis_origin·save_status를 분리한다. 기존 결과 재표시만 하면 new_analysis_complete=false/analysis_origin=previous_saved_result/저장 not_requested다. 새 검증 판단이 완료되고 실제 파일 쌍 저장 saved 또는 검증된 무변경 no_change인 경우만 fully_complete다. 파일 생성·대기·표시 보고로 완료를 꾸미지 않는다. 응답 유실은1회 확인 후 모르면 unknown이며 재커밋/force push하지 않는다. 원래 접수+300초 뒤 작업은 만료/미확인이다. 실제 commit SHA·완료시각은 영수증/채팅에 남긴다. 기존 파일의 단순 무수정과 이번 새 분석의 검증된 no_change를 구분한다.
-- 중단/시간 초과/실패는 단계·종목·코드·시각·횟수·복구·사용한 이전자료·결과 영향·다음 확인을 나열한다. 실측 총시간·첫 결과·수집/판단/저장·실제 표시 횟수와 저장 상태를 기록한다. 자동으로 만든 최종 파일은 채팅 표시 완료의 증거가 아니며 mon_run_observe에는 실제 표시 후 보고만 한다.
+- 중단/시간 초과/실패는 단계·종목·코드·시각·횟수·복구·사용한 이전자료·결과 영향·다음 확인을 나열한다. 실측 총시간·첫 결과·수집/판단/저장·실제 표시 횟수와 저장 상태를 기록한다. 자동으로 만든 최종 파일은 채팅 표시 완료의 증거가 아니며 mon_run_observe에는 실제 표시 후 보고만 한다. 서버 HTTP/단계/상세는 자동 계측하고 모델 밖 NAS·검색·Git 커넥터 호출은 실제 종료 후 mon_run_report 또는 MonExecution::report로 operation_id·seconds·units·success/code를 보고한다. 한 묶음 호출1회/검색어3개처럼 호출 수와 작업 수를 분리한다. 알 수 없는 시간은 추정해 넣지 않는다. 초과한 실제 호출도 기록하며 성공으로 바꾸지 않는다.
 
-시간 목표: 준비 자료 판단60초, 일반 전체120초(수집100초＋마무리20초), 추가 준비 최대300초. 중간 표시로 실제 처리시간이 줄었다고 단정하지 않는다.
+- 처리 종료 시 mon_run_finish/MonExecution::finish를 호출해 reason·unfinished(작업 ID/오류 코드)를 남기고 다음 정책을 확인한다. 새 검증 판단과 실제 saved/검증 no_change만 fully_complete이며 이전 표·표시 보고·파일 생성은 완료가 아니다. 게시 대기/미확인은 미완료이며 후속 확인은 같은 기한/작업 ID로 수행한다. 실제 게시 확인은 같은 통계 행의 revision만 갱신한다. 중단으로 종료 보고가 없으면 다음 시작이 보호 인덱스에서 최대8건의 만료를 점검해 censored/expired로 기록한다. 재개로 접수나 마감을 재설정하지 않는다. 다음 새 실행은 새 run_id와 현재 완료일/원문 해시로 미완료 필드부터 확인하고 완료 작업은 재사용한다.
+- NAS 통계는 mon_run-stats.php에 원자 저장한다. NAS 불가 시 고정 함수가 반환한 statistics_snapshot을 모델 밖에서 mon_execution_stats.json으로 내보내고 기존 Git 커넥터로 최신 통계와 MonRunStatistics::merge/CAS 병합 저장한다. 통계 파일은 분석/결과 파일 쌍과 별도이며 분석 실패 때도 기록한다. 코드 변경·시험 시간은 workload=maintenance 등 별도 분류로 두고 MON 시장 실행 통계에 섞지 않는다. 실제 첫/최종 채팅 전달 시각을 모르면 미측정으로 남긴다.
+
+시간 목표: 준비 자료 판단60초, 통계 없는 전체120초, 통계 기반 자동 전체120~300초. 실행 중 한도 변경 금지. 중간 표시로 실제 처리시간이 줄었다고 단정하지 않는다.
 금지: 일반 실행 중 계산 프로그램 생성/코드 개선, 정상 기능 재작성, 기존 PASS 재시험, 끝난 조회 반복, 사용자 CLI·새 데몬·cron 요구, NAS 배포/재시작, 예약 임의 등록, 주문. 기존 웹 수집 시작/중지 운영은 유지한다.
 ```
 <!-- MON:INSTRUCTION:END -->
+
+
+## 실행 통계와 자동 조정 — v4.7 / 1.7.0
+
+| 항목 | 적용 방식 | 안전 경계 |
+|---|---|---|
+| 전체 시간 | 같은 workload의 최근30일·최대60회, p90×1.25를10초 단위로 올림 | 120~300초; 증가 최대30초/회, 마감 초과는 최대2배; 완전 완료5회 뒤 감소 최대10초/회 |
+| 단계 예약 | 확정/게시 실측 p90×1.25로 각각10~30초 예약 | 수집/판단/게시 절대 마감은 접수 때 고정; 복구는 접수+300초 |
+| HTTP 횟수 | 5회 이상 실행의 호출 수 p90×1.25+게시 예약12회; 횟수 초과 관측이면10회 증가 | 20~60회; 공급자 호출은 게시12회 제외, 실제 전송 전 원자 카운터 검사 |
+| 단일 HTTP 시간 | 공급자별5회 이상 측정의 p90×1.5+0.25초 | 최소1초, Git 최대3초/원천 최대5초·호출자 한도·잔여 마감 중 최소; 과거 시간 초과20% 이상이면 원래 상한 |
+| 상세 시도·시간 | 5건 이상 재시도 복구율로1~3회, 관측 p90로 종목3~8초 | 일시 오류만, 최소30초/Retry-After; 데몬 회차1종목·8초/전체25초·시세2종목/6초 유지 |
+| 검색/표시 | 실제 외부 묶음과 작업 수 보고, 충분한 통계에서 검색2~4회 | 실제 초과 횟수도 기록; 표시 기본3회/변화 없으면2회는 유지, 미표시 보고 금지 |
+| 저장·중단 | 보호 저널→통계 upsert, 같은 run ID/revision 중복 제거 | 저장 잠금 실패는 원인/재시도 상태 보존, 손상 통계 거절; 과거 관측·중단 하한을 정확한 실측으로 바꾸지 않음 |
+
+`POST ?api=mon_run_statistics`는 운영자 인증으로 통계/다음 정책을 읽는다. `statistics_snapshot`으로 검증 병합 가져오기, `export=true`로 모델 밖 내보내기가 가능하다. `mon_run_report`에는 `report={operation_id,operation,seconds,units,success,code?}`를 보낸다. 허용 외부 operation은 external/nas·external/search·connector/github다. `mon_run_finish`는 `{run_context_id,reason,unfinished,export?}`다. 보존 한도는256KiB이고 비밀/가격/원문은 기록하지 않는다. 시간은 서버 finish까지이며 최종 채팅 전달은 실제 보고가 있을 때만 측정한다.
+
+[mon_execution_stats.json](mon_execution_stats.json)은16:02 실행의 확인된183초 하한·NAS1회/1.001464초 시간 초과·검색 묶음1회/검색어3개·기존 준비1회·실제 표시 보고2회만 담는다. 첫 표시 시간은 null, 새 분석은 미완료다. 이 한 건으로 다회 실측 통계가 있다고 주장하지 않는다. 종목·선정/자료 기준·보유·주문은 이번 코드 변경으로 바뀌지 않는다.
 
 ## 1. 역할과 저장 위치
 
@@ -250,7 +270,7 @@ GitHub 파일 읽기는 크기에 관계없이 Contents API의 `Accept: applicat
 | `?api=mon_detail_prepare` / MonDetails::prepare | 일치하는 개별 응답과 기존 자료 병합, 전체 자격/과거 참고 카드; 자율 선정 없음 |
 | `?api=mon_detail_select` / MonDetails::select | ChatGPT의 selected+references 검증과 최종 두 파일 반환 |
 | `?api=mon_detail_finalize` / MonDetails::finalize | selected/references와 독립 근거·현재가·위험을 한 번 확정; 인증된 매니페스트·선택적 게시 또는 기존 inline 파일 반환 |
-| `?api=mon_run_start`, `?api=mon_run_status`, `?api=mon_run_observe` / MonExecution | 원래 접수·마감 고정, 재개·실제 표시 보고·오류·최종/저장 상태 |
+| `?api=mon_run_start/status/observe/report/finish/statistics` / MonExecution·MonRunStatistics | 원래 접수·정책 고정, 실제 시간/횟수·오류·미완료·통계와 다음 정책 |
 | `?api=mon_discovery_plan` / MonDiscovery | 요청 국가·신규/이전 기회 배정, 활성30개와 남은 후보를 구분; 자동 선정 없음 |
 | `?api=mon_artifact_read`, `?api=mon_card_read` / MonArtifact | 고정 파일 청크·초대형 카드의 인증된 원문 읽기와 해시 검증 |
 | `?api=mon_publish_queue`, `?api=mon_publish_process` / MonPublication | 영속 파일 쌍 접수, 원자적 Git 저장과 확인된 실제 ref 영수증 |
@@ -309,7 +329,7 @@ GitHub 파일 읽기는 크기에 관계없이 Contents API의 `Accept: applicat
 
 요청 웹 폼은 `{source_json,context:{source_blob_sha,rendered_at,countries,important_ids},item:{request_id,symbol,wait_seconds:120,force_refresh:false}}`다. symbol은 기존 watchlist의 검증된 신원·source_codes·tick_size 형태이며 is_held=false다. 요청 해시는 고정 함수가 만든다. 동일 ID의 종목/내용 변경은 DETAIL_REQUEST_ID_REUSED다. 새 ID는 이전 응답을 무효화한다. 완료/만료된 가장 오래된 요청부터 교체할 수 있어30개 한도가 계속 누적되지 않는다.
 
-v4.6의 권장 등록은 `?api=mon_detail_requests`에 같은 source_json/context와 `items:[개별 item,...]`를 한 번 전송하는 방식이다. wait_seconds는 원래 접수+100초 수집 마감까지의 잔여시간 이하로 설정한다. 인증된 run_context_id가 있으면 서버도 요청 deadline을 이 마감으로 제한한다. 기본 API 호환값120초와 실행 전체 마감120초를 혼동하지 않는다. 동일 전송 안의 중복 symbol_id는 DETAIL_SYMBOL_DUPLICATE로 격리한다. 요청 국가 밖의 종목은 거절한다. 반환 파일은 ChatGPT가 한 번 저장하며 PHP 등록 함수는 원격 쓰기를 하지 않는다.
+v4.7의 권장 등록은 `?api=mon_detail_requests`에 같은 source_json/context와 `items:[개별 item,...]`를 한 번 전송하는 방식이다. wait_seconds는 시작에 고정한 adaptive_policy.limits.collection의 원래 접수 기준 잔여시간 이하로 설정한다(명시 normal은+100초). 인증된 run_context_id가 있으면 서버도 요청 deadline을 이 마감으로 제한한다. 기본 API 호환값120초와 실행 전체 마감120초를 혼동하지 않는다. 동일 전송 안의 중복 symbol_id는 DETAIL_SYMBOL_DUPLICATE로 격리한다. 요청 국가 밖의 종목은 거절한다. 반환 파일은 ChatGPT가 한 번 저장하며 PHP 등록 함수는 원격 쓰기를 하지 않는다.
 
 개별 조회/준비 폼은 `{source_json,context,live_observations?:[독립 검증 시세]}`다. 조회는 작은 상태·지표 카드만 반환한다. 준비는 기존 준비 응답에 `reference_cards, detail_status`를 더한다. **PHP 자료는 source_kind=php_auxiliary로 유지**하며 기업 확인·독립 판단을 대신하지 않는다.
 
@@ -353,7 +373,7 @@ NAS 데몬은 상세 처리 최대8초·회차당1종목·전체25초로 제한�
 
 new_analysis_complete는 서버가 실제 통합 확정/검증 무변경을 처리한 경우만 true다. analysis_origin은 previous_saved_result/secured_data_decision/revalidated_unchanged_decision을 구분한다. 표시 보고로 분석·게시 완료를 올릴 수 없다. 기존 결과 재표시·원격 파일 미수정만으로 fully_complete나 검증된 no_change를 선언하지 않는다.
 
-`mon_run_start` 입력은 `{run_id,received_at?,mode:"normal"|"extended",extension_reason?}`다. 같은 run_id의 접수시각·모드·사유는 불변이다. received_at가 빠지면 first_control_at 기준으로 시작하되 partial_timing=true다. `mon_run_status/observe`는 run_context_id를 사용한다. observe는 실제 표시 보고, 접근 미확인, 마감 초과만 받으며 완료를 꾸며내지 않는다.
+`mon_run_start` 입력은 `{run_id,received_at?,mode:"auto"|"normal"|"extended",workload?,extension_reason?}`다. 기본 auto/workload=mon이며 현재 통계 SHA/세대/한도도 원래 접수에 고정한다. 같은 run_id의 접수시각·모드·사유는 불변이다. received_at가 빠지면 first_control_at 기준으로 시작하되 partial_timing=true다. `mon_run_status/observe`는 run_context_id를 사용한다. observe는 실제 표시 보고, 접근 미확인, 마감 초과만 받으며 완료를 꾸며내지 않는다.
 
 run_context_id가 있는 계산·요청은 같은 보호 실행 상태를 재개한다. 문맥은 source SHA·UTC 마이크로초·정렬된 국가·중복 제거한 중요 ID로 발급/검증을 통일한다. 수치 캐시는 이력·지수·동일 비교 날짜·규칙·신원·가격 조정·호가·캘린더·목표 완료일·검증된 장중 관측을 키로 사용한다. 시세 collection ID/표시시각만 변경되면 전체 수치를 다시 준비하지 않는다. live 시세의 유효기간과 현재 진입 조건은 매번 다시 검사한다.
 
@@ -368,7 +388,7 @@ POST ?api=mon_detail_finalize
  response_mode:"manifest"|"inline",publish_mode:"manual"|"queue"|"inline",expected_head?}
 ```
 
-manifest는 운영자 인증과 run_context_id가 필요하다. manual은 검증 파일을 보호 저장하고 원격 쓰기를 하지 않는다. queue는 영속 접수만 반환하고 기존 데몬이 회차 안에서 게시한다. inline은 접수+120초(extended300초)까지 시도하고 미완료 작업은 원래 접수+300초까지만 같은 작업으로 재개한다. response_mode=inline은 기존 두 파일 본문 반환이며 새 게시 작업을 만들지 않는다. `expected_head`는 대상 stock/main의 실제40자리 SHA이며 queue/inline 게시에 필수다.
+manifest는 운영자 인증과 run_context_id가 필요하다. manual은 검증 파일을 보호 저장하고 원격 쓰기를 하지 않는다. queue는 영속 접수만 반환하고 기존 데몬이 회차 안에서 게시한다. inline은 고정 adaptive_policy.limits.publication(120~300초, 명시 normal120/extended300)까지 시도하고 미완료 작업은 원래 접수+300초까지만 같은 작업으로 재개한다. response_mode=inline은 기존 두 파일 본문 반환이며 새 게시 작업을 만들지 않는다. `expected_head`는 대상 stock/main의 실제40자리 SHA이며 queue/inline 게시에 필수다.
 
 price_observation은 symbol_id·통화·거래소·가격·quote_at·price_type·timestamp_basis·delay_seconds·market_date·session·source_kind=independent·evidence_ids를 포함한다. risk_review는 status·trading_status·checked_at·applies_as_of·scope·pending_items·confirmed_material_adverse·evidence_ids를 포함한다. 확인되지 않은 기업/거래 위험을 verified로 전환하지 않는다. 근거 ID·원문 URL·확인시각과 관측의 연결을 검사한다. 동일한 확정 decision/source의 재전송은 artifact를 재사용하며 변경된 decision은 MON_FINAL_DECISION_IMMUTABLE이다.
 
@@ -435,3 +455,5 @@ mon_result.md는 기준시각·상태 한 줄, **국가/종목/판단/자료 기
 - **v4.5 / mon.php 1.6.1 / 보강 D1.2 (2026-10-11)**: 259.2초 마감 초과·NAS 접근 미확인·미국 최신 비교 부족을 계기로 작은 첫 결과, KIS/대체/지수 예산 예약, 원천 공통 장애 차단, 성공 종목 원문 체크포인트와 지수 재개, 일시 오류만 재시도, 동일 기간 저장 지수 활용, 고정 함수의 실제 마감과 새 분석/재표시 완료 구분을 보강했다. 새 변경 경로 실제 PHP7.4.33 함수31건＋로컬 HTTP17건=48 PASS / 0 FAIL. 기존105 PASS 전체는 반복하지 않았다. 실제 NAS 배포·외부 원천 성공·미국 누락 자료·전체 ChatGPT120초 완료는 별도 미확인이다.
 
 - **v4.6 / mon.php 1.6.2 / 보강 D1.3 (2026-10-11)**: NAS 부팅·예외 종료 뒤 자동 재동작을 금지하고 웹의 부팅별15초 일회용 시작 권한, 중지 시 권한 취소, CLI 자동 실행 거절, 데몬 nice +10·최대96MiB·과부하 대기·분할 수집·ETag/캐시 재사용·대기 쓰기 축소를 반영했다. 새 변경 경로 실제 PHP7.4.33 함수·실행 모의41건＋로컬 HTTP/CLI16건=57 PASS / 0 FAIL. 기존48/105 PASS 전체는 반복하지 않았다. 실물 NAS 재부팅·배포·실제 부하/원천 성공은 미확인이다.
+
+- **v4.7 / mon.php 1.7.0 / 보강 D1.4 (2026-10-11)**: 보호 실행 통계·현재 한도 고정·다음 실행 자동 조정·HTTP 횟수/시간·상세 시도·실제 외부 보고·만료 중단 복구·게시 후 동일 통계 행 갱신을 구현했다. 새 변경만 PHP7.4.33 함수/연속 모의35건＋실제 로컬 HTTP20건=55 PASS/0 FAIL. NAS 배포/실부하/외부 원천 성공은 별도다.

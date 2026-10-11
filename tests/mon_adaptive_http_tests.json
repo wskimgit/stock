@@ -1,0 +1,91 @@
+{
+  "version": "1.7.0",
+  "tests": 20,
+  "passed": 20,
+  "failed": 0,
+  "wall_seconds": 0.239841,
+  "external_requests": 0,
+  "orders": 0,
+  "cases": [
+    {
+      "case": "statistics requires the existing operator authentication",
+      "pass": true
+    },
+    {
+      "case": "statistics control endpoint requires POST",
+      "pass": true
+    },
+    {
+      "case": "unauthorized reads create no run or start grant",
+      "pass": true
+    },
+    {
+      "case": "validated observed history imports and proposes 230 seconds",
+      "pass": true
+    },
+    {
+      "case": "repeated import preserves sample and checksum",
+      "pass": true
+    },
+    {
+      "case": "auto start freezes 210/220/230 limits and source generation",
+      "pass": true
+    },
+    {
+      "case": "start measures its handler and returns a small fallback",
+      "pass": true
+    },
+    {
+      "case": "same run cannot change frozen mode",
+      "pass": true
+    },
+    {
+      "case": "actual batch report is idempotent and marks caller provenance",
+      "pass": true
+    },
+    {
+      "case": "over-limit performed calls remain counted with a breach event",
+      "pass": true
+    },
+    {
+      "case": "duplicate display report counts once and cannot forge completion",
+      "pass": true
+    },
+    {
+      "case": "invalid reported duration fails without changing fixed deadlines",
+      "pass": true
+    },
+    {
+      "case": "finish records interruption and outstanding work without claimed success",
+      "pass": true
+    },
+    {
+      "case": "server finish preserves receipt and measures first reported display",
+      "pass": true
+    },
+    {
+      "case": "repeated finish creates no extra sample and no new ending time",
+      "pass": true
+    },
+    {
+      "case": "frozen policy survives finishing and new statistics",
+      "pass": true
+    },
+    {
+      "case": "corrupt imported statistics are rejected",
+      "pass": true
+    },
+    {
+      "case": "invalid import leaves valid stored statistics intact",
+      "pass": true
+    },
+    {
+      "case": "subsequent run chooses a new policy from persisted statistics",
+      "pass": true
+    },
+    {
+      "case": "all adaptive operations leave manual start grants and live stock files absent",
+      "pass": true
+    }
+  ]
+}
