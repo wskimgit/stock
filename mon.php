@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.0 -- PHP 7.4+ completion-first runs / advisory thresholds / bounded daemon load.
+ * mon.php 1.8.1 -- PHP 7.4+ persistent NAS recovery / completion-first runs / bounded daemon load.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.0';
+const MON_VERSION = '1.8.1';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -494,6 +494,171 @@ class MonHttp {
             throw new MonFault('HTTP_' . $r['status'], min(3600, max(0, $delay)));
         }
         try { return mon_decode($r['body']); } catch (Throwable $e) { throw new MonFault('HTTP_JSON_INVALID'); }
+    }
+}
+
+/* Read-only NAS client. One poll sends at most one GET; the caller continues other work until retry_at.
+ * This is separate from the daemon's short provider sockets. It never launches/restarts the daemon.
+ */
+final class MonNasConnection {
+    const CONTRACT='MON-NAS-CONNECTION-1.0';
+    const ENDPOINT='https://k-bizpost.myds.me/mon.php?view=bootstrap';
+    private $store;private $runId;private $name;private $transport;private $wall;private $mono;private $cancel;
+    public function __construct(MonStore $store,string $runId,?callable $transport=null,?callable $wall=null,?callable $mono=null,?callable $cancel=null){
+        if(!preg_match('/^[A-Za-z0-9._:-]{1,96}$/',$runId))throw new MonFault('NAS_RUN_ID_INVALID');
+        $this->store=$store;$this->runId=$runId;$this->name='nas-'.hash('sha256',$runId).'.php';$this->transport=$transport;
+        $this->wall=$wall?:static function(){return microtime(true);};$this->mono=$mono?:static function(){return mon_monotonic();};$this->cancel=$cancel;
+    }
+    public static function policy(): array {
+        return ['contract'=>self::CONTRACT,'connect_seconds'=>[10,20,40,60],'request_seconds'=>[20,40,80,120],
+            'retry_delays_seconds'=>[30,60,120,240,300],'max_attempts'=>null,'stop_on_threshold'=>false,
+            'minimum_processor_version'=>'1.8.0','healthy_refresh_seconds'=>10];
+    }
+    private function checked(string $name){
+        $e=$this->store->readPrivate($name);if($e===null)return null;$s=mon_get($e,'state');
+        if(!($s instanceof stdClass)||mon_get($s,'contract')!==self::CONTRACT||
+            !is_string(mon_get($e,'sha256'))||!hash_equals($e->sha256,hash('sha256',mon_json($s,false))))throw new MonFault('NAS_STATE_INVALID');
+        return $s;
+    }
+    private function save(string $name,stdClass $s): void {
+        $this->store->writePrivate($name,(object)['state'=>$s,'sha256'=>hash('sha256',mon_json($s,false))]);
+    }
+    private function state(): stdClass {
+        $s=$this->checked($this->name);if($s!==null){if(mon_get($s,'run_id')!==$this->runId)throw new MonFault('NAS_STATE_INVALID');return $s;}
+        $stats=$this->checked('nas-connection-stats.php');$samples=mon_get($stats,'success_seconds',[]);sort($samples,SORT_NUMERIC);
+        $p90=$samples?$samples[(int)ceil(count($samples)*.9)-1]:null;
+        $connect=$p90===null?10:min(60,max(10,(int)ceil($p90*1.5)));
+        return (object)['contract'=>self::CONTRACT,'run_id'=>$this->runId,'received_at'=>mon_iso((int)($this->wall)()),'state'=>'pending',
+            'connected'=>false,'compatible'=>false,'processor_version'=>null,'attempts'=>0,'failures'=>0,'timeouts'=>0,'recoveries'=>0,
+            'consecutive_failures'=>0,'total_seconds'=>0.0,'max_seconds'=>0.0,'retry_at'=>0.0,'pending_attempt'=>null,
+            'initial_connect_seconds'=>$connect,'initial_request_seconds'=>max(20,$connect*2),'learned_p90_seconds'=>$p90,'history'=>[]];
+    }
+    private function view(stdClass $s): array {
+        $p=self::policy();$i=min(3,(int)$s->consecutive_failures);
+        return array_merge((array)$s,['next_connect_seconds'=>max($s->initial_connect_seconds,$p['connect_seconds'][$i]),
+            'next_request_seconds'=>max($s->initial_request_seconds,$p['request_seconds'][$i]),
+            'retry_in_seconds'=>max(0,(float)$s->retry_at-(float)($this->wall)()),'max_attempts'=>null,'stop_on_threshold'=>false]);
+    }
+    public function status(): array {return $this->view($this->state());}
+    private function locked(callable $fn): array {
+        // Across run IDs as well: one NAS request on this client, no overlap or busy waiting.
+        $lock=@fopen($this->store->path('nas-connection.lock'),'c+');
+        if(!$lock)throw new MonFault('NAS_LOCK_UNAVAILABLE');@chmod($this->store->path('nas-connection.lock'),0600);
+        if(!flock($lock,LOCK_EX|LOCK_NB)){fclose($lock);return ['contract'=>self::CONTRACT,'state'=>'client_busy','connected'=>false,'retry_in_seconds'=>10];}
+        try{return $fn();}finally{flock($lock,LOCK_UN);fclose($lock);}
+    }
+    public function resume(): array {
+        // Explicit corrective action only. Reloading/status reads do not erase backoff or counters.
+        return $this->locked(function(){
+            $s=$this->state();if(in_array($s->state,['blocked','interrupted'],true)){$s->state='retry_wait';$s->retry_at=(float)($this->wall)();$this->save($this->name,$s);}
+            return $this->view($s);
+        });
+    }
+    private function checkCancel(): void {if($this->cancel)($this->cancel)();}
+    private static function retryAfter(array $headers,float $now): float {
+        $value='';foreach($headers as $k=>$v)if(strtolower((string)$k)==='retry-after')$value=trim((string)$v);
+        if(preg_match('/^\d+$/',$value))return (float)$value;
+        $date=$value!==''?strtotime($value):false;return $date===false?0:max(0,$date-$now);
+    }
+    private static function outcome(array $r): array {
+        $status=(int)mon_get($r,'status',0);$code=mon_get($r,'error_code');
+        if($code!==null)return ['state'=>$code==='INTERRUPTED'?'interrupted':($code==='NAS_REQUEST_UNCONFIRMED'||
+            preg_match('/^(HTTP_TRANSPORT_(5|6|7|28|35|52|55|56|60)|HTTP_(408|425|429|5\d\d))$/',(string)$code)?'retry_wait':'blocked'),'code'=>$code];
+        if($status===408||$status===425||$status===429||$status>=500&&$status<=599)return ['state'=>'retry_wait','code'=>'HTTP_'.$status];
+        if($status!==200)return ['state'=>'blocked','code'=>'HTTP_'.$status];
+        $body=(string)mon_get($r,'body','');
+        try{$j=mon_decode($body);}catch(Throwable $e){$j=null;}
+        if($j instanceof stdClass&&mon_get($j,'ok')===true){
+            $result=mon_get($j,'result');$header=mon_get($result,'header',$result);$v=mon_get($j,'processor_version',mon_get($header,'processor_version'));
+            if(mon_get($header,'contract')==='MON-BOOTSTRAP-1.0'&&is_string($v)&&preg_match('/^\d+\.\d+\.\d+$/',$v)&&
+                mon_get($header,'processor_version',$v)===$v&&is_string(mon_get($header,'state'))&&is_array(mon_get($result,'cards')))
+                return ['state'=>version_compare($v,'1.8.0','>=')?'connected':'connected_legacy','code'=>null,'version'=>$v];
+            $data=mon_get($j,'data');$v=mon_get($data,'version');
+            if($data instanceof stdClass&&is_string($v)&&preg_match('/^\d+\.\d+\.\d+$/',$v)&&is_bool(mon_get($data,'running'))&&is_bool(mon_get($data,'heartbeat_fresh')))
+                return ['state'=>'connected_legacy','code'=>null,'version'=>$v];
+        }
+        // A login/error page or arbitrary HTTP 200 must not be reported as a working MON API.
+        if(strpos($body,'<title>mon 모니터</title>')!==false&&preg_match('/<header>.*?<h1>mon 모니터<\/h1>.*?<span>v(\d+\.\d+\.\d+)<\/span>/s',$body,$m))
+            return ['state'=>'connected_legacy','code'=>null,'version'=>$m[1]];
+        return ['state'=>'blocked','code'=>'NAS_RESPONSE_CONTRACT_INVALID'];
+    }
+    private function settle(stdClass $s,array $r,?float $seconds): void {
+        $o=self::outcome($r);$s->pending_attempt=null;$s->state=$o['state'];$s->last_code=$o['code'];$s->last_http_status=(int)mon_get($r,'status',0);
+        $s->connected=in_array($s->state,['connected','connected_legacy'],true);$s->compatible=$s->state==='connected';$s->processor_version=$o['version']??null;
+        $row=(object)['attempt'=>$s->attempts,'at'=>mon_iso((int)($this->wall)()),'state'=>$s->state,'code'=>$o['code'],'http_status'=>$s->last_http_status,
+            'seconds'=>$seconds===null?null:round($seconds,6),'connect_seconds'=>$s->last_connect_seconds,'request_seconds'=>$s->last_request_seconds];
+        if($seconds!==null){$s->total_seconds+=$seconds;$s->max_seconds=max($s->max_seconds,$seconds);}
+        $s->history=array_slice(array_merge($s->history,[$row]),-20);$s->retry_at=0.0;
+        if($s->connected){
+            $s->recoveries+=(int)($s->consecutive_failures>0);$s->consecutive_failures=0;
+            if($seconds!==null){$stats=$this->checked('nas-connection-stats.php')??(object)['contract'=>self::CONTRACT,'success_seconds'=>[],'successful_connections'=>0];
+                $stats->successful_connections++;$stats->success_seconds=array_slice(array_merge($stats->success_seconds,[round($seconds,6)]),-60);$this->save('nas-connection-stats.php',$stats);}
+        }else{
+            $s->failures++;$s->consecutive_failures++;$s->timeouts+=(int)in_array($o['code'],['HTTP_TRANSPORT_28','HTTP_408'],true);
+            if($s->state==='retry_wait'){$p=self::policy();$delay=max($p['retry_delays_seconds'][min(4,$s->consecutive_failures-1)],self::retryAfter(mon_get($r,'headers',[]),(float)($this->wall)()));$s->retry_at=(float)($this->wall)()+$delay;}
+        }
+        $this->save($this->name,$s);
+    }
+    public function poll(): array {
+        return $this->locked(function(){
+            $s=$this->state();$this->checkCancel();
+            // A killed read-only GET has an unknown outcome. Preserve its count; recover with backoff.
+            if($s->pending_attempt!==null)$this->settle($s,['error_code'=>'NAS_REQUEST_UNCONFIRMED'],null);
+            if(in_array($s->state,['connected','connected_legacy','blocked','interrupted'],true)||$s->retry_at>(float)($this->wall)())return $this->view($s);
+            if(!$this->transport&&!extension_loaded('curl')&&self::curlExecutable()===null){$s->state='blocked';$s->last_code='NAS_CLIENT_TRANSPORT_REQUIRED';$this->save($this->name,$s);return $this->view($s);}
+            $plan=$this->view($s);$s->attempts++;$s->last_connect_seconds=$plan['next_connect_seconds'];$s->last_request_seconds=$plan['next_request_seconds'];
+            $s->pending_attempt=(object)['attempt'=>$s->attempts,'started_at'=>mon_iso((int)($this->wall)())];$s->state='connecting';$this->save($this->name,$s);
+            $start=(float)($this->mono)();$stop=null;
+            try{$r=$this->transport?($this->transport)('GET',self::ENDPOINT,['Accept: application/json'],$s->last_connect_seconds,$s->last_request_seconds):$this->request($s->last_connect_seconds,$s->last_request_seconds);
+                if(!is_array($r))throw new MonFault('NAS_TRANSPORT_RESULT_INVALID');$this->checkCancel();
+            }catch(MonStop $e){$stop=$e;$r=['error_code'=>'INTERRUPTED'];}
+            catch(MonFault $e){$r=['error_code'=>$e->faultCode,'headers'=>['retry-after'=>(string)$e->retryAfter]];}
+            catch(Throwable $e){$r=['error_code'=>'NAS_CLIENT_INTERNAL_ERROR'];}
+            $seconds=max(0,(float)($this->mono)()-$start);$this->settle($s,$r,$seconds);
+            if(MonExecution::$active){MonExecution::measure('external/nas',$seconds,$s->last_code,1,'server',$s->attempts>1);MonExecution::event('nas_connection',['code'=>$s->last_code??($s->compatible?'NAS_CONNECTED':'NAS_CONNECTED_LEGACY')]);}
+            if($stop!==null)throw $stop;
+            return $this->view($s);
+        });
+    }
+    private static function curlExecutable(): ?string {
+        if(PHP_SAPI!=='cli'||!function_exists('proc_open'))return null;
+        foreach(['/usr/bin/curl','/bin/curl','/usr/local/bin/curl']as $path)if(is_executable($path))return $path;
+        return null;
+    }
+    private function request(int $connect,int $total): array {
+        if(!extension_loaded('curl'))return $this->commandRequest($connect,$total);
+        $headers=[];$body='';$tooLarge=false;$ch=curl_init(self::ENDPOINT);
+        curl_setopt_array($ch,[CURLOPT_HTTPGET=>true,CURLOPT_HTTPHEADER=>['Accept: application/json'],CURLOPT_CONNECTTIMEOUT=>$connect,CURLOPT_TIMEOUT=>$total,
+            CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_USERAGENT=>'mon.php/'.MON_VERSION,
+            CURLOPT_HEADERFUNCTION=>static function($ch,$line)use(&$headers){if(preg_match('/^HTTP\//',$line))$headers=[];$p=strpos($line,':');if($p!==false)$headers[strtolower(trim(substr($line,0,$p)))]=trim(substr($line,$p+1));return strlen($line);},
+            CURLOPT_WRITEFUNCTION=>static function($ch,$chunk)use(&$body,&$tooLarge){if(strlen($body)+strlen($chunk)>262144){$tooLarge=true;return 0;}$body.=$chunk;return strlen($chunk);},
+            CURLOPT_NOPROGRESS=>false,CURLOPT_XFERINFOFUNCTION=>function(){try{$this->checkCancel();return 0;}catch(MonStop $e){return 1;}}]);
+        try{$ok=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_HTTP_CODE);$errno=curl_errno($ch);$this->checkCancel();
+            if($ok===false)throw new MonFault($tooLarge?'HTTP_RESPONSE_TOO_LARGE':'HTTP_TRANSPORT_'.$errno);
+            return ['status'=>$status,'headers'=>$headers,'body'=>$body];
+        }finally{curl_close($ch);}
+    }
+    private function commandRequest(int $connect,int $total): array {
+        // Native PHP clients without the curl extension use the fixed system curl. No shell, keys or daemon.
+        $exe=self::curlExecutable();if($exe===null)throw new MonFault('NAS_CLIENT_TRANSPORT_REQUIRED');$paths=[];$proc=null;$pipes=[];
+        try{
+            for($i=0;$i<3;$i++){$p=tempnam(sys_get_temp_dir(),'mon_nas_');if($p===false)throw new MonFault('NAS_CLIENT_TEMP_FAILED');chmod($p,0600);$paths[]=$p;}
+            $args=[$exe,'--silent','--show-error','--request','GET','--proto','=https','--connect-timeout',(string)$connect,'--max-time',(string)$total,
+                '--max-filesize','262144','--header','Accept: application/json','--output',$paths[0],'--dump-header',$paths[1],'--write-out','%{http_code}',self::ENDPOINT];
+            $proc=proc_open($args,[0=>['pipe','r'],1=>['pipe','w'],2=>['file',$paths[2],'w']],$pipes,null,null,['bypass_shell'=>true]);
+            if(!is_resource($proc))throw new MonFault('NAS_CLIENT_EXEC_FAILED');fclose($pipes[0]);unset($pipes[0]);stream_set_blocking($pipes[1],false);
+            $begin=mon_monotonic();$statusText='';$exit=-1;
+            do{$this->checkCancel();$info=proc_get_status($proc);$statusText.=stream_get_contents($pipes[1],16);
+                if(!$info['running']){$exit=$info['exitcode'];break;}
+                if(mon_monotonic()-$begin>$total+2){proc_terminate($proc);throw new MonFault('HTTP_TRANSPORT_28');}
+                usleep(100000);
+            }while(true);
+            $statusText.=stream_get_contents($pipes[1],16);fclose($pipes[1]);unset($pipes[1]);$closed=proc_close($proc);$proc=null;if($exit<0)$exit=$closed;
+            if($exit!==0)throw new MonFault(in_array($exit,[23,63],true)?'HTTP_RESPONSE_TOO_LARGE':'HTTP_TRANSPORT_'.$exit);
+            if(filesize($paths[0])>262144||filesize($paths[1])>32768)throw new MonFault('HTTP_RESPONSE_TOO_LARGE');
+            $headers=[];foreach(explode("\n",(string)file_get_contents($paths[1]))as $line){if(preg_match('/^HTTP\//',$line))$headers=[];$p=strpos($line,':');if($p!==false)$headers[strtolower(trim(substr($line,0,$p)))]=trim(substr($line,$p+1));}
+            return ['status'=>(int)$statusText,'headers'=>$headers,'body'=>(string)file_get_contents($paths[0])];
+        }finally{if(is_resource($proc)){proc_terminate($proc);foreach($pipes as $p)if(is_resource($p))fclose($p);proc_close($proc);}foreach($paths as $p)@unlink($p);}
     }
 }
 
@@ -1306,6 +1471,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
 function mon_web_html(array $data, string $notice, bool $ok, string $phpPath): void {
     $h=static function($v){return htmlspecialchars((string)$v,ENT_QUOTES|ENT_SUBSTITUTE,'UTF-8');};
     $initial=json_encode($data,JSON_UNESCAPED_UNICODE|JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_THROW_ON_ERROR);
+    $nasPolicy=json_encode(MonNasConnection::policy(),JSON_THROW_ON_ERROR);
     $label=$h($data['label']); $message=$h($data['message']); $notice=$h($notice); $phpPath=$h($phpPath);
     $count=$data['watchlist_loaded']?(int)$data['watched']:'—'; $collected=(int)$data['fresh_quotes'];$version=$h(MON_VERSION);
     $startDisabled=$data['running']?' disabled':''; $stopDisabled=$data['running']?'':' disabled';
@@ -1339,6 +1505,8 @@ summary{cursor:pointer;font-weight:650}label{display:block;margin:16px 0 5px;fon
 <div class="metrics"><div><span>관찰종목</span><b id="count">$count</b></div><div><span>최신 가격</span><b id="collected">$collected</b></div><div><span>최근 GitHub 반영</span><b id="mirror">—</b></div></div>
 <div class="sub">수집 60초 · GitHub 반영 180초 기본 주기</div>
 <p id="detail-progress" class="sub" role="status" aria-live="polite">종목별 자료 상태 확인 중</p>
+<p id="connection-recovery" class="sub" role="status" aria-live="polite"></p>
+<button id="connection-retry" type="button" hidden>연결 다시 확인</button>
 <ul id="detail-cards" class="sub" aria-label="종목별 자료 진행"></ul>
 <button id="detail-more" type="button" hidden>다음 종목 보기</button>
 <p id="final-publication" class="sub" role="status" aria-live="polite">최종 결과 저장 요청 없음</p>
@@ -1362,14 +1530,19 @@ summary{cursor:pointer;font-weight:650}label{display:block;margin:16px 0 5px;fon
 </main><script>
 (function(){
 'use strict';
-var current=$initial,busy=false,detailToken='',detailCursor=null;
+var current=$initial,busy=false,detailToken='',detailCursor=null,mutationUnconfirmed=false;
+var nasPolicy=$nasPolicy,recovery={failures:0,nextAt:0,needsAttention:false},timer=null,readJob=null;
+var recoveryKey='mon-nas-recovery:'+location.pathname;
+try{var saved=JSON.parse(sessionStorage.getItem(recoveryKey));
+ if(saved&&Number.isSafeInteger(saved.failures)&&saved.failures>=0&&Number.isFinite(saved.nextAt)&&saved.nextAt>=0&&typeof saved.needsAttention==='boolean')recovery=saved;
+}catch(ignore){}
 function text(id,value){document.getElementById(id).textContent=value;}
 function draw(s){
  current=s;text('state',s.label);text('message',s.message);text('count',s.watchlist_loaded?s.watched:'—');text('collected',s.fresh_quotes||0);
  var pub=s.final_publication;
  text('final-publication',pub?'최종 결과 표시 가능 · 저장 '+({queued:'대기',publishing:'처리 중',saved:'완료',conflict:'동시 변경으로 보류',failed:'실패',expired:'이전 버전 만료 · 재개 확인',unknown:'확인 재개 대기'}[pub.save_status]||'확인 필요')+(pub.time_excess_seconds>0?' · 기준시간 초과, 계속 처리':'')+(pub.pending_analysis?' · 새 자료는 후속 판단 필요':''):'최종 결과 저장 요청 없음');
  document.getElementById('dot').className='dot'+(s.readiness==='partial'&&s.monitoring_active?' warn':s.monitoring_active?' on':s.running&&s.heartbeat_fresh?' warn':'');
- document.getElementById('start').disabled=busy||s.running;document.getElementById('stop').disabled=busy||!s.running;
+ document.getElementById('start').disabled=busy||s.running||mutationUnconfirmed;document.getElementById('stop').disabled=busy||(!s.running&&!mutationUnconfirmed);
  var stamp=s.last_mirrored_at;
  text('mirror',stamp?new Date(stamp).toLocaleTimeString('ko-KR',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit'}):'—');
  text('settings-status','GitHub '+(s.github_token_source==='sis_private_sync_config.php'?'기존 설정 파일 사용':s.connection.github?'설정됨':'미설정')+' · 한국투자증권 '+(s.kis_credentials_source==='broker_config.local.php'?'기존 설정 파일 사용':s.connection.kis?'설정됨':'미설정'));
@@ -1393,31 +1566,81 @@ function notice(message,ok){var e=document.getElementById('notice');e.textConten
 function unverified(message){
  draw(Object.assign({},current,{heartbeat_fresh:false,monitoring_active:false,label:'상태 확인 필요',message:message}));notice(message,false);
 }
-async function refresh(){
- if(busy)return;
- try{var r=await fetch(location.pathname+'?view=status',{cache:'no-store',headers:{Accept:'application/json'}});var j=await r.json();if(j.ok&&j.data)draw(j.data);else unverified(j.message||'서버 상태를 확인하지 못했습니다.');}
- catch(e){unverified('서버 상태를 읽지 못했습니다. 자동으로 다시 확인합니다.');}
+function persistRecovery(){try{sessionStorage.setItem(recoveryKey,JSON.stringify(recovery));}catch(ignore){}}
+function clearTimer(){if(timer!==null)clearTimeout(timer);timer=null;}
+function connectionText(){
+ var seconds=Math.max(0,Math.ceil((recovery.nextAt-Date.now())/1000));
+ text('connection-recovery',recovery.needsAttention?'접속 권한·서버 응답을 확인한 뒤 연결을 다시 확인하세요.':recovery.failures?'연결 복구 '+recovery.failures+'회 · '+seconds+'초 후 다시 확인합니다.':'');
+ document.getElementById('connection-retry').hidden=!recovery.failures&&!recovery.needsAttention;
 }
+function scheduleAt(at){
+ clearTimer();recovery.nextAt=at;persistRecovery();connectionText();
+ if(!document.hidden&&!busy&&!readJob&&!recovery.needsAttention)timer=setTimeout(function(){timer=null;refresh();},Math.min(2147483647,Math.max(0,at-Date.now())));
+}
+function waitSeconds(headers){
+ var value=headers&&headers.get?headers.get('Retry-After'):null;
+ if(value&&/^\d+$/.test(value.trim())&&Number.isFinite(Number(value)))return Number(value);
+ var stamp=value?Date.parse(value):NaN;return Number.isFinite(stamp)?Math.max(0,(stamp-Date.now())/1000):0;
+}
+function healthy(){var recovered=recovery.failures>0;recovery.failures=0;recovery.needsAttention=false;persistRecovery();connectionText();if(recovered)notice('서버 연결을 다시 확인했습니다.',true);}
+function readFailure(headers,needsAttention){
+ recovery.failures++;recovery.needsAttention=!!needsAttention;
+ var delays=nasPolicy.retry_delays_seconds,delay=Math.max(delays[Math.min(delays.length-1,recovery.failures-1)],waitSeconds(headers));
+ recovery.nextAt=Date.now()+delay*1000;persistRecovery();
+ unverified(needsAttention?'서버 응답이나 접속 권한을 확인해야 합니다.':'서버 연결을 확인하지 못했습니다. 대기 시간을 늘려 계속 다시 확인합니다.');connectionText();
+}
+function validStatus(j){return j&&j.data&&typeof j.data.running==='boolean'&&typeof j.data.heartbeat_fresh==='boolean'&&typeof j.data.label==='string'&&typeof j.data.message==='string'&&j.data.connection&&typeof j.data.connection.github==='boolean'&&typeof j.data.connection.kis==='boolean';}
+function read(kind){
+ if(busy||readJob||document.hidden||recovery.needsAttention)return Promise.resolve();
+ if(recovery.failures&&Date.now()<recovery.nextAt){scheduleAt(recovery.nextAt);return Promise.resolve();}
+ if(kind==='detail'&&detailCursor===null)return Promise.resolve();
+ clearTimer();var token=detailToken,cursor=detailCursor,controller=new AbortController();
+ var job={controller:controller,reason:null,promise:null};readJob=job;document.getElementById('detail-more').disabled=true;
+ var timeout=setTimeout(function(){job.reason='timeout';controller.abort();},nasPolicy.request_seconds[Math.min(3,recovery.failures)]*1000);
+ job.promise=(async function(){var next=nasPolicy.healthy_refresh_seconds*1000;
+  try{
+   var url=location.pathname+(kind==='detail'?'?view=progress&since='+encodeURIComponent(token)+'&cursor='+cursor:'?view=status');
+   var r=await fetch(url,{cache:'no-store',redirect:'error',headers:{Accept:'application/json'},signal:controller.signal});
+   if(job.reason==='mutation')return;if(job.reason==='timeout')throw new Error('timeout');
+   if(!r.ok){readFailure(r.headers,!(r.status===408||r.status===425||r.status===429||r.status>=500));return;}
+   var j;try{j=await r.json();}catch(e){if(job.reason!=='mutation')readFailure(r.headers,job.reason!=='timeout');return;}
+   if(job.reason==='mutation')return;if(job.reason==='timeout')throw new Error('timeout');
+   if(kind==='detail'){
+    if(j.ok&&j.progress&&j.progress.snapshot_token===token&&detailToken===token&&detailCursor===cursor){detailRows(j.progress.cards);detailCursor=j.progress.page.next_cursor;document.getElementById('detail-more').hidden=detailCursor===null;healthy();}
+    else if(j.ok&&j.progress){next=0;}
+    else{readFailure(r.headers,false);return;}
+   }else if(j.ok&&validStatus(j)){mutationUnconfirmed=false;draw(j.data);healthy();}
+   else{readFailure(r.headers,!!j.ok||r.status===401||r.status===403);return;}
+  }catch(e){if(job.reason!=='mutation')readFailure(null,false);}
+  finally{clearTimeout(timeout);if(readJob===job)readJob=null;document.getElementById('detail-more').disabled=false;
+   if(job.reason!=='mutation'&&!busy)scheduleAt(recovery.failures?recovery.nextAt:Date.now()+next);
+  }
+ })();return job.promise;
+}
+function refresh(){return read('status');}
 document.querySelectorAll('.action-form').forEach(function(form){
  form.addEventListener('submit',async function(e){
-  e.preventDefault();if(busy)return;busy=true;draw(current);
+  e.preventDefault();if(busy)return;busy=true;clearTimer();draw(current);
   var button=form.querySelector('button');button.disabled=true;
+  if(readJob){readJob.reason='mutation';readJob.controller.abort();await readJob.promise;}
+  var controller=new AbortController(),timeout=setTimeout(function(){controller.abort();},nasPolicy.request_seconds[Math.min(3,recovery.failures)]*1000);
   try{
    var body=new URLSearchParams(new FormData(form));
-   var r=await fetch(location.pathname,{method:'POST',headers:{Accept:'application/json'},body:body});var j=await r.json();
-   notice(j.message,j.ok);if(j.data)draw(j.data);
+   var r=await fetch(location.pathname,{method:'POST',redirect:'error',headers:{Accept:'application/json'},body:body,signal:controller.signal});var j=await r.json();
+   notice(j.message,j.ok);if(validStatus(j)){mutationUnconfirmed=false;draw(j.data);}else throw new Error('unconfirmed');
+   if(r.ok&&j.ok)healthy();
    if(j.ok&&body.get('action')==='save_settings')['github','kis-key','kis-secret'].forEach(function(id){document.getElementById(id).value='';});
-  }catch(error){notice('요청 결과를 확인하지 못했습니다. 상태를 다시 확인합니다.',false);}
-  finally{busy=false;button.disabled=false;draw(current);refresh();}
+  }catch(error){mutationUnconfirmed=true;recovery.needsAttention=false;unverified('요청 결과를 확인하지 못했습니다. 상태를 조회해 확인합니다.');}
+  finally{clearTimeout(timeout);busy=false;button.disabled=false;draw(current);scheduleAt(recovery.failures?Math.max(Date.now(),recovery.nextAt):Date.now());}
  });
 });
-draw(current);setInterval(function(){if(!document.hidden)refresh();},10000);
-document.getElementById('detail-more').addEventListener('click',async function(){
- if(detailCursor===null)return;this.disabled=true;
- try{var r=await fetch(location.pathname+'?view=progress&since='+encodeURIComponent(detailToken)+'&cursor='+detailCursor,{cache:'no-store'});var j=await r.json();
-  if(j.ok&&j.progress&&j.progress.snapshot_token===detailToken){detailRows(j.progress.cards);detailCursor=j.progress.page.next_cursor;this.hidden=detailCursor===null;}
-  else refresh();
- }catch(e){notice('종목별 상태를 확인하지 못했습니다.',false);}finally{this.disabled=false;}
+draw(current);scheduleAt(recovery.failures||recovery.needsAttention?recovery.nextAt:Date.now()+nasPolicy.healthy_refresh_seconds*1000);
+document.getElementById('detail-more').addEventListener('click',function(){return read('detail');});
+document.getElementById('connection-retry').addEventListener('click',function(){
+ if(recovery.needsAttention){recovery.needsAttention=false;recovery.nextAt=Date.now();}scheduleAt(recovery.nextAt);
+});
+document.addEventListener('visibilitychange',function(){
+ if(document.hidden)clearTimer();else scheduleAt(recovery.nextAt);
 });
 })();
 </script></body></html>
@@ -4233,21 +4456,27 @@ function mon_web(): int {
 }
 function mon_main(array $argv): int {
     if (PHP_SAPI!=='cli') return mon_web();
-    $mode='status';$launchTicket=''; $envFile=getenv('MON_ENV_FILE')?:''; $dir=getenv('MON_STATE_DIR')?:__DIR__; $maxTicks=0; $instance=bin2hex(random_bytes(12));
+    $mode='status';$launchTicket='';$nasRun=''; $envFile=getenv('MON_ENV_FILE')?:''; $dir=getenv('MON_STATE_DIR')?:__DIR__; $maxTicks=0; $instance=bin2hex(random_bytes(12));
     foreach (array_slice($argv,1) as $arg) {
-        if (in_array($arg,['--run','--daemon','--once','--status','--stop','--check','--help'],true)) $mode=substr($arg,2);
+        if (in_array($arg,['--run','--daemon','--once','--status','--stop','--check','--help','--nas-check'],true)) $mode=substr($arg,2);
         elseif (strpos($arg,'--env=')===0) $envFile=substr($arg,6);
         elseif (strpos($arg,'--state-dir=')===0) $dir=substr($arg,12);
         elseif (preg_match('/^--max-ticks=(\d+)$/',$arg,$m)) $maxTicks=(int)$m[1];
         elseif (preg_match('/^--instance=([a-f0-9]{24})$/',$arg,$m)) $instance=$m[1];
         elseif (preg_match('/^--launch-ticket=([a-f0-9]{64})$/',$arg,$m)) $launchTicket=$m[1];
+        elseif (preg_match('/^--run-id=([A-Za-z0-9._:-]{1,96})$/',$arg,$m)) $nasRun=$m[1];
         else throw new MonFault('CLI_OPTION_INVALID');
     }
     if ($mode==='help') {
-        echo 'mon.php '.MON_VERSION." (PHP 7.4+)\n시작은 웹 시작 버튼만 허용합니다. NAS 부팅 뒤 자동 시작하지 않습니다.\n옵션 없음 / --status: 상태, --stop: 중지, --check: 설정 확인\n--daemon / --once는 사용할 수 없으며 --run은 일회용 웹 시작 권한이 필요합니다.\n";return 0;
+        echo 'mon.php '.MON_VERSION." (PHP 7.4+)\n시작은 웹 시작 버튼만 허용합니다. NAS 부팅 뒤 자동 시작하지 않습니다.\n옵션 없음 / --status: 상태, --stop: 중지, --check: 설정 확인\n--nas-check --run-id=ID: 한 번의 읽기 전용 NAS 접속/복구 상태 조회; retry_in_seconds 뒤 같은 ID로 계속합니다.\n--daemon / --once는 사용할 수 없으며 --run은 일회용 웹 시작 권한이 필요합니다.\n";return 0;
     }
     if(in_array($mode,['daemon','once'],true)||($mode==='run'&&$launchTicket===''))throw new MonFault('MANUAL_START_REQUIRED');
     $store=new MonStore($dir);
+    if($mode==='nas-check'){
+        if($nasRun==='')throw new MonFault('NAS_RUN_ID_REQUIRED');
+        echo mon_json((new MonNasConnection($store,$nasRun))->poll(),false);return 0;
+    }
+    if($nasRun!=='')throw new MonFault('CLI_OPTION_INVALID');
     if ($mode==='check') {
         $cfg=new MonConfig($envFile,$dir);
         echo mon_json(['php'=>PHP_VERSION,'curl'=>extension_loaded('curl'),'pcntl'=>function_exists('pcntl_fork'),'github_token_present'=>$cfg->get('GITHUB_TOKEN')!=='','kis_credentials_present'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!=='','repository'=>$cfg->get('MON_REPOSITORY','wskimgit/stock'),'branch'=>$cfg->get('MON_BRANCH','main'),'state_directory'=>$store->dir,'state_directory_writable'=>is_writable($dir)]); return 0;
