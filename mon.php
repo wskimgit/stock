@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.6.1 -- PHP 7.4+ early results / reserved fallbacks / resumable partial data.
+ * mon.php 1.6.2 -- PHP 7.4+ manual boot-bound start / bounded daemon load.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.6.1';
+const MON_VERSION = '1.6.2';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -249,6 +249,115 @@ function mon_settings_stamp(MonStore $store,string $envFile): string {
     return hash('sha256',implode('|',$parts));
 }
 
+// A previous boot's files, CLI/cron invocation or browser GET cannot grant a start.
+final class MonManualStart {
+    private $store;private $boot;private $clock;
+    public function __construct(MonStore $store,?callable $boot=null,?callable $clock=null){
+        $this->store=$store;$this->boot=$boot??static function(){return self::bootId();};$this->clock=$clock??static function(){return time();};
+    }
+    public static function bootId(): ?string {
+        $id=trim((string)@file_get_contents('/proc/sys/kernel/random/boot_id'));
+        if(preg_match('/^[a-f0-9-]{36}$/i',$id))return strtolower($id);
+        $stat=(string)@file_get_contents('/proc/stat');
+        if(preg_match('/^btime\s+(\d+)$/m',$stat,$m))return 'btime:'.$m[1];
+        return null; // Fail closed when the current boot cannot be verified.
+    }
+    private function guarded(callable $fn){
+        $h=@fopen($this->store->path('start_gate.lock'),'c+');
+        if(!$h||!flock($h,LOCK_EX|LOCK_NB)){if($h)fclose($h);throw new MonFault('WEB_START_BUSY');}
+        try{return $fn();}finally{flock($h,LOCK_UN);fclose($h);}
+    }
+    public function issue(string $instance): string {
+        return $this->guarded(function()use($instance){
+            $boot=($this->boot)();if(!is_string($boot)||$boot==='')throw new MonFault('BOOT_ID_UNAVAILABLE');
+            if(!preg_match('/^[a-f0-9]{24}$/',$instance))throw new MonFault('MANUAL_START_REQUIRED');
+            $ticket=bin2hex(random_bytes(32));$now=(int)($this->clock)();
+            $this->store->writePrivate('manual_start.php',(object)['boot_id'=>$boot,'instance_id'=>$instance,'state'=>'issued',
+                'issued_at'=>$now,'expires_at'=>$now+15,'ticket_sha256'=>hash('sha256',$ticket)]);
+            return $ticket;
+        });
+    }
+    private function checked(string $instance,string $ticket){
+        $r=$this->store->readPrivate('manual_start.php');$boot=($this->boot)();$now=(int)($this->clock)();
+        if(!is_string($boot)||$boot===''||!preg_match('/^[a-f0-9]{64}$/',$ticket)||mon_get($r,'state')!=='issued'
+            ||mon_get($r,'boot_id')!==$boot||mon_get($r,'instance_id')!==$instance||!is_int(mon_get($r,'issued_at'))
+            ||!is_int(mon_get($r,'expires_at'))||$r->issued_at>$now||$r->expires_at<=$now||$r->expires_at-$r->issued_at!==15
+            ||!hash_equals((string)mon_get($r,'ticket_sha256',''),hash('sha256',$ticket)))throw new MonFault('MANUAL_START_REQUIRED');
+        return $r;
+    }
+    public function validate(string $instance,string $ticket): void {$this->guarded(function()use($instance,$ticket){$this->checked($instance,$ticket);});}
+    public function consume(string $instance,string $ticket): string {
+        return $this->guarded(function()use($instance,$ticket){$r=$this->checked($instance,$ticket);$r->state='active';
+            unset($r->ticket_sha256);$this->store->writePrivate('manual_start.php',$r);return $r->boot_id;});
+    }
+    public function revoke(?string $fallbackInstance=null): ?string {
+        return $this->guarded(function()use($fallbackInstance){
+            $r=$this->store->readPrivate('manual_start.php');$boot=($this->boot)();$id=$fallbackInstance;
+            if(is_string($boot)&&mon_get($r,'boot_id')===$boot&&in_array(mon_get($r,'state'),['issued','active'],true))$id=mon_get($r,'instance_id',$id);
+            $this->store->writePrivate('manual_start.php',(object)['boot_id'=>$boot,'instance_id'=>$id,'state'=>'revoked']);
+            if(is_string($id))$this->store->write('stop.json',(object)['instance_id'=>$id,'requested_at'=>mon_iso()]);
+            return $id;
+        });
+    }
+}
+
+final class MonDaemonLoad {
+    const HEARTBEAT_SECONDS=20;
+    private $read;private $pauses=0;private $recoveries=0;
+    public $priorityApplied=false;public $memoryLimitApplied=false;
+    public function __construct(?callable $read=null){$this->read=$read??static function(){return self::system();};}
+    public static function system(): array {
+        $stat=(string)@file_get_contents('/proc/stat');$cores=preg_match_all('/^cpu\d+\s/m',$stat,$m);$cores=max(1,(int)$cores);
+        $load=function_exists('sys_getloadavg')?@sys_getloadavg():false;
+        $mem=(string)@file_get_contents('/proc/meminfo');$total=null;$available=null;
+        if(preg_match('/^MemTotal:\s+(\d+)\s+kB/m',$mem,$m))$total=(int)$m[1]*1024;
+        if(preg_match('/^MemAvailable:\s+(\d+)\s+kB/m',$mem,$m))$available=(int)$m[1]*1024;
+        // Older NAS kernels lack MemAvailable. Do not mistake filesystem cache for occupied RAM.
+        elseif(preg_match_all('/^(MemFree|Buffers|Cached|SReclaimable|Shmem):\s+(\d+)\s+kB/m',$mem,$rows,PREG_SET_ORDER)){
+            $parts=[];foreach($rows as $row)$parts[$row[1]]=(int)$row[2]*1024;
+            if(isset($parts['MemFree'],$parts['Buffers'],$parts['Cached']))$available=max(0,$parts['MemFree']+$parts['Buffers']+$parts['Cached']+($parts['SReclaimable']??0)-($parts['Shmem']??0));
+        }
+        return ['cores'=>$cores,'load1'=>is_array($load)?$load[0]:null,'memory_total_bytes'=>$total,'memory_available_bytes'=>$available];
+    }
+    public function apply(): void {
+        if(mon_function_available('proc_nice'))$this->priorityApplied=@proc_nice(10);
+        $limit=trim((string)ini_get('memory_limit'));$bytes=-1;
+        if(preg_match('/^(\d+)\s*([KMG]?)$/i',$limit,$m))$bytes=(int)$m[1]*(1024**([''=>0,'K'=>1,'M'=>2,'G'=>3][strtoupper($m[2])]));
+        if($bytes<0||$bytes>96*1048576)$this->memoryLimitApplied=@ini_set('memory_limit','96M')!==false;
+        else $this->memoryLimitApplied=true; // Keep a stricter pre-existing limit.
+    }
+    public function sample(): array {
+        $s=($this->read)();$cores=max(1,(int)mon_get($s,'cores',1));$load=mon_number(mon_get($s,'load1'));
+        $total=mon_number(mon_get($s,'memory_total_bytes'));$available=mon_number(mon_get($s,'memory_available_bytes'));
+        $floor=max(32*1048576,($total??0)*.10);$cpu=$load!==null&&$load>1.25*$cores;
+        $ram=$available!==null&&$available<$floor;$reason=$ram?'memory':($cpu?'load':null);
+        if($reason!==null){$this->pauses++;$this->recoveries=0;}
+        elseif($this->pauses){
+            $safe=($load===null||$load<=.9*$cores)&&($available===null||$available>=$floor*1.25);
+            $this->recoveries=$safe?$this->recoveries+1:0;
+            if($this->recoveries>=2){$this->pauses=0;$this->recoveries=0;}else $reason='recovering';
+        }
+        $wait=$this->pauses?min(120,30*(2**min(2,$this->pauses-1))):0;
+        return ['state'=>$this->pauses?'deferred':'normal','reason'=>$reason,'wait_seconds'=>$wait,'cores'=>$cores,'load1'=>$load,
+            'memory_available_bytes'=>$available,'memory_floor_bytes'=>$floor,'measurement_available'=>$load!==null||$available!==null,
+            'priority_applied'=>$this->priorityApplied,'memory_limit_applied'=>$this->memoryLimitApplied];
+    }
+    public static function settings(array $s): array {
+        $s['tick_budget_seconds']=min(25,$s['tick_budget_seconds']);$s['detail_jobs_per_tick']=min(1,$s['detail_jobs_per_tick']);
+        $s['detail_budget_seconds']=min(8,$s['detail_budget_seconds']);$s['detail_symbol_budget_seconds']=min(8,$s['detail_symbol_budget_seconds']);
+        $s['collection_budget_seconds']=min(6,$s['collection_budget_seconds']);$s['quote_symbols_per_tick']=2;$s['quote_symbol_budget_seconds']=3;
+        $s['publish_reserve_seconds']=min(5,$s['publish_reserve_seconds']);$s['request_poll_seconds']=max(30,$s['request_poll_seconds']);return $s;
+    }
+    public static function cpuSeconds(): ?float {
+        $r=mon_function_available('getrusage')?@getrusage():false;if(!is_array($r))return null;
+        return ($r['ru_utime.tv_sec']??0)+($r['ru_utime.tv_usec']??0)/1e6+($r['ru_stime.tv_sec']??0)+($r['ru_stime.tv_usec']??0)/1e6;
+    }
+    public static function waitSeconds(float $poll,float $elapsed,?float $cpuUsed): float {
+        // After each cycle allow at least five idle seconds and 9x actual CPU time (10% duty target).
+        return max(5,$poll-$elapsed,$cpuUsed===null?0:max(0,$cpuUsed)*9);
+    }
+}
+
 final class MonControl {
     public $store;
     public $instance;
@@ -480,18 +589,24 @@ final class MonGitHub {
         if($token!=='')$headers[]='Authorization: Bearer '.$token;
         return $headers;
     }
-    public function read(float $deadline, float $timeout=3): array {
+    public function read(float $deadline, float $timeout=3,?array $known=null): array {
         $url=$this->url.'?'.http_build_query(['ref'=>$this->config->get('MON_BRANCH','main')]);
         // The Contents API omits base64 content above 1 MiB. Raw media returns
         // the same file bytes at every supported size, without an extra request.
-        $r=$this->http->request('GET',$url,$this->headers(false,true),null,$deadline,$timeout);
+        $headers=$this->headers(false,true);$etag=$known['etag']??null;
+        $conditional=is_string($etag)&&preg_match('/^(W\/)?"[^"\r\n]{1,180}"$/',$etag)&&isset($known['sha'],$known['data']);
+        if($conditional)$headers[]='If-None-Match: '.$etag;
+        $r=$this->http->request('GET',$url,$headers,null,$deadline,$timeout);
+        if($r['status']===304){if(!$conditional)throw new MonFault('GITHUB_UNEXPECTED_NOT_MODIFIED');$known['unchanged']=true;return $known;}
         if ($r['status']<200 || $r['status']>=300) MonHttp::decode($r);
         $raw=$r['body'];
         if (!is_string($raw) || strlen($raw)>MonRun::MAX_SOURCE) throw new MonFault('DATA_SIZE_INVALID');
         try { $data=mon_decode($raw); } catch (Throwable $e) { throw new MonFault('DATA_JSON_INVALID'); }
         // The Git blob hash uses the exact downloaded bytes, including whitespace.
         // PUT still uses this SHA for conflict detection and preserves MON-owned data.
-        MonData::validate($data); return ['sha'=>MonRun::gitSha($raw),'data'=>$data];
+        MonData::validate($data);$etag=mon_get($r['headers'],'etag');
+        if(!is_string($etag)||!preg_match('/^(W\/)?"[^"\r\n]{1,180}"$/',$etag))$etag=null;
+        return ['sha'=>MonRun::gitSha($raw),'data'=>$data,'etag'=>$etag,'unchanged'=>false];
     }
     public function publish($batch, string $signature, float $deadline, array $settings, ?array $knownLatest = null): array {
         $headers=$this->headers(true); // Fail before any network work if writes are not configured.
@@ -709,7 +824,8 @@ final class MonCollector {
         }
         $cursor=$versionMatches?(int)mon_get($previous,'next_cursor',0):0; if ($count>0) $cursor=(($cursor%$count)+$count)%$count;
         $visited=0;
-        while ($visited<$count && microtime(true)<$deadline) {
+        $attemptLimit=(int)($settings['quote_symbols_per_tick']??PHP_INT_MAX);
+        while ($visited<$count && $this->attempted<$attemptLimit && microtime(true)<$deadline) {
             if ($this->control) { try { $this->control->check(); } catch (MonStop $e) { break; } }
             $i=($cursor+$visited)%$count; $s=$symbols[$i]; $r=$quotes[$s->symbol_id];
             if (mon_get($s,'example_only')===true||preg_match('/(^|[|_])SIM([_|]|$)/',$s->symbol_id)) {
@@ -720,7 +836,8 @@ final class MonCollector {
             $r->attempted_at=mon_iso($this->now());
             $this->attempted++;
             try {
-                $points=$this->fetch($s,$w,$deadline,$settings); $new=$points[0]; $older=$points[1]??null;
+                $symbolDeadline=isset($settings['quote_symbol_budget_seconds'])?min($deadline,microtime(true)+$settings['quote_symbol_budget_seconds']):$deadline;
+                $points=$this->fetch($s,$w,$symbolDeadline,$settings); $new=$points[0]; $older=$points[1]??null;
                 $newAt=mon_time($new->quote_at); $oldAt=mon_time(mon_get($r->point,'quote_at'));
                 if ($older===null&&$newAt!==null&&$oldAt!==null&&$oldAt<$newAt) $older=$r->point;
                 if ($older===null&&$newAt!==null&&$oldAt===$newAt) $older=$r->previous_point;
@@ -729,7 +846,7 @@ final class MonCollector {
                 $this->succeeded++;
             } catch (MonStop $e) { break; }
             catch (MonFault $e) {
-                if ($e->faultCode==='BUDGET_EXHAUSTED') break;
+                if ($e->faultCode==='BUDGET_EXHAUSTED'&&!isset($settings['quote_symbol_budget_seconds'])) break;
                 $r->fetch_status='error'; $r->quality_status=$r->point?MonData::quality($r->point,$this->now(),$settings):'failed';
                 $r->error=(object)['code'=>$e->faultCode,'message'=>'이번 시세 조회 실패; 마지막 확인 가격은 원래 시각으로 보존','source'=>null];
             }
@@ -761,22 +878,31 @@ final class MonDaemon {
     private $activity='starting';
     private $lastAttempted=0;
     private $lastSucceeded=0;
-    public function __construct(MonStore $store,string $envFile,string $instance) {
+    private $launchTicket;private $bootId;private $load;private $resources=[];private $lastHeartbeat=0.0;
+    private $heartbeatState='';private $remoteLatest=null;private $remoteScope='';private $lastCacheSha=null;
+    public function __construct(MonStore $store,string $envFile,string $instance,string $launchTicket='') {
         $this->store=$store; $this->envFile=$envFile; $this->control=new MonControl($store,$instance); $this->started=mon_iso();
-        $this->http=new MonHttp($this->control);
+        $this->http=new MonHttp($this->control);$this->launchTicket=$launchTicket;$this->load=new MonDaemonLoad();
     }
     private function heartbeat(string $state,?string $error=null): void {
         if($state!=='waiting')$this->activity=$state;
         if ($error!==null) $this->lastError=$error;
-        elseif (in_array($state,['paused','empty_watchlist','mirrored','collected','market_closed','detail_ready','detail_retry','detail_collecting','stopped'],true)) $this->lastError=null;
-        $this->store->write('status.json',(object)['version'=>MON_VERSION,'instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'activity_state'=>$this->activity,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'last_attempted'=>$this->lastAttempted,'last_succeeded'=>$this->lastSucceeded,'detail_counts'=>$this->detailCounts,'stage_seconds'=>$this->stageSeconds,'error_code'=>$this->lastError]);
+        elseif (in_array($state,['paused','empty_watchlist','mirrored','collected','market_closed','detail_ready','detail_retry','detail_collecting','resource_paused','stopped'],true)) $this->lastError=null;
+        $now=mon_monotonic();$signature=$state.'|'.$this->activity.'|'.$this->lastError;
+        if($state==='waiting'&&$signature===$this->heartbeatState&&$now-$this->lastHeartbeat<MonDaemonLoad::HEARTBEAT_SECONDS)return;
+        $this->store->write('status.json',(object)['version'=>MON_VERSION,'boot_id'=>$this->bootId,'start_policy'=>'manual_web_only','instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'activity_state'=>$this->activity,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'last_attempted'=>$this->lastAttempted,'last_succeeded'=>$this->lastSucceeded,'detail_counts'=>$this->detailCounts,'stage_seconds'=>$this->stageSeconds,'resources'=>$this->resources,'error_code'=>$this->lastError]);
+        $this->lastHeartbeat=$now;$this->heartbeatState=$signature;
     }
     private function cacheRemote($data,MonConfig $cfg,?string $sha=null): void {
+        if($sha!==null&&$this->lastCacheSha===$sha)return;
         $local=clone $data;
         $local->_mon_cache=(object)['repository'=>$cfg->get('MON_REPOSITORY','wskimgit/stock'),'branch'=>$cfg->get('MON_BRANCH','main'),'fetched_at'=>mon_iso(),'blob_sha'=>$sha];
         $this->store->write('remote_cache.json',$local);
+        $this->lastCacheSha=$sha;
     }
     private function readRemote(MonGitHub $gh,MonConfig $cfg,float $deadline): array {
+        $scope=hash('sha256',$cfg->get('MON_REPOSITORY','wskimgit/stock').'|'.$cfg->get('MON_BRANCH','main').'|'.$cfg->get('GITHUB_TOKEN'));
+        if($scope!==$this->remoteScope){$this->remoteLatest=null;$this->lastCacheSha=null;$this->remoteScope=$scope;}
         if($cfg->get('GITHUB_TOKEN')===''){
             try{
                 $cached=$this->store->read('remote_cache.json');$meta=mon_get($cached,'_mon_cache');$at=mon_time(mon_get($meta,'fetched_at'));
@@ -786,7 +912,7 @@ final class MonDaemon {
                 }
             }catch(MonFault $e){/* An invalid local cache is replaced only by a verified remote read. */}
         }
-        $latest=$gh->read($deadline);$latest['cached']=false;return $latest;
+        $latest=$gh->read($deadline,3,$this->remoteLatest);$latest['cached']=false;$this->remoteLatest=$latest;return $latest;
     }
     public static function forceMirror($w,int $now,array $settings): bool {
         $slots=mon_get($w->settings,'analysis_slots',[]); if (!is_array($slots)) return false;
@@ -799,15 +925,28 @@ final class MonDaemon {
         }
         return false;
     }
+    public static function detailWorkDue($data,int $now): bool {
+        foreach(MonDetails::requests($data)as $sid=>$request){
+            try{MonDetails::validRequest($request,$sid);}catch(MonFault $e){continue;}
+            $response=mon_get(mon_get($data->collection,'detail_responses'),$sid);
+            if(!MonDetails::matching($request,$response))return true;
+            if(mon_get($response,'state')==='retry_wait'&&((int)mon_get($response,'retry_after',0)<=$now||$now>=MonRun::seconds($request->deadline_at)))return true;
+        }return false;
+    }
     private function tick(): void {
         $tickMono=mon_monotonic();$this->stageSeconds=[];$cfg=new MonConfig($this->envFile,$this->store->dir);
         $deadline=static function(float $offset)use($tickMono){return microtime(true)+max(0,$offset-(mon_monotonic()-$tickMono));};
-        $this->poll=$cfg->int('MON_IDLE_POLL_SECONDS',60,1,3600);$this->lastAttempted=0;$this->lastSucceeded=0;
-        $publication=new MonPublication($this->store,$this->http,$cfg);$published=$publication->processNext($deadline(8));
+        $this->poll=$cfg->int('MON_IDLE_POLL_SECONDS',60,30,3600);$this->lastAttempted=0;$this->lastSucceeded=0;
+        $this->resources=$this->load->sample();$publication=new MonPublication($this->store,$this->http,$cfg);
+        if($this->resources['state']==='deferred'){
+            // A zero network budget only expires/records queued work under its ORIGINAL deadline.
+            $publication->processNext($deadline(0));$this->poll=$this->resources['wait_seconds'];$this->heartbeat('resource_paused');return;
+        }
+        $published=$publication->processNext($deadline(8));
         $this->stageSeconds['final_publication']=round(mon_monotonic()-$tickMono,6);$sourceStart=mon_monotonic();
         if($published&&in_array($published['save_status'],['queued','publishing'],true))$this->poll=min($this->poll,5);
         $gh=new MonGitHub($this->http,$cfg);$latest=$this->readRemote($gh,$cfg,$deadline(18));$knownLatest=$latest;
-        $data=clone $latest['data'];$data->collection=mon_decode(mon_json($data->collection,false));$w=$data->watchlist;$settings=MonData::settings($w);
+        $data=clone $latest['data'];$data->collection=mon_decode(mon_json($data->collection,false));$w=$data->watchlist;$settings=MonDaemonLoad::settings(MonData::settings($w));
         $this->stageSeconds['source_read']=round(mon_monotonic()-$sourceStart,6);
         $this->poll=$settings['request_poll_seconds'];if(!$latest['cached'])$this->cacheRemote($data,$cfg,$latest['sha']);
         if($published&&in_array($published['save_status'],['queued','publishing'],true))$this->poll=min($this->poll,5);
@@ -844,13 +983,13 @@ final class MonDaemon {
         };
         if($hasPending)$data=$flush($data);
         $publishBefore=$this->stageSeconds['detail_publish']??0;
-        $work=$worker->processAvailable($data,microtime(true)+max(0,min($settings['detail_budget_seconds'],$this->http->remaining($tickDeadline)-$settings['publish_reserve_seconds'])),$settings,
+        $work=self::detailWorkDue($data,time())?$worker->processAvailable($data,microtime(true)+max(0,min($settings['detail_budget_seconds'],$this->http->remaining($tickDeadline)-$settings['publish_reserve_seconds'])),$settings,
             function($current,$job)use($checkpoint,$flush,$settings,&$detailState,&$unflushed,&$lastFlush,&$firstResponse){
                 $checkpoint($current);$unflushed++;$this->detailCounts=MonProgress::build($current,time())['counts'];$this->heartbeat('detail_collecting');
                 $detailState=$job['response']->state==='retry_wait'?'detail_retry':'detail_ready';
                 $due=$firstResponse||$unflushed>=$settings['detail_publish_batch_size']||mon_monotonic()-$lastFlush>=$settings['detail_publish_max_delay_seconds'];$firstResponse=false;
                 return $due?$flush($current):$current;
-            });
+            }):['data'=>$data,'handler_seconds'=>0];
         $data=$work['data'];$this->stageSeconds['detail_work']=round(max(0,$work['handler_seconds']-(($this->stageSeconds['detail_publish']??0)-$publishBefore)),6);
         if($unflushed>0)$data=$flush($data);$w=$data->watchlist;
         $this->detailCounts=MonProgress::build($data,time())['counts'];
@@ -868,7 +1007,7 @@ final class MonDaemon {
         $batch->detail_responses=MonDetails::mergedResponses($data,$previous);
         $this->lastAttempted=$this->collector->attempted;$this->lastSucceeded=$this->collector->succeeded;
         $dirty=$this->collector->attempted>0||(mon_get($pending,'signature')===$signature&&mon_get($pending,'dirty',false));
-        $this->store->write('pending.json',(object)['signature'=>$signature,'collection'=>$batch,'dirty'=>$dirty]);
+        if($this->lastAttempted>0)$this->store->write('pending.json',(object)['signature'=>$signature,'collection'=>$batch,'dirty'=>$dirty]);
         $due=($dirty&&time()-$this->lastPublished>=$settings['mirror_seconds'])||self::forceMirror($w,time(),$settings);
         if($due){try{$at=mon_monotonic();$saved=$gh->publish($batch,$signature,$tickDeadline,$settings,$knownLatest);if($saved['written'])$this->lastPublished=time();$this->cacheRemote($saved['data'],$cfg,$saved['sha']);$this->stageSeconds['quote_publish']=round(mon_monotonic()-$at,6);@unlink($this->store->path('pending.json'));}
             catch(MonFault $e){if($e->faultCode==='WATCHLIST_CHANGED'){@unlink($this->store->path('pending.json'));$this->heartbeat('watchlist_changed',$e->faultCode);return;}throw $e;}}
@@ -878,6 +1017,8 @@ final class MonDaemon {
     public function run(int $maxTicks=0): int {
         $this->lock=@fopen($this->store->path('daemon.lock'),'c+');
         if (!$this->lock||!flock($this->lock,LOCK_EX|LOCK_NB)) { if ($this->lock) fclose($this->lock); throw new MonFault('ALREADY_RUNNING'); }
+        try{$this->bootId=(new MonManualStart($this->store))->consume($this->control->instance,$this->launchTicket);$this->launchTicket='';$this->load->apply();}
+        catch(Throwable $e){flock($this->lock,LOCK_UN);fclose($this->lock);throw $e;}
         if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
             pcntl_async_signals(true); $ctl=$this->control;
             pcntl_signal(SIGTERM,static function() use($ctl){$ctl->stop=true;}); pcntl_signal(SIGINT,static function() use($ctl){$ctl->stop=true;});
@@ -885,7 +1026,7 @@ final class MonDaemon {
         $exit=0; $this->heartbeat('starting'); $this->store->log('daemon_started');
         try {
             while (!$maxTicks || $this->ticks<$maxTicks) {
-                $this->control->check(); $start=mon_monotonic(); $stamp=mon_settings_stamp($this->store,$this->envFile);$this->ticks++;
+                $this->control->check(); $start=mon_monotonic();$cpuStart=MonDaemonLoad::cpuSeconds(); $stamp=mon_settings_stamp($this->store,$this->envFile);$this->ticks++;
                 try { $this->tick(); $this->failures=0; }
                 catch (MonStop $e) { throw $e; }
                 catch (MonFault $e) {
@@ -895,10 +1036,12 @@ final class MonDaemon {
                     $this->failures++; $exit=1; $this->store->log('tick_error',['code'=>'INTERNAL_ERROR']); $this->heartbeat('retrying','INTERNAL_ERROR'); $this->poll=max($this->poll,30);
                 }
                 if ($maxTicks && $this->ticks>=$maxTicks) break;
-                $remaining=max(0,$this->poll-(mon_monotonic()-$start));
+                if(function_exists('gc_collect_cycles'))gc_collect_cycles();$cpuEnd=MonDaemonLoad::cpuSeconds();
+                $remaining=MonDaemonLoad::waitSeconds($this->poll,mon_monotonic()-$start,$cpuStart!==null&&$cpuEnd!==null?$cpuEnd-$cpuStart:null);
+                $settingsCheck=mon_monotonic();
                 while ($remaining>0) {
                     $slice=min(5,$remaining); $this->control->wait($slice); $this->heartbeat('waiting'); $remaining-=$slice;
-                    if(mon_settings_stamp($this->store,$this->envFile)!==$stamp)break;
+                    if(mon_monotonic()-$settingsCheck>=MonDaemonLoad::HEARTBEAT_SECONDS){$settingsCheck=mon_monotonic();if(mon_settings_stamp($this->store,$this->envFile)!==$stamp)break;}
                 }
             }
         } catch (MonStop $e) { $exit=0; }
@@ -912,10 +1055,11 @@ final class MonDaemon {
 }
 
 function mon_status(MonStore $store): array {
+    $status=$store->read('status.json');$boot=MonManualStart::bootId();$verified=is_string($boot)&&mon_get($status,'boot_id')===$boot;
+    if(!is_file($store->path('daemon.lock')))return ['running'=>false,'status'=>$status,'boot_verified'=>$verified,'start_policy'=>'manual_web_only'];
     $h=@fopen($store->path('daemon.lock'),'c+'); if (!$h) throw new MonFault('LOCK_READ_FAILED');
     $free=flock($h,LOCK_EX|LOCK_NB); if ($free) flock($h,LOCK_UN); fclose($h);
-    $status=$store->read('status.json');
-    return ['running'=>!$free,'status'=>$status];
+    return ['running'=>!$free,'status'=>$status,'boot_verified'=>$verified,'start_policy'=>'manual_web_only'];
 }
 function mon_function_available(string $name): bool {
     $disabled=array_map('trim',explode(',',(string)ini_get('disable_functions')));
@@ -950,6 +1094,8 @@ function mon_web_error(string $code): string {
         'HTTP_403'=>'서비스 접근 권한 또는 호출 한도를 확인하세요.',
         'HTTP_429'=>'호출 제한으로 기다리는 중입니다. 자동으로 다시 시도합니다.',
         'DATA_SCHEMA_INVALID'=>'GitHub 데이터 규격이 맞지 않습니다.',
+        'MANUAL_START_REQUIRED'=>'자동 실행은 허용하지 않습니다. 웹 시작 버튼을 눌러 실행하세요.',
+        'BOOT_ID_UNAVAILABLE'=>'현재 NAS 부팅 정보를 확인하지 못해 시작을 보류했습니다.',
         'WEB_UNIX_REQUIRED'=>'현재 서버에서 백그라운드 데몬을 시작할 수 없습니다.',
         'WEB_INTERNAL_ERROR'=>'요청을 완료하지 못했습니다. 잠시 후 상태를 확인하세요.'
     ];
@@ -1037,7 +1183,8 @@ function mon_web_start(MonStore $store, MonConfig $cfg): string {
         if (mon_status($store)['running']) return '이미 실행 중입니다.';
         $runtime=mon_web_runtime($store,$cfg);
         $instance=bin2hex(random_bytes(12)); $envFile=getenv('MON_ENV_FILE')?:'';
-        $command=mon_web_detach_command('nohup '.escapeshellarg($runtime['path']).' '.escapeshellarg(__FILE__).' --run --env='.escapeshellarg($envFile).' --state-dir='.escapeshellarg($store->dir).' --instance='.escapeshellarg($instance).' > '.escapeshellarg($store->path('launcher.log')).' 2>&1 < /dev/null &');
+        $gate=new MonManualStart($store);$ticket=$gate->issue($instance);
+        $command=mon_web_detach_command('nohup '.escapeshellarg($runtime['path']).' '.escapeshellarg(__FILE__).' --run --env='.escapeshellarg($envFile).' --state-dir='.escapeshellarg($store->dir).' --instance='.escapeshellarg($instance).' --launch-ticket='.escapeshellarg($ticket).' > '.escapeshellarg($store->path('launcher.log')).' 2>&1 < /dev/null &');
         if (mon_function_available('proc_open') && mon_function_available('proc_close')) {
             $pipes=[];
             $p=@proc_open(['/bin/sh','-c',$command],mon_web_descriptors(['file','/dev/null','a']),$pipes,$store->dir);
@@ -1053,14 +1200,14 @@ function mon_web_start(MonStore $store, MonConfig $cfg): string {
             }
             usleep(100000);
         } while (microtime(true)<$end);
+        $gate->revoke($instance);
         throw new MonFault('DAEMON_START_NOT_CONFIRMED');
     } finally { flock($lock,LOCK_UN); fclose($lock); }
 }
 function mon_web_stop(MonStore $store): string {
-    $s=mon_status($store); if (!$s['running']) return '이미 중지되어 있습니다.';
-    $id=mon_get($s['status'],'instance_id');
+    $s=mon_status($store);$id=(new MonManualStart($store))->revoke(mon_get($s['status'],'instance_id'));
+    if (!$s['running']) return '데몬이 중지되어 있습니다. 대기 중인 시작 권한도 취소했습니다.';
     if (!is_string($id)) throw new MonFault('DAEMON_STARTING_RETRY_STOP');
-    $store->write('stop.json',(object)['instance_id'=>$id,'requested_at'=>mon_iso()]);
     $end=microtime(true)+3;
     do { if (!mon_status($store)['running']) return '데몬을 중지했습니다.'; usleep(100000); } while (microtime(true)<$end);
     return '중지를 요청했습니다. 현재 처리를 마치고 종료합니다.';
@@ -1086,6 +1233,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
     $w=mon_get($cache,'watchlist');$symbols=mon_get($w,'symbols',[]); $quotes=mon_get($collection,'quotes',[]);
     $loaded=is_array($symbols)&&$w!==null;$enabled=mon_get(mon_get($w,'settings'),'enabled');
     $freshLimit=max(30,min(90,(float)mon_get(mon_get($w,'settings'),'tick_budget_seconds',55)+10));$fresh=$at!==null&&$at<=$now+5&&$now-$at<=$freshLimit;
+    if(mon_get($status,'version')===MON_VERSION&&!$s['boot_verified'])$fresh=false;
     $configured=$cfg->get('GITHUB_TOKEN')!=='';$error=mon_get($status,'error_code');$blockers=[];$markets=[];$freshQuotes=0;
     $restart=$s['running']&&is_string(mon_get($status,'version'))&&mon_get($status,'version')!==MON_VERSION;
     if(!$configured)$blockers[]=$cfg->githubTokenError();
@@ -1093,6 +1241,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
     if($loaded&&count($symbols)===0)$blockers[]='EMPTY_WATCHLIST';
     if($restart)$blockers[]='DAEMON_RESTART_REQUIRED';
     if($s['running']&&!$fresh)$blockers[]='HEARTBEAT_STALE';
+    if($s['running']&&mon_get($status,'activity_state')==='resource_paused')$blockers[]='SYSTEM_RESOURCE_PRESSURE';
     $ids=[];
     if($loaded){
         $settings=MonData::settings($w);
@@ -1104,12 +1253,13 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
     }
     $open=false;foreach($markets as $m)if($m['collect'])$open=true;
     $activity=mon_get($status,'activity_state',mon_get($status,'state','starting'));
-    $readiness='stopped';$label='중지됨';$message='시작 버튼을 누르면 백그라운드에서 계속 실행합니다.';
+    $readiness='stopped';$label='중지됨';$message='NAS 부팅·예기치 않은 종료 뒤에는 자동 시작하지 않습니다. 시작 버튼을 눌러 실행하세요.';
     if($s['running']){
         if($stopping){$readiness='stopping';$label='중지 중';$message='중지 요청을 처리하고 있습니다.';}
         elseif(!$fresh){$readiness='unknown';$label='응답 확인 필요';$message='프로세스 잠금은 유지되지만 최신 상태 응답을 확인하지 못했습니다.';}
         elseif($restart){$readiness='restart_required';$label='재시작 필요';$message='새 코드가 저장되었습니다. 중지 후 시작하면 v'.MON_VERSION.'이 적용됩니다.';}
         elseif(!$configured){$readiness='needs_setup';$label='설정 필요';$message=mon_web_error($cfg->githubTokenError());if($enabled===false)$message.=' 관찰목록의 수집 설정도 꺼져 있습니다.';}
+        elseif($activity==='resource_paused'){$readiness='resource_paused';$label='시스템 부하 대기';$message='NAS 부하 또는 여유 메모리 때문에 새 수집을 잠시 쉬고 있습니다. 원래 자료시각과 작업 마감은 유지합니다.';}
         elseif($error){$readiness='error';$label=$error==='QUOTE_FETCH_FAILED'?'시세 조회 실패':'연결 확인 필요';$message=mon_web_error($error);}
         elseif($enabled===false){$readiness='paused';$label='수집 꺼짐';$message='관찰목록의 수집 설정이 꺼져 있어 대기 중입니다.';}
         elseif(!$loaded){$readiness='loading';$label='목록 확인 중';$message='GitHub 관찰목록을 확인하고 있습니다.';}
@@ -1123,7 +1273,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
     }
     $active=$s['running']&&$fresh&&in_array($readiness,['collecting','partial'],true)&&$freshQuotes>0;
     return [
-        'version'=>MON_VERSION,'running'=>$s['running'],'stopping'=>$stopping,'heartbeat_fresh'=>$fresh,
+        'version'=>MON_VERSION,'running'=>$s['running'],'stopping'=>$stopping,'heartbeat_fresh'=>$fresh,'start_policy'=>'manual_web_only','auto_start'=>false,'boot_verified'=>$s['boot_verified'],'resources'=>mon_get($status,'resources',new stdClass()),
         'readiness'=>$readiness,'monitoring_active'=>$active,'restart_required'=>$restart,'setup_blockers'=>$blockers,'detail_counts'=>mon_get($status,'detail_counts',new stdClass()),'detail_progress'=>MonProgress::cached($cache,$store->read('detail_pending.json')),'market_states'=>$markets,'watchlist_loaded'=>$loaded,'fresh_quotes'=>$freshQuotes,
         'label'=>$label,
         'message'=>$message,'status'=>$status,
@@ -1244,7 +1394,7 @@ document.querySelectorAll('.action-form').forEach(function(form){
   finally{busy=false;button.disabled=false;draw(current);refresh();}
  });
 });
-draw(current);setInterval(refresh,3000);
+draw(current);setInterval(function(){if(!document.hidden)refresh();},10000);
 document.getElementById('detail-more').addEventListener('click',async function(){
  if(detailCursor===null)return;this.disabled=true;
  try{var r=await fetch(location.pathname+'?view=progress&since='+encodeURIComponent(detailToken)+'&cursor='+detailCursor,{cache:'no-store'});var j=await r.json();
@@ -3387,12 +3537,14 @@ final class MonPublication {
         if(!$lock||!flock($lock,LOCK_EX|LOCK_NB)){if($lock)fclose($lock);return $this->receipt($this->load($id));}
         $job=null;
         try{
-            $job=$this->load($id);MonArtifact::load($this->store,$job->artifact_id);
+            $job=$this->load($id);$hasBudget=$this->http->remaining($deadline)>=.05;
+            if($hasBudget)MonArtifact::load($this->store,$job->artifact_id);
             if(in_array($job->status,['saved','failed','conflict','expired','unknown'],true))return $this->receipt($job);
             if($this->now()+5<MonRun::seconds(mon_get($job,'last_seen_at',$job->created_at))){$job->status=$job->ref_attempted?'unknown':'failed';$job->last_error='MON_CLOCK_REWIND';$this->save($job);return $this->receipt($job);}
             if($this->now()>=MonRun::seconds($job->expires_at)){
                 $job->status=$job->ref_attempted?'unknown':'expired';$job->last_error='MON_PUBLICATION_DEADLINE';$this->save($job);return $this->receipt($job);
             }
+            if(!$hasBudget)return $this->receipt($job);
             if(mon_get($job,'retry_after')!==null&&$this->now()<$job->retry_after)return $this->receipt($job);
             $deadline=min($deadline,microtime(true)+max(0,MonRun::seconds($job->expires_at)-$this->now()));
             $this->http->rememberDeadline($deadline);
@@ -3454,7 +3606,7 @@ final class MonPublication {
     public function processNext(float $deadline): ?array {
         $files=glob($this->store->path('publish-*.php'))?:[];sort($files,SORT_STRING);
         foreach($files as $file)if(preg_match('/^mon_publish-([a-f0-9]{64})\.php$/',basename($file),$m)){
-            try{$j=$this->load($m[1]);if(in_array($j->status,['queued','publishing'],true)&&($j->retry_after===null||$this->now()>=$j->retry_after))return $this->process($m[1],$deadline);}
+            try{$j=$this->load($m[1]);if(in_array($j->status,['queued','publishing'],true)&&($j->retry_after===null||$this->now()>=$j->retry_after||$this->now()>=MonRun::seconds($j->expires_at)))return $this->process($m[1],$deadline);}
             catch(MonFault $e){$this->store->log('publication_job_invalid',['code'=>$e->faultCode]);continue;}
         }return null;
     }
@@ -3678,57 +3830,30 @@ function mon_web(): int {
 }
 function mon_main(array $argv): int {
     if (PHP_SAPI!=='cli') return mon_web();
-    $mode='daemon'; $envFile=getenv('MON_ENV_FILE')?:''; $dir=getenv('MON_STATE_DIR')?:__DIR__; $maxTicks=0; $instance=bin2hex(random_bytes(12));
+    $mode='status';$launchTicket=''; $envFile=getenv('MON_ENV_FILE')?:''; $dir=getenv('MON_STATE_DIR')?:__DIR__; $maxTicks=0; $instance=bin2hex(random_bytes(12));
     foreach (array_slice($argv,1) as $arg) {
         if (in_array($arg,['--run','--daemon','--once','--status','--stop','--check','--help'],true)) $mode=substr($arg,2);
         elseif (strpos($arg,'--env=')===0) $envFile=substr($arg,6);
         elseif (strpos($arg,'--state-dir=')===0) $dir=substr($arg,12);
         elseif (preg_match('/^--max-ticks=(\d+)$/',$arg,$m)) $maxTicks=(int)$m[1];
         elseif (preg_match('/^--instance=([a-f0-9]{24})$/',$arg,$m)) $instance=$m[1];
+        elseif (preg_match('/^--launch-ticket=([a-f0-9]{64})$/',$arg,$m)) $launchTicket=$m[1];
         else throw new MonFault('CLI_OPTION_INVALID');
     }
     if ($mode==='help') {
-        echo 'mon.php '.MON_VERSION." (PHP 7.4+ CLI)\nphp74 mon.php = 데몬 시작 (옵션 생략 가능)\n--daemon 시작 / --run 전면 실행 / --once 한 주기 / --status 상태 / --stop 종료 / --check 설정\n기본 설정은 코드 상단 MON_CONFIG, 상태 파일은 mon.php와 같은 폴더\n"; return 0;
+        echo 'mon.php '.MON_VERSION." (PHP 7.4+)\n시작은 웹 시작 버튼만 허용합니다. NAS 부팅 뒤 자동 시작하지 않습니다.\n옵션 없음 / --status: 상태, --stop: 중지, --check: 설정 확인\n--daemon / --once는 사용할 수 없으며 --run은 일회용 웹 시작 권한이 필요합니다.\n";return 0;
     }
+    if(in_array($mode,['daemon','once'],true)||($mode==='run'&&$launchTicket===''))throw new MonFault('MANUAL_START_REQUIRED');
     $store=new MonStore($dir);
     if ($mode==='check') {
         $cfg=new MonConfig($envFile,$dir);
         echo mon_json(['php'=>PHP_VERSION,'curl'=>extension_loaded('curl'),'pcntl'=>function_exists('pcntl_fork'),'github_token_present'=>$cfg->get('GITHUB_TOKEN')!=='','kis_credentials_present'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!=='','repository'=>$cfg->get('MON_REPOSITORY','wskimgit/stock'),'branch'=>$cfg->get('MON_BRANCH','main'),'state_directory'=>$store->dir,'state_directory_writable'=>is_writable($dir)]); return 0;
     }
     if ($mode==='status') { echo mon_json(mon_status($store)); return 0; }
-    if ($mode==='stop') {
-        $s=mon_status($store); if (!$s['running']) { echo "이미 중지되어 있습니다.\n"; return 0; }
-        $id=mon_get($s['status'],'instance_id'); if (!is_string($id)) throw new MonFault('DAEMON_STARTING_RETRY_STOP');
-        $store->write('stop.json',(object)['instance_id'=>$id,'requested_at'=>mon_iso()]); echo "종료 요청을 기록했습니다.\n"; return 0;
-    }
-    if ($mode==='daemon') {
-        if (mon_status($store)['running']) { echo "이미 실행 중입니다.\n"; return 0; }
-        if (DIRECTORY_SEPARATOR!=='/') throw new MonFault('USE_FOREGROUND_WITH_SERVICE_MANAGER');
-        if (function_exists('pcntl_fork') && function_exists('posix_setsid')) {
-            $pid=pcntl_fork(); if ($pid<0) throw new MonFault('DAEMON_FORK_FAILED');
-            if ($pid===0) {
-                if (posix_setsid()<0) exit(1);
-                $child=pcntl_fork(); if ($child<0) exit(1); if ($child>0) exit(0);
-                // Release inherited caller pipes so the parent command can complete.
-                @fclose(STDIN); @fclose(STDOUT); @fclose(STDERR);
-                $in=fopen('/dev/null','r'); $out=fopen($store->path('launcher.log'),'a'); $err=fopen($store->path('launcher.log'),'a');
-                exit((new MonDaemon($store,$envFile,$instance))->run($maxTicks));
-            }
-        } else {
-            if (!function_exists('exec')) throw new MonFault('USE_FOREGROUND_WITH_SERVICE_MANAGER');
-            $command='nohup '.escapeshellarg(PHP_BINARY).' '.escapeshellarg(__FILE__).' --run --env='.escapeshellarg($envFile).' --state-dir='.escapeshellarg($dir).' --instance='.escapeshellarg($instance).' > '.escapeshellarg($store->path('launcher.log')).' 2>&1 < /dev/null &';
-            exec($command);
-        }
-        $end=microtime(true)+5;
-        do {
-            $s=mon_status($store);
-            if ($s['running']&&mon_get($s['status'],'instance_id')===$instance) { echo "mon 데몬을 시작했습니다. PID=".mon_get($s['status'],'pid')."\n"; return 0; }
-            usleep(100000);
-        } while (microtime(true)<$end);
-        throw new MonFault('DAEMON_START_NOT_CONFIRMED');
-    }
+    if ($mode==='stop') {echo mon_web_stop($store)."\n";return 0;}
+    (new MonManualStart($store))->validate($instance,$launchTicket);
     if (!extension_loaded('curl')) throw new MonFault('PHP_CURL_REQUIRED');
-    return (new MonDaemon($store,$envFile,$instance))->run($mode==='once'?1:$maxTicks);
+    return (new MonDaemon($store,$envFile,$instance,$launchTicket))->run($maxTicks);
 }
 
 if (realpath($_SERVER['SCRIPT_FILENAME']??'')===__FILE__) {

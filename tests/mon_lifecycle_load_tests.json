@@ -1,0 +1,236 @@
+{
+    "suite": "MON manual lifecycle and daemon load 1.6.2",
+    "runtime": "7.4.33",
+    "duration_seconds": 0.124064,
+    "pass": 41,
+    "fail": 0,
+    "cases": [
+        {
+            "name": "manual web permit is bound to this boot and consumed once",
+            "pass": true,
+            "seconds": 0.000853
+        },
+        {
+            "name": "previous boot permit cannot launch after NAS reboot",
+            "pass": true,
+            "seconds": 0.000195
+        },
+        {
+            "name": "new manual start works after reboot with a new permit",
+            "pass": true,
+            "seconds": 0.000633
+        },
+        {
+            "name": "expired permit cannot be reused by a supervisor",
+            "pass": true,
+            "seconds": 0.000116
+        },
+        {
+            "name": "clock rewind cannot extend a start permit",
+            "pass": true,
+            "seconds": 0.000135
+        },
+        {
+            "name": "wrong process instance cannot consume a permit",
+            "pass": true,
+            "seconds": 0.000103
+        },
+        {
+            "name": "wrong token cannot consume a permit",
+            "pass": true,
+            "seconds": 0.000132
+        },
+        {
+            "name": "missing boot identity prevents issuing a permit",
+            "pass": true,
+            "seconds": 0.000119
+        },
+        {
+            "name": "stop cancels a child that has not started yet",
+            "pass": true,
+            "seconds": 0.000468
+        },
+        {
+            "name": "stop during the consumed-before-heartbeat race uses the active instance",
+            "pass": true,
+            "seconds": 0.000556
+        },
+        {
+            "name": "start state stores a hash instead of a launch token",
+            "pass": true,
+            "seconds": 0.000129
+        },
+        {
+            "name": "concurrent gate use returns busy without overwriting a permit",
+            "pass": true,
+            "seconds": 0.000158
+        },
+        {
+            "name": "an old status PID does not count as a running daemon",
+            "pass": true,
+            "seconds": 0.000198
+        },
+        {
+            "name": "daemon itself rejects an unpermitted run before HTTP or status writes",
+            "pass": true,
+            "seconds": 0.001885
+        },
+        {
+            "name": "actual one-cycle manual run records the current boot and prevents replay",
+            "pass": true,
+            "seconds": 0.003244
+        },
+        {
+            "name": "normal system admits bounded collection",
+            "pass": true,
+            "seconds": 5.0e-6
+        },
+        {
+            "name": "load threshold scales with CPU cores",
+            "pass": true,
+            "seconds": 6.0e-6
+        },
+        {
+            "name": "low available memory pauses collection",
+            "pass": true,
+            "seconds": 3.0e-6
+        },
+        {
+            "name": "resource backoff is bounded at 30, 60, 120 seconds",
+            "pass": true,
+            "seconds": 8.0e-6
+        },
+        {
+            "name": "two healthy samples are required before resuming",
+            "pass": true,
+            "seconds": 5.0e-6
+        },
+        {
+            "name": "near-threshold pressure does not cause repeated stop/start oscillation",
+            "pass": true,
+            "seconds": 4.0e-6
+        },
+        {
+            "name": "unavailable measurements are disclosed and fixed caps stay active",
+            "pass": true,
+            "seconds": 0.001645
+        },
+        {
+            "name": "daemon caps do not change foreground analysis or watchlist settings",
+            "pass": true,
+            "seconds": 0.001325
+        },
+        {
+            "name": "CPU duty waiting adds idle time after an overrun instead of spinning",
+            "pass": true,
+            "seconds": 2.0e-6
+        },
+        {
+            "name": "high load daemon cycle makes zero external transport calls and preserves checkpoints",
+            "pass": true,
+            "seconds": 0.00236
+        },
+        {
+            "name": "resource wait is visible on the real web state model",
+            "pass": true,
+            "seconds": 0.000261
+        },
+        {
+            "name": "unchanged source uses ETag and reuses the exact validated bytes",
+            "pass": true,
+            "seconds": 0.001394
+        },
+        {
+            "name": "changed source replaces the cached SHA and data",
+            "pass": true,
+            "seconds": 0.001446
+        },
+        {
+            "name": "unsolicited 304 is rejected instead of fabricating a source",
+            "pass": true,
+            "seconds": 6.0e-5
+        },
+        {
+            "name": "unsafe ETag is never sent as a request header",
+            "pass": true,
+            "seconds": 0.001366
+        },
+        {
+            "name": "unchanged daemon cache skips an atomic rewrite",
+            "pass": true,
+            "seconds": 0.001421
+        },
+        {
+            "name": "waiting heartbeat is throttled while stop state is immediate",
+            "pass": true,
+            "seconds": 0.000599
+        },
+        {
+            "name": "market closure makes no quote calls and no new quote checkpoint",
+            "pass": true,
+            "seconds": 0.003229
+        },
+        {
+            "name": "retry-wait data is not decoded before the retry is due",
+            "pass": true,
+            "seconds": 0.002505
+        },
+        {
+            "name": "two-symbol limit rotates through every symbol and preserves unvisited prices",
+            "pass": true,
+            "seconds": 0.007604
+        },
+        {
+            "name": "a repeatedly timed-out quote cannot starve later symbols",
+            "pass": true,
+            "seconds": 0.003644
+        },
+        {
+            "name": "stop remains responsive while resource waiting is active",
+            "pass": true,
+            "seconds": 0.000162
+        },
+        {
+            "name": "pressure deferral preserves queue expiry and does not load the large artifact",
+            "pass": true,
+            "seconds": 0.020632
+        },
+        {
+            "name": "pressure does not postpone original publication expiration",
+            "pass": true,
+            "seconds": 0.023002
+        },
+        {
+            "name": "normal publication budget still verifies artifact integrity before proceeding",
+            "pass": true,
+            "seconds": 0.021432
+        },
+        {
+            "name": "expired publication with a possible ref write stays unknown",
+            "pass": true,
+            "seconds": 0.020931
+        }
+    ],
+    "metrics": {
+        "local_daemon_priority_applied": true,
+        "local_memory_limit": "96M",
+        "pressure_backoff_seconds": [
+            30,
+            60,
+            120,
+            120,
+            120,
+            120,
+            120
+        ],
+        "unchanged_source_body_bytes": 0,
+        "rotation_cursors_5_symbols": [
+            2,
+            4,
+            1
+        ]
+    },
+    "external_requests": 0,
+    "orders": 0,
+    "nas_reboot_performed": false
+}

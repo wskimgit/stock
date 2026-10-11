@@ -1,5 +1,25 @@
 # MON 보강 구현·검증 보고
 
+## v1.6.2 / 지시문 v4.6 — NAS 수동 시작과 데몬 부하 제어
+
+2026-10-11 KST. 사용자 요청은 NAS 부팅 때 자동 재동작 금지와 다른 NAS 작업에 무리한 부하 방지다. 코드의 옵션 없는 CLI는 기존 daemon 시작이었고 데몬은 대기에도10초 원문 수신·5초 heartbeat/설정 해시를 반복했다. NAS의 실제 시작 작업/부하 측정은 이번 환경에서 확인하지 않았다.
+
+| 구현 | 확인한 결과 |
+|---|---|
+| MonManualStart·CLI·웹 Start/Stop | 부팅/인스턴스/15초/해시·한 번 소비·Stop 취소; 이전 부팅/기한/재사용/잘못된 토큰·경합 거절 |
+| 기본 CLI 상태 조회, --daemon/--once/무권한 --run 거절 | 실제 CLI와 GET/설정/게시 경로에서 자동 실행 권한 없음; 기존 PID만으로 실행 판단 안 함 |
+| MonDaemonLoad·run의 우선순위/메모리/유휴 | 로컬 PHP7.4에서 nice 적용·96M 확인; CPU 단위 부하/여유 RAM·30/60/120 대기·2회 회복·측정 불가 표시 |
+| 데몬 전용 작업 상한·quote 커서 | 전체25초·상세1개/8초·시세2개/6초·종목3초; 5종목 커서2→4→1, 반복 시간 초과 뒤에도 다음 종목 진행 |
+| MonGitHub 조건부 GET·cacheRemote·detailWorkDue | 304 원문0바이트·같은 SHA cache 쓰기0·완료/미도래 요청 원문 준비 생략 |
+| heartbeat·설정 확인·웹 polling | 대기 쓰기 생략과 종료 즉시 기록,20초 설정 확인·10초 웹/숨긴 탭 생략 |
+| 시스템 부하 대기와 게시 마감 | 과부하 회차 외부 호출0·기존 체크포인트 보존·artifact 해제 생략·원래 expires_at 보존·expired/unknown 구분 |
+
+[함수·한 회차 실행 모의](tests/mon_lifecycle_load_test.php)의 [원시 결과](tests/mon_lifecycle_load_tests.json)는 **PHP7.4.33에서41 PASS / 0 FAIL**이다. [HTTP/CLI 검증](tests/mon_lifecycle_load_http_test.py)의 [원시 결과](tests/mon_lifecycle_load_http_tests.json)는 **같은 PHP7.4.33의 실제 로컬 서버·CLI에서16 PASS / 0 FAIL**이다. 합계57 PASS/0 FAIL이며 외부 API/주문0이다. foreground 한 회차 모의 실행은 종료했고 별도 상주 MON 작업자를 남기지 않았다. 이전48/105 PASS 전체를 반복하거나 합산하지 않았다.
+
+검증한 재부팅은 boot ID 교체 모의이며 NAS를 실제로 재부팅하지 않았다. 시스템 부하/메모리 수치는 합성이며 실제 CPU/RAM 감소율·NAS PHP 권한·Git ETag 공급·외부 수집 성공·ChatGPT120초 완료를 보장하지 않는다. 직접 분석/상세 함수 설정과 MON-P3.1·MACD(12,26,9)·mon_data.json/mon_result.md는 유지했다. 큰 관찰목록과 긴 과부하 대기는 가격/상세 응답의 갱신을 늦출 수 있고 원래 마감 후에는 자료 부족·이전자료·게시 만료로 표시한다.
+
+현재 저장 대상은 코드·지시문·wiki·설계/보고와 새 검증 파일4개다. NAS `/web/mon.php` 교체·실가동은 별도다. 교체 후 웹 중지→시작으로 적용하고 이후 재부팅/예외 종료마다 웹에서 다시 시작한다. 새 폴더·cron·watchdog를 설치하지 않는다.
+
 ## v1.6.1 / 지시문 v4.5 — 세 장애의 복구 보강
 
 2026-10-11 KST. 직전 실행은 접수 후259.2초에 기존 결과를 표시했고 NAS 건강 조회1회가 Proxy CONNECT 시간 초과였다. 미국10/9 완료봉·S&P500 비교와 가격 기준 충돌은 해결되지 않았다. 새 분석 실패를 PHP/NAS가 실제로 모두 해결했다고 선언하지 않는다.
