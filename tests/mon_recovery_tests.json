@@ -1,0 +1,144 @@
+{
+    "suite": "MON recovery 1.6.1",
+    "runtime": "7.4.33",
+    "duration_seconds": 24.180414542999642,
+    "pass": 31,
+    "fail": 0,
+    "cases": [
+        {
+            "case": "initial view needs no lossless payload decoding or indicator preparation",
+            "pass": true
+        },
+        {
+            "case": "missing source still returns a final needs-data result",
+            "pass": true
+        },
+        {
+            "case": "initial GET projection does not modify its cache or create private state",
+            "pass": true
+        },
+        {
+            "case": "corrupted saved source is reported without a guessed selection",
+            "pass": true
+        },
+        {
+            "case": "initial pages keep all 30 old rows under the response limit",
+            "pass": true
+        },
+        {
+            "case": "initial pagination rejects a mixed snapshot",
+            "pass": true
+        },
+        {
+            "case": "old replay plus no-change never means new analysis completed",
+            "pass": true
+        },
+        {
+            "case": "startup after 259 seconds keeps the original expired budget and old result",
+            "pass": true
+        },
+        {
+            "case": "direct fixed prepare cannot bypass a expired execution budget",
+            "pass": true
+        },
+        {
+            "case": "direct fixed finalize cannot bypass a expired execution budget",
+            "pass": true
+        },
+        {
+            "case": "known analysis completion remains separate from pending publication",
+            "pass": true
+        },
+        {
+            "case": "network failure skips same provider but permits a different origin",
+            "pass": true
+        },
+        {
+            "case": "a single slow symbol does not suppress another healthy symbol at the same provider",
+            "pass": true
+        },
+        {
+            "case": "distinct timeout evidence opens a shared provider cooldown",
+            "pass": true
+        },
+        {
+            "case": "cooldown expires without sleeping or extending the request deadline",
+            "pass": true
+        },
+        {
+            "case": "HTTP 404 for one symbol never opens a provider-wide breaker",
+            "pass": true
+        },
+        {
+            "case": "Retry-After is honored by the provider cooldown",
+            "pass": true
+        },
+        {
+            "case": "Git confirmation requests are not blocked by the market-data breaker",
+            "pass": true
+        },
+        {
+            "case": "KIS timeout leaves time for Yahoo stock and the exact benchmark",
+            "pass": true
+        },
+        {
+            "case": "benchmark failure preserves stock and resumes without downloading it again",
+            "pass": true
+        },
+        {
+            "case": "checkpoint hash mismatch triggers fresh stock verification",
+            "pass": true
+        },
+        {
+            "case": "checkpoint request mismatch triggers fresh stock verification",
+            "pass": true
+        },
+        {
+            "case": "checkpoint expiry mismatch triggers fresh stock verification",
+            "pass": true
+        },
+        {
+            "case": "nontransient DETAIL_BENCHMARK_DATE_MISSING does not poll unchanged data",
+            "pass": true
+        },
+        {
+            "case": "nontransient DETAIL_PRICE_BASIS_CONFLICT does not poll unchanged data",
+            "pass": true
+        },
+        {
+            "case": "nontransient YAHOO_MAPPING_MISSING does not poll unchanged data",
+            "pass": true
+        },
+        {
+            "case": "nontransient DETAIL_COMPARISON_DATES_MISMATCH does not poll unchanged data",
+            "pass": true
+        },
+        {
+            "case": "worker preserves old analysis and terminates a missing mapping without retry",
+            "pass": true
+        },
+        {
+            "case": "fresh finalization labels newly completed analysis explicitly",
+            "pass": true
+        },
+        {
+            "case": "saved exact benchmark is reused even when its paired stock is older",
+            "pass": true
+        },
+        {
+            "case": "a Retry-After beyond the remaining request budget ends with previous data",
+            "pass": true
+        }
+    ],
+    "metrics": {
+        "initial_projection_ms": 0.748,
+        "initial_pages_30_rows": 4,
+        "provider_timeouts_seconds": [
+            2.3399492868193192,
+            3.9497968364084954,
+            5.0
+        ]
+    },
+    "external_requests": 0,
+    "orders": 0
+}

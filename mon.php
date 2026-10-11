@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.6.0 -- PHP 7.4+ bounded runs / single finalization / durable publication.
+ * mon.php 1.6.1 -- PHP 7.4+ early results / reserved fallbacks / resumable partial data.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.6.0';
+const MON_VERSION = '1.6.1';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -271,7 +271,7 @@ class MonHttp {
     private $control;
     private $transport;
     private $lastQuoteStart = null;
-    private $deadlineMap=[];private $wall;private $mono;
+    private $deadlineMap=[];private $wall;private $mono;private $circuit=[];private $outageEvidence=[];
     public function __construct(?MonControl $control = null, ?callable $transport = null,?callable $wall=null,?callable $mono=null) {
         $this->control=$control;$this->transport=$transport;$this->wall=$wall?:static function(){return microtime(true);};$this->mono=$mono?:static function(){return mon_monotonic();};
     }
@@ -283,9 +283,36 @@ class MonHttp {
         }return $this->deadlineMap[$key];
     }
     public function remaining(float $deadline): float {return max(0,min($deadline-(float)($this->wall)(),$this->rememberDeadline($deadline)-(float)($this->mono)()));}
+    // Only common provider outages are shared. A missing symbol never blocks its peers.
+    private function circuitFailure(string $host,string $code,int $retryAfter=0,string $resource=''): void {
+        if(!in_array($host,['openapi.koreainvestment.com','m.stock.naver.com','query1.finance.yahoo.com'],true))return;
+        $network=preg_match('/^HTTP_TRANSPORT_(5|6|7|28|35|52|55|56|60)$/',$code)===1;
+        if(!$network&&$code!=='HTTP_429'&&preg_match('/^HTTP_5\d\d$/',$code)!==1)return;
+        $now=(float)($this->mono)();foreach($this->circuit as $key=>$row)if($row['until']<=$now)unset($this->circuit[$key]);
+        $seconds=$code==='HTTP_429'?min(300,max(30,$retryAfter)):30;
+        // A slow/broken single resource is insufficient evidence that the whole provider is down.
+        if(($code==='HTTP_TRANSPORT_28'||preg_match('/^HTTP_5\d\d$/',$code)===1)&&$resource!==''){
+            $this->circuit[$resource]=['until'=>$now+$seconds,'code'=>$code];
+            $proof=$this->outageEvidence[$host]??[];foreach($proof as $key=>$until)if($until<=$now)unset($proof[$key]);
+            $proof[$resource]=$now+$seconds;$this->outageEvidence[$host]=$proof;if(count($proof)<2)return;
+        }
+        $this->circuit[$host]=['until'=>$now+$seconds,'code'=>$code];
+    }
+    private function response(string $host,array $r,float $end,string $resource): array {
+        $r['_deadline_missed']=(float)($this->mono)()>$end;
+        $status=(int)mon_get($r,'status',0);$after=mon_get(mon_get($r,'headers',[]),'retry-after','0');
+        if($status===429||$status>=500)$this->circuitFailure($host,'HTTP_'.$status,ctype_digit((string)$after)?(int)$after:0,$resource);
+        elseif($status>=200&&$status<300){unset($this->circuit[$resource],$this->outageEvidence[$host][$resource]);}
+        return $r;
+    }
     public function request(string $method, string $url, array $headers, ?string $body, float $deadline, float $timeout = 5.0, float $spacing = 0.0): array {
         if ($this->control) $this->control->check();
         $end=$this->rememberDeadline($deadline);
+        if($this->remaining($deadline)<.05)throw new MonFault('BUDGET_EXHAUSTED');
+        $host=parse_url($url,PHP_URL_HOST);
+        if(parse_url($url,PHP_URL_SCHEME)!=='https'||!in_array($host,['api.github.com','openapi.koreainvestment.com','m.stock.naver.com','query1.finance.yahoo.com'],true))throw new MonFault('HTTP_HOST_NOT_ALLOWED');
+        $resource=$host.'|'.hash('sha256',$method.'|'.$url);
+        foreach([$host,$resource]as $key)if(isset($this->circuit[$key])&&$this->circuit[$key]['until']>(float)($this->mono)())throw new MonFault('HTTP_CIRCUIT_OPEN',max(1,(int)ceil($this->circuit[$key]['until']-(float)($this->mono)())));
         if ($spacing > 0) {
             $wait = $this->lastQuoteStart===null?0:$this->lastQuoteStart+$spacing-(float)($this->mono)();
             if ($wait > 0) {
@@ -297,9 +324,10 @@ class MonHttp {
         $left = $this->remaining($deadline);
         if ($left < 0.05) throw new MonFault('BUDGET_EXHAUSTED');
         $timeout = min($timeout, $left);
-        $host = parse_url($url, PHP_URL_HOST);
-        if (parse_url($url, PHP_URL_SCHEME) !== 'https' || !in_array($host, ['api.github.com', 'openapi.koreainvestment.com', 'm.stock.naver.com', 'query1.finance.yahoo.com'], true)) throw new MonFault('HTTP_HOST_NOT_ALLOWED');
-        if ($this->transport){$r=($this->transport)($method,$url,$headers,$body,$timeout);$r['_deadline_missed']=(float)($this->mono)()>$end;return $r;}
+        if ($this->transport){
+            try{return $this->response($host,($this->transport)($method,$url,$headers,$body,$timeout),$end,$resource);}
+            catch(MonFault $e){$this->circuitFailure($host,$e->faultCode,$e->retryAfter,$resource);throw $e;}
+        }
         if (!extension_loaded('curl')) throw new MonFault('PHP_CURL_REQUIRED');
         $responseHeaders = []; $responseBody = ''; $tooLarge = false;
         $ch = curl_init($url);
@@ -329,8 +357,8 @@ class MonHttp {
         curl_setopt_array($ch, $options);
         $ok = curl_exec($ch); $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); $errno = curl_errno($ch); curl_close($ch);
         if ($this->control) $this->control->check();
-        if ($ok === false) throw new MonFault($tooLarge ? 'HTTP_RESPONSE_TOO_LARGE' : 'HTTP_TRANSPORT_' . $errno);
-        return ['status' => $status, 'headers' => $responseHeaders, 'body' => $responseBody,'_deadline_missed'=>(float)($this->mono)()>$end];
+        if ($ok === false){$code=$tooLarge?'HTTP_RESPONSE_TOO_LARGE':'HTTP_TRANSPORT_'.$errno;$this->circuitFailure($host,$code,0,$resource);throw new MonFault($code);}
+        return $this->response($host,['status'=>$status,'headers'=>$responseHeaders,'body'=>$responseBody],$end,$resource);
     }
     public static function decode(array $r) {
         if ($r['status'] < 200 || $r['status'] >= 300) {
@@ -794,7 +822,7 @@ final class MonDaemon {
         $queued=mon_get($detailPending,'collection',new stdClass());$merged=MonDetails::mergedResponses($data,$queued);
         $data->collection->detail_responses=$merged;
         // Jobs run during market closure too. One failure cannot block another symbol.
-        $daily=new MonDaily($this->http,$this->collector,$cfg);$worker=new MonDetailWorker($daily,$this->store);
+        $daily=new MonDaily($this->http,$this->collector,$cfg,$this->store);$worker=new MonDetailWorker($daily,$this->store);
         $hasPending=MonRun::json($merged)!==MonRun::json(mon_get($latest['data']->collection,'detail_responses',new stdClass()));
         $detailState=null;$publishError=null;$unflushed=0;$lastFlush=mon_monotonic();
         $firstResponse=MonProgress::build($latest['data'],time())['counts']['done']===0;
@@ -2455,6 +2483,7 @@ final class MonDetails {
         if($changed)$out->analysis->input_snapshot->lossless_payload=MonRun::pack($p,'gzip+base64');return $out;
     }
     public static function prepare($d,$context,array $liveRows=[]): array {
+        if(MonExecution::$active)MonExecution::$active->guard('decision');
         $input=self::inputs($d,$context);$p=MonRun::payload($input);$prepared=MonSwing::prepare($input,$context,$liveRows);$refs=[];
         foreach($prepared['full_signals']as $sid=>$s){
             $s->data_status=mon_get(mon_get(mon_get($p,'detail_imports'),$sid),'data_status','verified_saved_data');
@@ -2466,7 +2495,7 @@ final class MonDetails {
         $pages=MonPaging::pages(['state_token'=>$prepared['state_token'],'prepared_fingerprint'=>$prepared['prepared_fingerprint'],'card_kind'=>'previous_reference'],$refs);
         $view['reference_cards']=$pages['pages'][0]['cards'];$view['reference_card_pages']=$pages['pages'];
         foreach($pages['artifact_cards']as $sha=>$card)$view['artifact_cards']->$sha=$card;
-        $view['detail_status']=self::view($d,$context);return $view;
+        $view['detail_status']=self::view($d,$context);if(MonExecution::$active)MonExecution::$active->guard('decision');return $view;
     }
     public static function selectData($d,$decision): array {
         $context=mon_get($decision,'view_context');$input=self::inputs($d,$context);$prepared=MonSwing::prepare($input,$context,mon_get($decision,'live_observations',[]));$references=mon_get($decision,'references',[]);
@@ -2499,18 +2528,21 @@ final class MonDetails {
         return ['data'=>$out,'payload'=>$p,'context'=>MonRun::context($context),'prepared'=>$prepared];
     }
     public static function finalize($d,$decision): array {
+        if(MonExecution::$active){MonExecution::$active->guard('decision');if(MonRun::seconds(mon_get($decision,'fixed_as_of'))>MonExecution::$active->end('decision'))throw new MonFault('MON_DECISION_DEADLINE');}
         $bundle=self::selectData($d,$decision);$out=$bundle['data'];$p=$bundle['payload'];
         MonConfirmation::apply($d,$out,$p,mon_get($decision,'confirmations'),$out->analysis->as_of);
         $out->analysis->discovery_state=MonDiscovery::counts($out,$p,$bundle['prepared'],$out->analysis->as_of);
+        if(MonExecution::$active)MonExecution::$active->guard('decision');
         if(MonMeaning::same($d,$out,$p)){
             return ['status'=>'no_change','write_required'=>false,'files'=>[],'summary'=>MonRun::render($d,$bundle['context']->rendered_at),
-                'final_available'=>true,'save_status'=>'no_change','validation'=>['analysis_as_of_preserved'=>true,'collection_preserved'=>true,'meaningful_change'=>false,'prepare_reused'=>$bundle['prepared']['prepare_reused']]];
+                'final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'revalidated_unchanged_decision','save_status'=>'no_change','validation'=>['analysis_as_of_preserved'=>true,'collection_preserved'=>true,'meaningful_change'=>false,'prepare_reused'=>$bundle['prepared']['prepare_reused']]];
         }
         $out->analysis->input_snapshot->mon_input_state->final_available=true;
         $out->analysis->input_snapshot->mon_input_state->save_status='pending';
         if(MonExecution::$active)$out->analysis->input_snapshot->mon_input_state->timing=(object)MonExecution::$active->timing();
         $result=MonSwing::finalize($d,$out,$p,$bundle['context'],['종목별 자율 판단·근거를 한 번 확정; 현재·과거 신호와 저장 상태 구분']);
-        $result['final_available']=true;$result['save_status']='pending';
+        if(MonExecution::$active)MonExecution::$active->guard('decision');
+        $result['final_available']=true;$result['new_analysis_complete']=true;$result['analysis_origin']='secured_data_decision';$result['save_status']='pending';
         $result['validation']['prepare_reused']=$bundle['prepared']['prepare_reused'];$result['validation']['cache_key']=$bundle['prepared']['cache_key'];
         return $result;
     }
@@ -2518,8 +2550,41 @@ final class MonDetails {
 }
 
 final class MonDaily {
-    private $http;private $collector;private $config;private $memo=[];public $partialFields=null;public $conflictDiagnostics=null;public $conflictArtifact=null;
-    public function __construct(MonHttp $http,MonCollector $collector,MonConfig $config){$this->http=$http;$this->collector=$collector;$this->config=$config;}
+    private $http;private $collector;private $config;private $memo=[];private $store;
+    public $partialFields=null;public $conflictDiagnostics=null;public $conflictArtifact=null;
+    public function __construct(MonHttp $http,MonCollector $collector,MonConfig $config,?MonStore $store=null){$this->http=$http;$this->collector=$collector;$this->config=$config;$this->store=$store;}
+    public static function retryable(string $code): bool {
+        return preg_match('/^HTTP_TRANSPORT_(5|6|7|28|35|52|55|56|60)$/',$code)===1||
+            in_array($code,['HTTP_CIRCUIT_OPEN','HTTP_408','HTTP_429','BUDGET_EXHAUSTED'],true)||preg_match('/^HTTP_5\d\d$/',$code)===1;
+    }
+    private function checkpoint($request,?stdClass $source=null): ?stdClass {
+        if(!$this->store)return null;
+        $name='stock-checkpoint-'.hash('sha256',$request->symbol_id).'.php';
+        try{
+            if($source!==null){
+                $bars=MonSwing::bars($source->bars);$last=end($bars);
+                if($last[0]!==$request->target_completed_date)return null;
+                $row=(object)['contract'=>'MON-STOCK-CHECKPOINT-1.0','request_hash'=>$request->request_hash,'symbol_id'=>$request->symbol_id,
+                    'target_completed_date'=>$request->target_completed_date,'expires_at'=>$request->deadline_at,'source'=>$source,'sha256'=>MonRun::digest($source)];
+                $this->store->writePrivate($name,$row);return $source;
+            }
+            $row=$this->store->readPrivate($name);
+            if(mon_get($row,'contract')!=='MON-STOCK-CHECKPOINT-1.0'||mon_get($row,'request_hash')!==$request->request_hash||
+                mon_get($row,'symbol_id')!==$request->symbol_id||mon_get($row,'target_completed_date')!==$request->target_completed_date||
+                MonRun::seconds(mon_get($row,'expires_at'))<=microtime(true)||!hash_equals((string)mon_get($row,'sha256',''),MonRun::digest(mon_get($row,'source'))))return null;
+            $saved=$row->source;$bars=MonSwing::bars($saved->bars);$last=end($bars);
+            if(count($bars)<21||$last[0]!==$request->target_completed_date||mon_get($saved->origin,'price_basis')!==MonDetails::BASIS)return null;
+            MonRun::utc(mon_get($saved->origin,'checked_at'));return $saved;
+        }catch(Throwable $e){return null;}
+    }
+    private static function comparableBenchmark(array $stock,$benchmark): bool {
+        try{
+            $dates=array_column(array_slice(MonSwing::bars($stock),-21),0);if(count($dates)!==21)return false;
+            $values=MonSwing::benchmarkCloses($benchmark->bars);$end=end($dates);
+            $available=array_values(array_filter(array_keys($values),static function($date)use($end){return $date<=$end;}));
+            return array_slice($available,-21)===$dates;
+        }catch(Throwable $e){return false;}
+    }
     private function kisHeaders(string $tr,float $deadline,array $settings): array {
         return ['Content-Type: application/json','authorization: Bearer '.$this->collector->token($deadline,$settings),'appkey: '.$this->config->get('KIS_APP_KEY'),'appsecret: '.$this->config->get('KIS_APP_SECRET'),'tr_id: '.$tr,'custtype: P'];
     }
@@ -2574,19 +2639,31 @@ final class MonDaily {
         ksort($rows,SORT_STRING);$bars=array_values($rows);if(count($bars)<21)throw new MonFault('DETAIL_BENCHMARK_DATE_MISSING');return(object)['bars'=>$bars,'origin'=>(object)['source'=>'KIS','source_url'=>$url,'checked_at'=>mon_iso(),'complete_source_window'=>true]];
     }
     public function fetch($request,$cached,float $deadline,array $settings): stdClass {
-        $this->partialFields=null;$this->conflictDiagnostics=null;$this->conflictArtifact=null;$symbol=$request->symbol;$target=$request->target_completed_date;$errors=[];$stock=null;$bench=null;$bm=MonDetails::benchmark($symbol);
-        try{$stock=$this->kisStock($symbol,$target,$deadline,$settings,$cached);}catch(MonFault $e){$errors[]=$e->faultCode;}
-        if($stock===null){$map=mon_get($symbol->source_codes,'yahoo');$ticker=is_string($map)?$map:mon_get($map,'symbol');if(!is_string($ticker))throw new MonFault('YAHOO_MAPPING_MISSING');$stock=$this->yahoo($symbol,$ticker,$target,$deadline,$settings);}
+        $this->partialFields=null;$this->conflictDiagnostics=null;$this->conflictArtifact=null;$symbol=$request->symbol;$target=$request->target_completed_date;$errors=[];$bench=null;$bm=MonDetails::benchmark($symbol);
+        $stock=$this->checkpoint($request);$resumed=$stock!==null;$left=$this->http->remaining($deadline);
+        if($left<.05)throw new MonFault('BUDGET_EXHAUSTED');
+        // Reserve both the stock alternative and benchmark; the first provider cannot spend the whole symbol budget.
+        $stockDeadline=$resumed?$deadline:microtime(true)+max(.05,$left-min(3.0,max(.1,$left*.35)));
+        $kisDeadline=microtime(true)+max(.02,$this->http->remaining($stockDeadline)*.45);
+        if($stock===null)try{$stock=$this->kisStock($symbol,$target,min($stockDeadline,$kisDeadline),$settings,$cached);}catch(MonFault $e){$errors[]=$e->faultCode;}
+        if($stock===null){$map=mon_get($symbol->source_codes,'yahoo');$ticker=is_string($map)?$map:mon_get($map,'symbol');if(!is_string($ticker))throw new MonFault('YAHOO_MAPPING_MISSING');$stock=$this->yahoo($symbol,$ticker,$target,$stockDeadline,$settings);}
         if($cached instanceof stdClass){$comparison=MonBarConflict::compare($cached,$stock,$symbol);$this->conflictDiagnostics=$comparison['diagnostics'];
             if($comparison['conflict']){
                 $this->conflictArtifact=(object)['symbol_id'=>$symbol->symbol_id,'target_completed_date'=>$target,'previous_verified_snapshot'=>$cached,'conflicting_stock_source'=>$stock,'diagnostics'=>$comparison['diagnostics']];
                 throw new MonFault('DETAIL_PRICE_BASIS_CONFLICT');
             }$stock->bars=$comparison['bars'];}
-        $last=end($stock->bars);$this->partialFields=(object)['stock'=> (object)['last_close'=>$last[4],'bars_as_of'=>$last[0],'bar_count'=>count($stock->bars),'source_checked_at'=>$stock->origin->checked_at,'source'=>$stock->origin->source,'benchmark_status'=>'pending','current_signal_verified'=>false]];
-        if($cached instanceof stdClass&&$cached->metrics->bars_as_of===$target){$bench=(object)['bars'=>$cached->benchmark_bars,'origin'=>$cached->benchmark_origin];}
-        if($bench===null&&$bm['kis']!==null)try{$bench=$this->kisIndex($symbol,$target,$bm['kis'],$deadline,$settings);}catch(MonFault $e){$errors[]=$e->faultCode;}
-        if($bench===null)$bench=$this->yahoo($symbol,$bm['ticker'],$target,$deadline,$settings,true);
-        $s=MonDetails::snapshot($symbol,$stock->bars,$bench->bars,$bm['id'],$stock->origin,$bench->origin);$s->provider_attempt_errors=$errors;$this->partialFields->stock->benchmark_status='verified';return $s;
+        $saved=$this->checkpoint($request,$stock)!==null;
+        $last=end($stock->bars);$this->partialFields=(object)['stock'=> (object)['last_close'=>$last[4],'bars_as_of'=>$last[0],'bar_count'=>count($stock->bars),'source_checked_at'=>$stock->origin->checked_at,'source'=>$stock->origin->source,'benchmark_status'=>'pending','current_signal_verified'=>false],
+            'recovery'=>(object)['stock_checkpoint_saved'=>$saved,'stock_checkpoint_reused'=>$resumed,'resume_stage'=>'benchmark','missing_fields'=>['benchmark_same_21_sessions'],'provider_attempt_errors'=>$errors]];
+        if($cached instanceof stdClass&&mon_get($cached,'benchmark_id')===$bm['id']){
+            $candidate=(object)['bars'=>$cached->benchmark_bars,'origin'=>$cached->benchmark_origin];
+            if(self::comparableBenchmark($stock->bars,$candidate))$bench=$candidate;
+        }
+        if($bench===null&&$bm['kis']!==null){$kisDeadline=microtime(true)+max(.02,$this->http->remaining($deadline)*.45);
+            try{$bench=$this->kisIndex($symbol,$target,$bm['kis'],min($deadline,$kisDeadline),$settings);}catch(MonFault $e){$errors[]=$e->faultCode;}}
+        if($bench===null)try{$bench=$this->yahoo($symbol,$bm['ticker'],$target,$deadline,$settings,true);}catch(MonFault $e){$errors[]=$e->faultCode;$this->partialFields->recovery->provider_attempt_errors=$errors;throw $e;}
+        $s=MonDetails::snapshot($symbol,$stock->bars,$bench->bars,$bm['id'],$stock->origin,$bench->origin);$s->provider_attempt_errors=$errors;
+        $this->partialFields->stock->benchmark_status='verified';$this->partialFields->recovery->missing_fields=[];$this->partialFields->recovery->resume_stage='complete';return $s;
     }
 }
 
@@ -2599,7 +2676,7 @@ final class MonDetailWorker {
         foreach($list as $r){$previous=mon_get($responses,$r->symbol_id);$match=MonDetails::matching($r,$previous);
             if($match&&($previous->state!=='retry_wait'||(mon_get($previous,'retry_after',0)>$now&&$now<MonRun::seconds($r->deadline_at))))continue;
             $cached=MonDetails::cached($d,$r->symbol,$sourcePayload);$local=mon_get($cache,$r->symbol_id);if($local instanceof stdClass)try{$candidate=MonDetails::unpack($local);if($candidate->symbol_id!==$r->symbol_id||$candidate->criteria_version!==MonSwing::CRITERIA||$candidate->history_metadata->price_basis!==MonDetails::BASIS||!hash_equals($candidate->history_metadata->bars_sha256,MonRun::digest(MonSwing::bars($candidate->bars))))throw new MonFault('DETAIL_CACHE_INVALID');if($cached===null||$candidate->metrics->bars_as_of>$cached->metrics->bars_as_of)$cached=$candidate;}catch(MonFault $e){}
-            $attempts=$match?(int)mon_get($previous,'attempts',0):0;$snapshot=$cached;$error=null;$conflict=false;$state='done';$status='no_data';$conflictRef=null;$this->daily->partialFields=null;$this->daily->conflictDiagnostics=null;$this->daily->conflictArtifact=null;
+            $attempts=$match?(int)mon_get($previous,'attempts',0):0;$snapshot=$cached;$error=null;$conflict=false;$state='done';$status='no_data';$conflictRef=null;$retryDelay=30;$this->daily->partialFields=null;$this->daily->conflictDiagnostics=null;$this->daily->conflictArtifact=null;
             $reuse=$cached instanceof stdClass&&$cached->metrics->bars_as_of===$r->target_completed_date&&$r->target_verified&&!$r->force_refresh;
             if($reuse)$status='reused_current';
             elseif($now>=MonRun::seconds($r->deadline_at)){$error='DETAIL_WAIT_DEADLINE';$status=$cached?'previous_verified':'no_data';}
@@ -2610,15 +2687,16 @@ final class MonDetailWorker {
                         $snapshot=$cached;$status=$cached?'previous_verified':'no_data';$error='DETAIL_LATE_RESPONSE';
                     }
                 }catch(MonFault $e){$error=$e->faultCode;$conflict=$error==='DETAIL_PRICE_BASIS_CONFLICT';$status=$cached?'previous_verified':'no_data';
-                    if(!$conflict&&$attempts<2&&$now+30<MonRun::seconds($r->deadline_at))$state='retry_wait';}}
-            $now=(int)($this->clock)();if($state==='retry_wait'&&$now+30>=MonRun::seconds($r->deadline_at))$state='done';
+                    $retryDelay=max(30,min(300,$e->retryAfter));
+                    if(!$conflict&&MonDaily::retryable($error)&&$attempts<2&&$now+$retryDelay<MonRun::seconds($r->deadline_at))$state='retry_wait';}}
+            $now=(int)($this->clock)();if($state==='retry_wait'&&$now+$retryDelay>=MonRun::seconds($r->deadline_at))$state='done';
             if($this->daily->conflictArtifact instanceof stdClass){
                 $raw=MonRun::json($this->daily->conflictArtifact);$sha=hash('sha256',$raw);
                 try{MonArtifact::card($this->store,$sha,$this->daily->conflictArtifact);$conflictRef=(object)['sha256'=>$sha,'bytes'=>strlen($raw),'content_ref'=>'mon_card_read','diagnostic_count'=>count($this->daily->conflictDiagnostics)];}
                 catch(MonFault $e){$this->store->log('conflict_artifact_unavailable',['symbol_id'=>$r->symbol_id,'code'=>$e->faultCode]);}
             }
             $response=(object)['contract'=>MonDetails::CONTRACT,'request_id'=>$r->request_id,'request_hash'=>$r->request_hash,'symbol_id'=>$r->symbol_id,'state'=>$state,'data_status'=>$status,
-                'attempts'=>$attempts,'completed_at'=>mon_iso($now),'retry_after'=>$state==='retry_wait'?$now+30:null,'error'=>$error,'conflict'=>$conflict,'usable'=>$snapshot!==null&&!$conflict,
+                'attempts'=>$attempts,'completed_at'=>mon_iso($now),'retry_after'=>$state==='retry_wait'?$now+$retryDelay:null,'error'=>$error,'conflict'=>$conflict,'usable'=>$snapshot!==null&&!$conflict,
                 'bars_as_of'=>$snapshot?$snapshot->metrics->bars_as_of:null,'source_checked_at'=>$snapshot?$snapshot->history_metadata->checked_at:null,'partial_fields'=>$this->daily->partialFields,
                 'conflict_diagnostics'=>$this->daily->conflictDiagnostics===null?null:array_slice($this->daily->conflictDiagnostics,0,1),'conflict_artifact'=>$conflictRef,'payload'=>$snapshot?MonDetails::pack($snapshot):null];
             $responses->{$r->symbol_id}=$response;
@@ -2762,7 +2840,7 @@ final class MonExecution {
             $run=(object)['contract'=>self::CONTRACT,'run_context_id'=>$id,'received_at'=>$received,'first_control_at'=>MonBudget::iso($now),
                 'last_seen_at'=>MonBudget::iso($now),'mode'=>$mode,'extension_reason'=>$reason,'partial_timing'=>$partial,
                 'timing_basis'=>$partial?'server_first_control':'caller_reported_receipt_plus_server_monotonic',
-                'final_available'=>false,'save_status'=>'not_requested','events'=>[]];
+                'final_available'=>false,'new_analysis_complete'=>false,'analysis_origin'=>'none','save_status'=>'not_requested','events'=>[]];
             $run->immutable_sha256=MonRun::digest(MonRun::pick($run,['contract','run_context_id','received_at','first_control_at','mode','extension_reason','partial_timing','timing_basis']));
             $store->writePrivate('run-'.$id.'.php',$run);
             return self::resume($store,$id,$wall,$mono);
@@ -2782,15 +2860,72 @@ final class MonExecution {
             $run=self::$store->readPrivate('run-'.$id.'.php');$row=(object)['phase'=>$phase,'at'=>MonBudget::iso($budget->now()),'elapsed_seconds'=>round($budget->elapsed(),6)];
             foreach(['symbol_id','code','attempts','recovery','previous_data','result_impact','next_check','job_id','reported_at']as $k)if(isset($fields[$k]))$row->$k=$fields[$k];
             $run->events[]= $row; $run->events=array_slice($run->events,-100);$run->last_seen_at=$row->at;
-            foreach(['final_available','save_status','job_id','artifact_id']as $k)if(array_key_exists($k,$fields))$run->$k=$fields[$k];
+            foreach(['final_available','new_analysis_complete','analysis_origin','save_status','job_id','artifact_id']as $k)if(array_key_exists($k,$fields))$run->$k=$fields[$k];
             self::$store->writePrivate('run-'.$id.'.php',$run);$budget->run=$run;
         }finally{flock($lock,LOCK_UN);fclose($lock);}
     }
     public static function view(MonBudget $b): array {
+        $complete=mon_get($b->run,'new_analysis_complete',false)===true;
         return ['contract'=>self::CONTRACT,'run_context_id'=>$b->run->run_context_id,'timing'=>$b->timing(),
             'final_available'=>$b->run->final_available,'save_status'=>$b->run->save_status,
-            'fully_complete'=>$b->run->final_available&&in_array($b->run->save_status,['saved','no_change'],true),
+            'new_analysis_complete'=>$complete,'analysis_origin'=>mon_get($b->run,'analysis_origin','unmeasured'),
+            'fully_complete'=>$complete&&$b->run->final_available&&in_array($b->run->save_status,['saved','no_change'],true),
+            'next_action'=>$b->remaining('decision')<.05?'display_secured_result':($b->remaining('collection')<.05?'decide_secured_data':'collect_with_reserved_fallbacks'),
+            'remaining_seconds'=>['collection'=>round($b->remaining('collection'),3),'decision'=>round($b->remaining('decision'),3),'publication'=>round($b->remaining('publication'),3)],
             'job_id'=>mon_get($b->run,'job_id'),'artifact_id'=>mon_get($b->run,'artifact_id'),'events'=>$b->run->events];
+    }
+}
+
+/* Initial/failure view is a small, provisional projection. Never prepare indicators or select stocks here. */
+final class MonBootstrap {
+    const CONTRACT='MON-BOOTSTRAP-1.0';
+    public static function build($d,string $at,?string $sha=null,int $cursor=0,string $token=''): array {
+        MonRun::utc($at);$cards=[];$counts=['KR'=>0,'US'=>0,'JP'=>0];$periods=[];$asOf=null;$sourceError=null;
+        try{
+            if(!($d instanceof stdClass))throw new MonFault('MON_BOOTSTRAP_SOURCE_UNAVAILABLE');
+            MonRun::validate($d);$asOf=$d->analysis->as_of;$watch=MonRun::rows($d->watchlist->symbols);$periods=MonRun::periods($d,$at);
+            foreach($d->analysis->results as $r){
+                $sid=mon_get($r,'symbol_id');$symbol=$watch[$sid]??null;
+                if(!$symbol||!in_array(mon_get($r,'action'),['BUY_REVIEW','SELL_REVIEW','REFERENCE_REVIEW'],true)&&!$symbol->is_held)continue;
+                $country=$symbol->country;$current=mon_get($periods[$country]??null,'current_period',false);
+                $now=MonRun::current($r,$d->watchlist,$at,$current);$reason=(string)mon_get($r,'reason','');
+                $short=preg_replace('/^(.{0,100}).*/us','$1',$reason);
+                $cards[]=(object)['symbol_id'=>$sid,'country'=>$country,'name'=>$symbol->name,'currency'=>$symbol->currency,
+                    'stored_action'=>$r->action,'state'=>$r->action==='REFERENCE_REVIEW'||!$current?'previous_reference':'previous_decision_provisional',
+                    'readiness'=>$now->readiness==='ready'?'needs_confirmation':$now->readiness,'blockers'=>$now->blockers,
+                    'signal_as_of'=>mon_get($r,'signal_as_of',mon_get(mon_get($r,'swing_signal'),'bars_as_of')),
+                    'entry_plans'=>mon_get($r,'entry_plans',[]),'plan_valid_until'=>mon_get($r,'plan_valid_until'),
+                    'reason_excerpt'=>$short,'reason_sha256'=>hash('sha256',$reason)];$counts[$country]++;
+            }
+        }catch(Throwable $e){$cards=[];$counts=['KR'=>0,'US'=>0,'JP'=>0];$sourceError=$e instanceof MonFault?$e->faultCode:'MON_BOOTSTRAP_SOURCE_INVALID';}
+        $snapshot=MonRun::digest([$asOf,$sha,$at,$cards,$periods,$sourceError]);
+        if($cursor!==0&&($token===''||!hash_equals($snapshot,$token)))throw new MonFault('MON_BOOTSTRAP_CURSOR_INVALID');
+        $header=['contract'=>self::CONTRACT,'processor_version'=>MON_VERSION,'snapshot_token'=>$snapshot,'rendered_at'=>$at,'analysis_as_of'=>$asOf,
+            'source_blob_sha'=>$sha,'source_validation'=>'schema_only_previous_record','new_analysis_complete'=>false,'analysis_origin'=>'previous_saved_result','auto_selected'=>false,
+            'write_required'=>false,'save_status'=>'not_requested','state'=>$cards?'previous_saved_result':'needs_data','counts'=>$counts,'periods'=>array_values($periods),'source_error'=>$sourceError];
+        $pages=MonPaging::pages($header,$cards,8192);if(!isset($pages['pages'][$cursor]))throw new MonFault('MON_BOOTSTRAP_CURSOR_INVALID');
+        $page=$pages['pages'][$cursor];$page['page']=['index'=>$cursor,'total'=>count($pages['pages']),'next_cursor'=>$cursor+1<count($pages['pages'])?$cursor+1:null];
+        return $page;
+    }
+    public static function fromStore(MonStore $store,?string $at=null,int $cursor=0,string $token=''): array {
+        $at=$at??mon_iso();$seconds=MonRun::seconds($at);if($seconds>microtime(true)+5||$seconds<microtime(true)-60)throw new MonFault('MON_BOOTSTRAP_TIME_INVALID');
+        try{$d=$store->read('remote_cache.json');$sha=mon_get(mon_get($d,'_mon_cache'),'blob_sha');return self::build($d,$at,is_string($sha)?$sha:null,$cursor,$token);}
+        catch(MonFault $e){if(in_array($e->faultCode,['MON_BOOTSTRAP_CURSOR_INVALID','MON_BOOTSTRAP_TIME_INVALID'],true))throw $e;return self::build(null,$at);}
+    }
+    public static function recover($data,$request=null,?MonStore $store=null): array {
+        if(!($data instanceof stdClass)&&$request instanceof stdClass)try{
+            $c=mon_get($request,'context',mon_get(mon_get($request,'decision'),'view_context'));$sha=mon_get($c,'source_blob_sha');
+            if(is_string($sha))$data=mon_run_source($request,'source_json',$sha);
+        }catch(Throwable $ignore){}
+        if($data instanceof stdClass)return self::build($data,mon_iso());
+        if($store)try{return self::fromStore($store);}catch(Throwable $ignore){}
+        return self::build(null,mon_iso());
+    }
+    public static function summary(array $view,string $code): string {
+        $h=$view['header'];$text='처리 제한 · '.$code.' · 기존 판단 기준 '.($h['analysis_as_of']??'없음').' · 이전 기록 잠정 재표시';
+        if(!$view['cards'])return '자료 부족 · '.$text.' · 저장·현재 진입 여부 미확인';
+        foreach($view['cards']as $r)$text.="\n".(mon_get($r,'country','')).' '.mon_get($r,'name',mon_get($r,'symbol_id','원문 확인 필요')).' · '.mon_get($r,'state','원문 확인 필요').' · '.mon_get($r,'signal_as_of','미확인').' · '.mon_get($r,'readiness','needs_data');
+        return $text.' · 새 선정·원래 판단시각 갱신 없음';
     }
 }
 final class MonPaging {
@@ -3327,11 +3462,11 @@ final class MonPublication {
 
 function mon_run_web(string $api): int {
     header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store');$start=microtime(true);$mono=mon_monotonic();
-    $data=null;$publication=null;$publicationJobId=null;$publicationReceipt=null;$publicationAttempted=false;
+    $data=null;$request=null;$store=null;$publication=null;$publicationJobId=null;$publicationReceipt=null;$publicationAttempted=false;
     MonExecution::$active=null;MonExecution::$store=null;MonPreparation::$store=null;
     try {
         $controls=['mon_run_start','mon_run_status','mon_run_observe','mon_artifact_read','mon_card_read','mon_publish_queue','mon_publish_process'];
-        $legacy=['mon_view','mon_patch','mon_swing_prepare','mon_swing_migrate','mon_swing_select','mon_detail_request','mon_detail_requests','mon_detail_view','mon_detail_prepare','mon_detail_select'];
+        $legacy=['mon_bootstrap','mon_view','mon_patch','mon_swing_prepare','mon_swing_migrate','mon_swing_select','mon_detail_request','mon_detail_requests','mon_detail_view','mon_detail_prepare','mon_detail_select'];
         if(!in_array($api,array_merge($controls,$legacy,['mon_detail_finalize','mon_discovery_plan']),true))throw new MonFault('MON_API_UNKNOWN');
         if(($_SERVER['REQUEST_METHOD']??'GET')!=='POST')throw new MonFault('MON_METHOD_INVALID');
         if(strtolower(trim(explode(';',$_SERVER['CONTENT_TYPE']??'')[0]))!=='application/json')throw new MonFault('MON_CONTENT_TYPE_INVALID');
@@ -3344,7 +3479,7 @@ function mon_run_web(string $api): int {
         $store=new MonStore(getenv('MON_STATE_DIR')?:__DIR__);$cfg=new MonConfig(getenv('MON_ENV_FILE')?:'',$store->dir);$operator=null;
         if(in_array($api,$controls,true)){
             $operator=MonOperator::check($cfg);
-            if($api==='mon_run_start')$result=MonExecution::view(MonExecution::start($store,$request));
+            if($api==='mon_run_start'){$result=MonExecution::view(MonExecution::start($store,$request));$result['initial_result']=MonBootstrap::fromStore($store);}
             elseif($api==='mon_artifact_read')$result=MonArtifact::chunk($store,$request);
             elseif($api==='mon_card_read')$result=MonArtifact::card($store,(string)mon_get($request,'sha256',''));
             else {
@@ -3352,12 +3487,14 @@ function mon_run_web(string $api): int {
                 $publication=new MonPublication($store,new MonHttp(),$cfg);
                 if($api==='mon_run_status'){
                     $result=MonExecution::view($budget);$jobId=mon_get($budget->run,'job_id');
-                    if(is_string($jobId)){$receipt=$publication->receipt($publication->load($jobId));$result['publication']=$receipt;$result['save_status']=$receipt['save_status'];$result['fully_complete']=$receipt['fully_complete'];}
+                    if(is_string($jobId)){$receipt=$publication->receipt($publication->load($jobId));$result['publication']=$receipt;$result['save_status']=$receipt['save_status'];$result['fully_complete']=$result['new_analysis_complete']&&$receipt['fully_complete'];}
                 }elseif($api==='mon_run_observe'){
                     $event=mon_get($request,'event');
                     if(!in_array($event,['initial_display_reported','intermediate_display_reported','final_display_reported','access_unconfirmed','deadline_missed'],true))throw new MonFault('MON_RUN_EVENT_INVALID');
                     $fields=(array)mon_get($request,'fields',new stdClass());
                     foreach($fields as $key=>$value)if(!is_scalar($value)&&$value!==null||is_string($value)&&strlen($value)>1000)throw new MonFault('MON_RUN_EVENT_INVALID');
+                    // Display reports cannot turn a reused table into server-confirmed new analysis.
+                    $fields=array_intersect_key($fields,array_flip(['symbol_id','code','attempts','recovery','previous_data','result_impact','next_check','reported_at']));
                     MonExecution::event($event,$fields);$result=MonExecution::view($budget);
                 }elseif($api==='mon_publish_queue'){
                     $result=$publication->enqueue((string)mon_get($request,'artifact_id',''),(string)mon_get($request,'expected_head',''),$budget,$operator);
@@ -3383,7 +3520,8 @@ function mon_run_web(string $api): int {
                     ($select&&!($api==='mon_detail_finalize'&&is_string(mon_get(MonExecution::$active->run,'artifact_id')))))MonExecution::$active->guard('decision');
             }
             $data=mon_run_source($request,'source_json',$c->source_blob_sha);
-            if($api==='mon_detail_request')$result=MonDetails::register($data,$context,mon_get($request,'item'));
+            if($api==='mon_bootstrap')$result=MonBootstrap::build($data,$c->rendered_at,$c->source_blob_sha);
+            elseif($api==='mon_detail_request')$result=MonDetails::register($data,$context,mon_get($request,'item'));
             elseif($api==='mon_detail_requests')$result=MonDetails::registerMany($data,$context,mon_get($request,'items'));
             elseif($api==='mon_discovery_plan')$result=MonDiscovery::plan($data,$context,mon_get($request,'items'));
             elseif($api==='mon_detail_view')$result=MonDetails::view($data,$context);
@@ -3432,7 +3570,7 @@ function mon_run_web(string $api): int {
                     'received_at'=>MonExecution::$active->run->received_at,'prepared_fingerprint'=>mon_get($request->decision,'prepared_fingerprint')]);
                 $mode=mon_get($request,'publish_mode','manual');if(!in_array($mode,['manual','queue','inline'],true))throw new MonFault('MON_PUBLICATION_MODE_INVALID');
                 $result['save_status']='not_requested';
-                MonExecution::event('final_prepared',['final_available'=>true,'save_status'=>'not_requested','artifact_id'=>$result['manifest']['artifact_id']]);
+                MonExecution::event('final_prepared',['final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'secured_data_decision','save_status'=>'not_requested','artifact_id'=>$result['manifest']['artifact_id']]);
                 if($mode!=='manual'){
                     $publication=new MonPublication($store,new MonHttp(),$cfg);$receipt=$publication->enqueue($result['manifest']['artifact_id'],(string)mon_get($request,'expected_head',''),MonExecution::$active,$operator);
                     $publicationJobId=$receipt['job_id'];$publicationReceipt=$receipt;
@@ -3443,7 +3581,10 @@ function mon_run_web(string $api): int {
                     MonExecution::event('publication_observed',['save_status'=>$receipt['save_status'],'job_id'=>$receipt['job_id']]);
                 }
                 $result['files']=[];$result['large_body_in_model']=false;
-            }elseif($api==='mon_detail_finalize'&&!$result['write_required']&&MonExecution::$active&&$result['status']==='no_change')MonExecution::event('final_reused',['final_available'=>true,'save_status'=>'no_change']);
+            }elseif($api==='mon_detail_finalize'&&MonExecution::$active){
+                if(!$result['write_required']&&$result['status']==='no_change')MonExecution::event('final_reused',['final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'revalidated_unchanged_decision','save_status'=>'no_change']);
+                elseif($result['write_required'])MonExecution::event('final_inline_prepared',['final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'secured_data_decision','save_status'=>'not_requested']);
+            }
             if(mon_get($request,'response_mode','inline')==='manifest'){
                 MonArtifact::detachCards($store,$result,static function()use($cfg,&$operator){$operator=$operator??MonOperator::check($cfg);});
             }
@@ -3468,24 +3609,36 @@ function mon_run_web(string $api): int {
         else http_response_code(400);
         if($publication&&is_string($publicationJobId))try{$publicationReceipt=$publication->receipt($publication->load($publicationJobId));}catch(Throwable $ignore){if($publicationAttempted)$publicationReceipt=['save_status'=>'unknown','job_id'=>$publicationJobId,'fully_complete'=>false];}
         try{MonExecution::event('failure',['code'=>$code,'result_impact'=>'publication_receipt_authoritative_no_substitute_selection']);}catch(Throwable $ignore){}
+        $fallback=MonBootstrap::recover($data,$request,$store);
         echo mon_json(['ok'=>false,'api'=>$api,'processor_version'=>MON_VERSION,'error_code'=>$code,'write_required'=>false,
             'remote_written'=>mon_get($publicationReceipt,'save_status')==='saved'?true:(in_array(mon_get($publicationReceipt,'save_status'),['publishing','unknown'],true)?null:false),
-            'publication'=>$publicationReceipt,'fallback_summary'=>mon_failure_summary($data,$code),'handler_seconds'=>mon_monotonic()-$mono,
+            'publication'=>$publicationReceipt,'fallback_result'=>$fallback,'new_analysis_complete'=>MonExecution::$active?mon_get(MonExecution::$active->run,'new_analysis_complete',false):false,'fallback_summary'=>MonBootstrap::summary($fallback,$code),'handler_seconds'=>mon_monotonic()-$mono,
             'run_timing'=>MonExecution::$active?MonExecution::$active->timing():['partial_timing'=>true]],false);return 1;
     }catch(Throwable $e){
+        $fallback=MonBootstrap::recover($data,$request,$store);
         http_response_code(500);echo mon_json(['ok'=>false,'api'=>$api,'processor_version'=>MON_VERSION,'error_code'=>'MON_HANDLER_INTERNAL_ERROR','write_required'=>false,'remote_written'=>$publicationAttempted?null:false,
-            'publication'=>$publicationReceipt,'fallback_summary'=>mon_failure_summary($data,'MON_HANDLER_INTERNAL_ERROR')],false);return 1;
+            'publication'=>$publicationReceipt,'fallback_result'=>$fallback,'new_analysis_complete'=>MonExecution::$active?mon_get(MonExecution::$active->run,'new_analysis_complete',false):false,'fallback_summary'=>MonBootstrap::summary($fallback,'MON_HANDLER_INTERNAL_ERROR')],false);return 1;
     }
 }
 
 function mon_failure_summary($data,string $code): string {
-    if($data instanceof stdClass)try{MonRun::validate($data);MonRun::verifyFacts($data,MonRun::payload($data));return MonRun::render($data,mon_iso(),['새 작업 실패 '.$code.' · 검증된 이전 판단과 원래 판단시각 표시']);}catch(Throwable $ignore){}
-    return '자료 부족 · 새 판단을 확정하지 못했습니다. 오류: '.$code.' · 저장·현재 진입 가능 여부는 확인되지 않았습니다.';
+    return MonBootstrap::summary(MonBootstrap::recover($data),$code);
 }
 
 function mon_web(): int {
     if (isset($_GET['api'])) return mon_run_web((string)$_GET['api']);
     header('Cache-Control: no-store');
+    if(($_GET['view']??'')==='bootstrap'){
+        header('Content-Type: application/json; charset=utf-8');
+        try{
+            if(($_SERVER['REQUEST_METHOD']??'GET')!=='GET')throw new MonFault('MON_METHOD_INVALID');
+            $cursor=(string)($_GET['cursor']??'0');if(!preg_match('/^\d{1,3}$/',$cursor))throw new MonFault('MON_BOOTSTRAP_CURSOR_INVALID');
+            $store=new MonStore(getenv('MON_STATE_DIR')?:__DIR__);
+            $result=MonBootstrap::fromStore($store,isset($_GET['at'])?(string)$_GET['at']:null,(int)$cursor,(string)($_GET['since']??''));
+            echo mon_json(['ok'=>true,'processor_version'=>MON_VERSION,'result'=>$result],false);return 0;
+        }catch(MonFault $e){http_response_code($e->faultCode==='MON_METHOD_INVALID'?405:400);if($e->faultCode==='MON_METHOD_INVALID')header('Allow: GET');echo mon_json(['ok'=>false,'error_code'=>$e->faultCode],false);return 1;}
+        catch(Throwable $e){http_response_code(500);echo mon_json(['ok'=>false,'error_code'=>'MON_BOOTSTRAP_INTERNAL_ERROR'],false);return 1;}
+    }
     if(($_GET['view']??'')==='progress'){
         header('Content-Type: application/json; charset=utf-8');
         try{
