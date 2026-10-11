@@ -79,7 +79,7 @@ with tempfile.TemporaryDirectory(prefix='mon-progress-http-') as tmp:
         status, state = request('?view=status')
         check('ordinary web status includes progressive counts without starting a process', status == 200 and state['data']['detail_progress']['counts']['done'] == 1 and not state['data']['running'])
         status, html = request(html=True)
-        check('HTML contains per-symbol list and version with no credentials', status == 200 and 'v1.5.0' in html and 'id="detail-cards"' in html and 'fixture-secret' not in html)
+        check('HTML contains per-symbol list and version with no credentials', status == 200 and '<span>v' in html and 'id="detail-cards"' in html and 'fixture-secret' not in html)
         html_path = ROOT/'tests/progress_ui_fixture.html'
         html_path.write_text(html)
         check('progress access creates no daemon status or publication file', not (web/'mon_status.json').exists() and not (web/'mon.log').exists())

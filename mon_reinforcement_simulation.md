@@ -1,6 +1,8 @@
 # MON 보강 설계 시뮬레이션 보고
 
-2026-10-11 KST · D1.0 · 합성 자료·가상 시간·네트워크 사용 없음
+2026-10-11 KST · D1.0 설계 모델의 이력 · 합성 자료·가상 시간·네트워크 사용 없음
+
+후속 D1.1은 mon.php1.6.0·지시문v4.4에 구현했다. 실제 수정 코드의105건 변경 검증은 [구현 보고](mon_reinforcement_implementation.md)에 별도 기록했다. 아래 가상 시간·성적은 당시 모델 결과이며 운영 성적으로 바꾸거나 다시 합산하지 않는다.
 
 ## 실행 결과
 
@@ -116,7 +118,7 @@ S10은 취소 불가 호출이98초에 시작해178초에 끝난다. 마감을 �
 
 ## 실제 PHP7.4 토큰 재현
 
-현 mon.php1.5.0에 합성 문서를 전달했다. 국가 순서·동등 UTC 시각·중복 중요 ID가 다른 원문 토큰은 불일치했다. MonRun::context 적용 후 일치했고 실제 소스 변경은 다른 토큰이었다. 네트워크·실제 시장 자료·수집기 가동은 사용하지 않았다.
+당시 mon.php1.5.0에 합성 문서를 전달했다. 국가 순서·동등 UTC 시각·중복 중요 ID가 다른 원문 토큰은 불일치했다. MonRun::context 적용 후 일치했고 실제 소스 변경은 다른 토큰이었다. 네트워크·실제 시장 자료·수집기 가동은 사용하지 않았다. 이 결과는 [v1.5 원시 기록](tests/mon_reinforcement_token_probe.json)에 보존했다. v1.6에서는 원문 문맥도 내부 정규화하므로 두 토큰이 같아야 한다. [v1.6 진단](tests/mon_reinforcement_token_probe_v16.json)과 실제 변경 시험에서 확인했다.
 
 ## 재현
 
@@ -124,7 +126,7 @@ S10은 취소 불가 호출이98초에 시작해178초에 끝난다. 마감을 �
 
 ```text
 python3 tests/mon_reinforcement_simulation.py
-php tests/mon_reinforcement_token_probe.php
+php tests/mon_reinforcement_token_probe.php [선택한_이전_mon.php_경로]
 ```
 
 실제 토큰 재현 런타임은PHP7.4다. 1차50사례 원시 기록은 별도 보존했다. 최종 시뮬레이터는66사례와두 고정 seed를 재현한다. 로컬 실행시간은 장비와 시점에 따라 달라진다.
@@ -133,4 +135,4 @@ php tests/mon_reinforcement_token_probe.php
 
 상태·캐시·마감·게시 프로토콜을 가상화했다. 현재가와 기간은 합성 입력이다. RS/MACD 공식은 기존 검증 입력을 가정했으며 실제 공급자 성공·NAS 성능·인증·외부 도구 취소·Git 병행 쓰기·ChatGPT 선정 품질을 확인하지 않았다.
 
-운영 구현·NAS 배포는 수행하지 않았다. [최종 설계](mon_reinforcement_design.md)의 P0~P3 순서와 실환경 합격 조건을 따른다.
+D1.0 당시 운영 구현·NAS 배포는 수행하지 않았다. 후속 D1.1에서 코드·지시문·wiki 구현과 로컬 변경 검증을 완료했다. NAS 배포·실가동은 별도이며 [최종 설계](mon_reinforcement_design.md)의 실환경 합격 조건을 따른다.

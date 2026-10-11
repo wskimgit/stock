@@ -1,0 +1,132 @@
+{
+  "kind": "actual_local_php_http_and_ui_tests",
+  "processor_version": "1.6.0",
+  "case_count": 30,
+  "passed": 30,
+  "failed": 0,
+  "elapsed_seconds": 1.0021818050008733,
+  "external_requests": 0,
+  "orders": 0,
+  "cases": [
+    {
+      "case": "unauthenticated run state is rejected",
+      "pass": true
+    },
+    {
+      "case": "rejected action still returns a marked result",
+      "pass": true
+    },
+    {
+      "case": "authenticated run records original reception",
+      "pass": true
+    },
+    {
+      "case": "same run start is idempotent",
+      "pass": true
+    },
+    {
+      "case": "restart cannot move original reception",
+      "pass": true
+    },
+    {
+      "case": "actual HTTP preparation succeeds",
+      "pass": true
+    },
+    {
+      "case": "preparation is split into bounded exact UTF-8 pages",
+      "pass": true
+    },
+    {
+      "case": "one HTTP finalization creates a fixed two-file manifest",
+      "pass": true
+    },
+    {
+      "case": "large source and encoded bodies are absent from final response",
+      "pass": true
+    },
+    {
+      "case": "final availability is separate from saving",
+      "pass": true
+    },
+    {
+      "case": "display is refreshed separately from the immutable file",
+      "pass": true
+    },
+    {
+      "case": "identical final replay reuses its sealed artifact",
+      "pass": true
+    },
+    {
+      "case": "a changed sealed decision is rejected",
+      "pass": true
+    },
+    {
+      "case": "invalid output modes do not silently stage files",
+      "pass": true
+    },
+    {
+      "case": "real HTTP chunks preserve exact UTF-8 file bytes",
+      "pass": true
+    },
+    {
+      "case": "arbitrary private paths are rejected",
+      "pass": true
+    },
+    {
+      "case": "private artifact reads require operator authentication",
+      "pass": true
+    },
+    {
+      "case": "queue acknowledgement follows a durable protected journal",
+      "pass": true
+    },
+    {
+      "case": "queue replay does not create another job",
+      "pass": true
+    },
+    {
+      "case": "queued work is never labelled fully complete",
+      "pass": true
+    },
+    {
+      "case": "protected state cannot execute as public JSON",
+      "pass": true
+    },
+    {
+      "case": "progress page 1 fits 4 KiB",
+      "pass": true
+    },
+    {
+      "case": "progress page 2 fits 4 KiB",
+      "pass": true
+    },
+    {
+      "case": "progress page 3 fits 4 KiB",
+      "pass": true
+    },
+    {
+      "case": "progress page 4 fits 4 KiB",
+      "pass": true
+    },
+    {
+      "case": "HTTP pagination covers all 30 symbols exactly once",
+      "pass": true
+    },
+    {
+      "case": "HTTP cursor rejects mixed snapshots",
+      "pass": true
+    },
+    {
+      "case": "rendered web UI JavaScript parses",
+      "pass": true
+    },
+    {
+      "case": "UI distinguishes saved from unknown and appends next-page rows",
+      "pass": true
+    },
+    {
+      "case": "test did not change live result files or send publication requests",
+      "pass": true
+    }
+  ]
+}

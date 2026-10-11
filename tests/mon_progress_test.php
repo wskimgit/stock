@@ -18,7 +18,7 @@ try {
     check_progress('duplicate symbol within bulk call is rejected without undoing valid items',$bulk['requests'][3]['error']==='DETAIL_SYMBOL_DUPLICATE'&&$bulk['validation']['collection_preserved']&&$bulk['validation']['analysis_preserved']);
     $registered=mon_decode($bulk['files'][0]['content']);$bulkReuse=MonDetails::registerMany($registered,$ctx,[$items[0],$items[1]]);
     check_progress('bulk re-transmission reuses IDs and returns no repeated full file',!$bulkReuse['write_required']&&$bulkReuse['files']===[]);
-    check_progress('PHP 7.4-compatible default caps are bounded',MON_VERSION==='1.5.0'&&$settings['detail_symbol_budget_seconds']===8.0&&$settings['detail_jobs_per_tick']===3);
+    check_progress('PHP 7.4-compatible default caps are bounded',version_compare(MON_VERSION,'1.5.0','>=')&&$settings['detail_symbol_budget_seconds']===8.0&&$settings['detail_jobs_per_tick']===3);
     $settings['request_spacing_seconds']=0;$dir=progress_dir();$store=new MonStore($dir);$cfg=progress_test_config($dir);
     $before=MonRun::json($d->analysis);$trace=[];$clock=microtime(true);
     $work=worker_progress($d,$store,$cfg)->processAvailable($d,microtime(true)+5,$settings,static function($current,$job)use(&$trace){$trace[]=MonProgress::build($current,time())['counts'];});

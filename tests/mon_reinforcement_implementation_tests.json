@@ -1,0 +1,318 @@
+{
+    "kind": "actual_modified_php_offline_tests",
+    "processor_version": "1.6.0",
+    "php_version": "7.4.33",
+    "case_count": 75,
+    "passed": 75,
+    "failed": 0,
+    "elapsed_seconds": 2.3187642890043207,
+    "metrics": {
+        "same_input_numerical_builds": 1,
+        "oversized_card_original_bytes": 168053,
+        "progress_pages_for_30_requests": 4
+    },
+    "external_requests": 0,
+    "orders": 0,
+    "cases": [
+        {
+            "case": "PHP 7.4 runtime and native gzip",
+            "pass": true
+        },
+        {
+            "case": "equivalent raw contexts have one normalized token",
+            "pass": true
+        },
+        {
+            "case": "real source change invalidates token",
+            "pass": true
+        },
+        {
+            "case": "run restart does not reset the original start",
+            "pass": true
+        },
+        {
+            "case": "monotonic elapsed survives wall-clock rewind",
+            "pass": true
+        },
+        {
+            "case": "normal phase budgets are absolute 100 110 120 300",
+            "pass": true
+        },
+        {
+            "case": "extended recovery ends at original start plus 300",
+            "pass": true
+        },
+        {
+            "case": "missing receipt timestamp is explicitly partial",
+            "pass": true
+        },
+        {
+            "case": "detail requests share the run collection cutoff",
+            "pass": true
+        },
+        {
+            "case": "expired collection refuses a fresh detail request",
+            "pass": true
+        },
+        {
+            "case": "one numerical prepare serves prepare and unified finalize",
+            "pass": true
+        },
+        {
+            "case": "quote-only collection update reuses numerical prepare",
+            "pass": true
+        },
+        {
+            "case": "changed OHLCV invalidates numerical cache",
+            "pass": true
+        },
+        {
+            "case": "mapping and tick-rule change invalidates cache",
+            "pass": true
+        },
+        {
+            "case": "calendar target change invalidates cache",
+            "pass": true
+        },
+        {
+            "case": "persistent prepare cache survives memory reset",
+            "pass": true
+        },
+        {
+            "case": "cached source verification time stays original",
+            "pass": true
+        },
+        {
+            "case": "final confirmation ready",
+            "pass": true
+        },
+        {
+            "case": "final confirmation outside_zone",
+            "pass": true
+        },
+        {
+            "case": "final confirmation stale_price",
+            "pass": true
+        },
+        {
+            "case": "final confirmation stale_trading",
+            "pass": true
+        },
+        {
+            "case": "final confirmation pending_risk",
+            "pass": true
+        },
+        {
+            "case": "final confirmation adverse",
+            "pass": true
+        },
+        {
+            "case": "old corporate verification never becomes current",
+            "pass": true
+        },
+        {
+            "case": "symbol display uses source identity map",
+            "pass": true
+        },
+        {
+            "case": "per-country combined selection limit stays three",
+            "pass": true
+        },
+        {
+            "case": "unverified previous source cannot fill references",
+            "pass": true
+        },
+        {
+            "case": "unchanged decision and facts skip another commit",
+            "pass": true
+        },
+        {
+            "case": "new primary evidence is a meaningful change",
+            "pass": true
+        },
+        {
+            "case": "UTF-8 pages preserve oversized cards without truncation",
+            "pass": true
+        },
+        {
+            "case": "oversized shared header becomes a lossless artifact",
+            "pass": true
+        },
+        {
+            "case": "30 progress requests are paged below 4 KiB",
+            "pass": true
+        },
+        {
+            "case": "same progress token omits duplicate cards",
+            "pass": true
+        },
+        {
+            "case": "progress cursor cannot mix a different snapshot",
+            "pass": true
+        },
+        {
+            "case": "fair requests interleave countries and new previous groups",
+            "pass": true
+        },
+        {
+            "case": "unproven identity metadata does not count as new discovery",
+            "pass": true
+        },
+        {
+            "case": "operator credential is required for a write",
+            "pass": true
+        },
+        {
+            "case": "operator token and trusted server identity work without leaking tokens",
+            "pass": true
+        },
+        {
+            "case": "protected artifacts cannot be interpreted as public JSON",
+            "pass": true
+        },
+        {
+            "case": "UTF-8 file chunks reassemble exact Git and SHA256 bytes",
+            "pass": true
+        },
+        {
+            "case": "artifact API rejects arbitrary paths and ranges",
+            "pass": true
+        },
+        {
+            "case": "replaced artifact bytes are rejected before publishing",
+            "pass": true
+        },
+        {
+            "case": "same pair and expected head reuse one durable job",
+            "pass": true
+        },
+        {
+            "case": "queue write failure never acknowledges queued",
+            "pass": true
+        },
+        {
+            "case": "file-pair publication is one verified ref update",
+            "pass": true
+        },
+        {
+            "case": "lost ref acknowledgement confirms saved without another commit",
+            "pass": true
+        },
+        {
+            "case": "lost ack and failed confirmation remain unknown",
+            "pass": true
+        },
+        {
+            "case": "crash after one blob leaves the old public pair then resumes",
+            "pass": true
+        },
+        {
+            "case": "collection race merges once and preserves decision time",
+            "pass": true
+        },
+        {
+            "case": "concurrent analysis is never overwritten",
+            "pass": true
+        },
+        {
+            "case": "late detail merge is marked pending analysis",
+            "pass": true
+        },
+        {
+            "case": "deadline expires unsent work without fake saved",
+            "pass": true
+        },
+        {
+            "case": "job cannot be moved to another run to reset expiry",
+            "pass": true
+        },
+        {
+            "case": "journal mutation is detected before a network request",
+            "pass": true
+        },
+        {
+            "case": "publication scope cannot be changed by configuration",
+            "pass": true
+        },
+        {
+            "case": "close numeric difference from a different record remains conflict",
+            "pass": true
+        },
+        {
+            "case": "same immutable record permits proven display rounding only",
+            "pass": true
+        },
+        {
+            "case": "volume difference and adjustment difference stay conflicts",
+            "pass": true
+        },
+        {
+            "case": "one HTTP deadline cannot grow after a wall-clock rewind",
+            "pass": true
+        },
+        {
+            "case": "publication restart with a rewound clock fails without sending",
+            "pass": true
+        },
+        {
+            "case": "publication clock uses monotonic elapsed through a network wait",
+            "pass": true
+        },
+        {
+            "case": "recomputed response rejects changed technical",
+            "pass": true
+        },
+        {
+            "case": "recomputed response rejects changed entry_plans",
+            "pass": true
+        },
+        {
+            "case": "recomputed response rejects changed history_metadata",
+            "pass": true
+        },
+        {
+            "case": "all source-conflict fields remain available after sixteen rows",
+            "pass": true
+        },
+        {
+            "case": "a damaged publication job does not block another queued pair",
+            "pass": true
+        },
+        {
+            "case": "discovery and registration respect requested countries",
+            "pass": true
+        },
+        {
+            "case": "a newly completed market day requires fresh preparation",
+            "pass": true
+        },
+        {
+            "case": "server first-seen metadata stays fixed on an identical request replay",
+            "pass": true
+        },
+        {
+            "case": "a permanent new-origin flag cannot relabel a known candidate as new",
+            "pass": true
+        },
+        {
+            "case": "legacy request replay remains compatible without new server metadata",
+            "pass": true
+        },
+        {
+            "case": "discovery counts unique first-seen identities and rejects a wrong name",
+            "pass": true
+        },
+        {
+            "case": "nested oversized card bodies become authenticated lossless references",
+            "pass": true
+        },
+        {
+            "case": "operation failure still provides a marked result without automatic selection",
+            "pass": true
+        },
+        {
+            "case": "the existing daemon resumes a sealed pair without creating another service",
+            "pass": true
+        }
+    ]
+}
