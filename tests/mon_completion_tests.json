@@ -1,0 +1,128 @@
+{
+    "version": "1.8.0",
+    "php": "7.4.33",
+    "tests": 22,
+    "passed": 22,
+    "failed": 0,
+    "wall_seconds": 0.582046,
+    "simulation": {
+        "late_start": {
+            "elapsed": 700,
+            "reference": 120,
+            "continues": true
+        },
+        "late_complete": {
+            "elapsed": 700.0,
+            "reference": 120,
+            "outcome": "complete",
+            "overtime": 580.0
+        },
+        "detail_recovery": {
+            "attempts": 4,
+            "states": [
+                "retry_wait",
+                "retry_wait",
+                "retry_wait",
+                "done"
+            ],
+            "attempt_excess": 2
+        },
+        "publication_recovery": {
+            "failures": 4,
+            "final": "saved",
+            "public_ref_updates": 1
+        }
+    },
+    "external_requests": 0,
+    "orders": 0,
+    "cases": [
+        {
+            "case": "all four reference times may be exceeded without cancelling the run",
+            "pass": true
+        },
+        {
+            "case": "prepare and immutable final decision work after the original decision reference",
+            "pass": true
+        },
+        {
+            "case": "ninety HTTP sends exceed data and total references without losing any send",
+            "pass": true
+        },
+        {
+            "case": "more than one hundred external reports remain idempotent and counted",
+            "pass": true
+        },
+        {
+            "case": "an external duration over three hundred seconds is preserved exactly",
+            "pass": true
+        },
+        {
+            "case": "deadline finish checkpoints pending work instead of expiring it",
+            "pass": true
+        },
+        {
+            "case": "confirmed completion after seven hundred seconds records completion and overtime",
+            "pass": true
+        },
+        {
+            "case": "repeated final finish keeps one sample, one timestamp and one revision",
+            "pass": true
+        },
+        {
+            "case": "four detail attempts recover without a deadline or attempt-limit terminal state",
+            "pass": true
+        },
+        {
+            "case": "old attempt-limit detail responses become resumable after upgrade",
+            "pass": true
+        },
+        {
+            "case": "an expired local work slice preserves the request and reports no attempt",
+            "pass": true
+        },
+        {
+            "case": "progress remains collecting after the reference and pagination tokens ignore clock-only changes",
+            "pass": true
+        },
+        {
+            "case": "a transient publication failure remains queued through four failures and then saves",
+            "pass": true
+        },
+        {
+            "case": "lost ref acknowledgement and failed confirmation resume with reads and no duplicate ref mutation",
+            "pass": true
+        },
+        {
+            "case": "more than one concurrent collection rebase preserves the fixed decision",
+            "pass": true
+        },
+        {
+            "case": "old expired publication journals resume instead of expiring again",
+            "pass": true
+        },
+        {
+            "case": "resource deferral neither expires publication nor creates a public mutation",
+            "pass": true
+        },
+        {
+            "case": "a new run checkpoints an old pending run without marking it abandoned or terminal",
+            "pass": true
+        },
+        {
+            "case": "next references grow beyond three hundred seconds from observed overtime while the current reference remains fixed",
+            "pass": true
+        },
+        {
+            "case": "explicit user interruption still stops work and cannot be relabeled complete",
+            "pass": true
+        },
+        {
+            "case": "per-request socket timeouts and daemon load limits remain independent of advisory totals",
+            "pass": true
+        },
+        {
+            "case": "a hundred distinct stage metrics aggregate without stopping work or losing counts",
+            "pass": true
+        }
+    ]
+}

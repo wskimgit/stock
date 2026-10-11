@@ -67,9 +67,17 @@ with tempfile.TemporaryDirectory(prefix="mon-adaptive-http-") as temp:
             check("statistics control endpoint requires POST", status == 405 and out["error_code"] == "MON_METHOD_INVALID")
             check("unauthorized reads create no run or start grant", not list(state.glob("mon_run-*.php")) and not (state / "mon_manual_start.php").exists())
 
-            snapshot = json.loads((ROOT / "mon_execution_stats.json").read_text())
+            snapshot = json.loads((ROOT / "tests/mon_completion_observed_fixture.json").read_text())
+            # Freeze the two migration observations independently of changing live history;
+            # relocate their timestamps so the real endpoint's thirty-day window is testable.
+            newest = max(datetime.fromisoformat(row["finished_at"].replace("Z", "+00:00")) for row in snapshot["samples"])
+            offset = datetime.now(timezone.utc) - timedelta(seconds=10) - newest
+            for row in snapshot["samples"]:
+                for key in ("received_at", "finished_at"):
+                    row[key] = (datetime.fromisoformat(row[key].replace("Z", "+00:00")) + offset).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+            snapshot = json.loads(subprocess.check_output([PHP, "-n", "-r", f"require '{ROOT}/mon.php'; echo MonRun::json(MonRunStatistics::seal(json_decode(stream_get_contents(STDIN))));"], input=json.dumps(snapshot).encode(), env=env))
             status, out = request("mon_run_statistics", {"statistics_snapshot": snapshot, "export": True})
-            check("validated observed history imports and proposes 230 seconds", status == 200 and out["result"]["next_policy"]["limits"]["publication"] == 230)
+            check("validated observed history imports and proposes 370 advisory seconds", status == 200 and out["result"]["next_policy"]["limits"]["publication"] == 370)
             first_sha = out["result"]["statistics_snapshot"]["sha256"]
             status, out = request("mon_run_statistics", {"statistics_snapshot": snapshot, "export": True})
             check("repeated import preserves sample and checksum", status == 200 and out["result"]["statistics_snapshot"]["sha256"] == first_sha)
@@ -79,7 +87,7 @@ with tempfile.TemporaryDirectory(prefix="mon-adaptive-http-") as temp:
             result = out["result"]
             run_id = result["run_context_id"]
             frozen = result["adaptive_policy"]
-            check("auto start freezes 210/220/230 limits and source generation", status == 200 and frozen["limits"] == {"collection": 210, "decision": 220, "publication": 230, "recovery": 300} and frozen["statistics_generation"] >= 1)
+            check("auto start freezes 350/360/370 references and source generation", status == 200 and frozen["limits"] == {"collection": 350, "decision": 360, "publication": 370, "recovery": 370} and frozen["statistics_generation"] >= 1)
             check("start measures its handler and returns a small fallback", result["operations"]["handler/control"]["count"] >= 1 and result["initial_result"]["header"]["state"] == "needs_data")
             status, out = request("mon_run_start", {"run_id": "http-adaptive", "received_at": received, "mode": "extended", "extension_reason": "late"})
             check("same run cannot change frozen mode", status == 400 and out["error_code"] == "MON_RUN_START_IMMUTABLE")
@@ -120,12 +128,12 @@ with tempfile.TemporaryDirectory(prefix="mon-adaptive-http-") as temp:
             status, out = request("mon_run_statistics", {"export": True})
             check("invalid import leaves valid stored statistics intact", status == 200 and out["result"]["statistics_snapshot"]["sha256"] == digest)
             status, out = request("mon_run_start", {"run_id": "http-next", "received_at": iso()})
-            check("subsequent run chooses a new policy from persisted statistics", status == 200 and out["result"]["adaptive_policy"]["statistics_sha256"] == digest and out["result"]["adaptive_policy"]["limits"]["publication"] == 230)
+            check("subsequent run chooses a new policy from persisted statistics", status == 200 and out["result"]["adaptive_policy"]["statistics_sha256"] == digest and out["result"]["adaptive_policy"]["limits"]["publication"] == 370)
             check("all adaptive operations leave manual start grants and live stock files absent", not (state / "mon_manual_start.php").exists() and not (state / "mon_daemon.lock").exists() and not (web / "mon_data.json").exists() and not (web / "mon_result.md").exists())
         finally:
             server.terminate()
             server.wait(timeout=5)
 
 failed = sum(not case["pass"] for case in cases)
-print(json.dumps({"version": "1.7.0", "tests": len(cases), "passed": len(cases) - failed, "failed": failed, "wall_seconds": round(time.monotonic() - started, 6), "external_requests": 0, "orders": 0, "cases": cases}, ensure_ascii=False, indent=2))
+print(json.dumps({"version": "1.8.0", "tests": len(cases), "passed": len(cases) - failed, "failed": failed, "wall_seconds": round(time.monotonic() - started, 6), "external_requests": 0, "orders": 0, "cases": cases}, ensure_ascii=False, indent=2))
 raise SystemExit(bool(failed))

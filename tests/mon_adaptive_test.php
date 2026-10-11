@@ -61,12 +61,12 @@ ad_case('five complete runs decrease only ten seconds and keep the 120 floor',fu
     ad_ok(MonRunStatistics::recommend(ad_history(5,40,120),'mon',microtime(true))->limits->publication===120);
     $sim['stable_fast_runs']=['completed'=>5,'old_total'=>240,'next_total'=>230,'reason'=>$p->reason];
 });
-ad_case('one slow sample cannot immediately shrink and growth stays bounded',function(){
+ad_case('one slow sample cannot immediately shrink and reference growth remains gradual without a stop cap',function(){
     ad_ok(MonRunStatistics::recommend(ad_history(1,40,240),'mon',microtime(true))->limits->publication===240);
     $p=MonRunStatistics::recommend(ad_history(5,700,120,false),'mon',microtime(true));ad_ok($p->limits->publication===240);
-    ad_ok(MonRunStatistics::recommend(ad_history(5,700,300,false),'mon',microtime(true))->limits->publication===300);
+    ad_ok(MonRunStatistics::recommend(ad_history(5,700,300,false),'mon',microtime(true))->limits->publication===600);
 });
-ad_case('retry outcomes choose one or three attempts within the hard cap',function()use(&$sim){
+ad_case('retry outcomes choose one or three attempts as advisory escalation references',function()use(&$sim){
     $bad=ad_history(5,160,180,false);$good=ad_history(5,160,180,true);
     foreach($bad->samples as $r)$r->operations->{'detail/fetch'}=ad_op(2,0,1,0,.2,2);
     foreach($good->samples as $r)$r->operations->{'detail/fetch'}=ad_op(2,1,1,1,1);
@@ -78,9 +78,9 @@ ad_case('HTTP timeout tuning respects one-second floor and provider caps',functi
     $s=ad_history(5,70);foreach($s->samples as $r){$r->operations->{'http/api.github.com'}=ad_op(1,1,0,0,.05);$r->operations->{'http/query1.finance.yahoo.com'}=ad_op(1,0,0,0,4,1);}MonRunStatistics::seal($s);
     $p=MonRunStatistics::recommend($s,'mon',microtime(true));ad_ok($p->http_timeouts->{'api.github.com'}===1.0&&$p->http_timeouts->{'query1.finance.yahoo.com'}===5.0);
 });
-ad_case('call-count statistics raise quota only to the sixty-call ceiling',function(){
+ad_case('call-count statistics raise the advisory reference beyond sixty calls',function(){
     $s=ad_history(5,100);foreach($s->samples as $r){$r->counts->http_calls=50;$r->counts->http_limit_hits=1;}MonRunStatistics::seal($s);
-    $p=MonRunStatistics::recommend($s,'mon',microtime(true));ad_ok($p->http_calls===60&&$p->publication_call_reserve===12);
+    $p=MonRunStatistics::recommend($s,'mon',microtime(true));ad_ok($p->http_calls===75&&$p->publication_call_reserve===12);
 });
 ad_case('phase reserves respond to measured finalization and publication times',function(){
     $s=ad_history(5,100);foreach($s->samples as $r){$r->operations->{'handler/mon_detail_finalize'}=ad_op(1,1,0,0,12);$r->operations->{'handler/mon_publish_process'}=ad_op(1,1,0,0,16);}MonRunStatistics::seal($s);
@@ -112,13 +112,10 @@ ad_case('open circuits are skips rather than repeated attempts',function(){
     for($i=0;$i<2;$i++)ad_fault(static function()use($http){$http->request('GET','https://query1.finance.yahoo.com/a',[],null,microtime(true)+5);},$i===0?'HTTP_TRANSPORT_7':'HTTP_CIRCUIT_OPEN');
     MonExecution::event('measured');ad_ok($b->run->counts->http_calls===1&&$b->run->operations->{'http/query1.finance.yahoo.com'}->count===1);
 });
-ad_case('data-call ceiling leaves twelve publication calls and counts only sends',function(){
-    $s=ad_store();$w=microtime(true);$m=0.;$b=ad_start($s,'call-reserve',$w,$m);$calls=0;$http=new MonHttp(null,static function()use(&$calls){$calls++;return ['status'=>200,'headers'=>[],'body'=>'{}'];});
-    for($i=0;$i<18;$i++)$http->request('GET','https://query1.finance.yahoo.com/a'.$i,[],null,microtime(true)+5);
-    ad_fault(static function()use($http){$http->request('GET','https://query1.finance.yahoo.com/overflow',[],null,microtime(true)+5);},'MON_HTTP_COUNT_LIMIT');MonExecution::event('failure',['code'=>'MON_HTTP_COUNT_LIMIT']);
-    for($i=0;$i<12;$i++)$http->request('GET','https://api.github.com/a'.$i,[],null,microtime(true)+5);
-    ad_fault(static function()use($http){$http->request('GET','https://api.github.com/overflow',[],null,microtime(true)+5);},'MON_HTTP_COUNT_LIMIT');
-    $v=MonExecution::finish();ad_ok($calls===30&&$v['run']['counts']->http_calls===30&&$v['next_policy']->http_calls===40);
+ad_case('data-call references record excess sends without suppressing them',function(){
+    $s=ad_store();$w=microtime(true);$m=0.;$b=ad_start($s,'call-reference',$w,$m);$calls=0;$http=new MonHttp(null,static function()use(&$calls){$calls++;return ['status'=>200,'headers'=>[],'body'=>'{}'];});
+    for($i=0;$i<40;$i++)$http->request('GET','https://query1.finance.yahoo.com/a'.$i,[],null,microtime(true)+5);
+    $v=MonExecution::finish();ad_ok($calls===40&&$v['run']['counts']->http_calls===40&&$v['run']['count_excess']->http_calls===10&&$v['next_policy']->http_calls===62);
 });
 ad_case('reported connector operations are idempotent and retain their provenance',function(){
     $s=ad_store();$w=microtime(true);$m=0.;$b=ad_start($s,'report',$w,$m);$report=(object)['operation_id'=>'query-1','operation'=>'external/search','success'=>false,'code'=>'HTTP_TRANSPORT_28','seconds'=>12.,'units'=>3];
@@ -133,43 +130,44 @@ ad_case('display reports count once and never prove a new analysis',function(){
     $s=ad_store();$w=microtime(true);$m=0.;$b=ad_start($s,'display',$w,$m);MonExecution::event('initial_display_reported');MonExecution::event('initial_display_reported');MonExecution::event('final_display_reported');
     ad_ok($b->run->counts->displays_reported===2&&!MonExecution::view($b)['fully_complete']);
 });
-ad_case('finish retry preserves original ending and records a single incomplete sample',function(){
+ad_case('finish retry preserves receipt and checkpoints ongoing work and records a single incomplete sample',function(){
     $s=ad_store();$w=microtime(true);$m=0.;ad_start($s,'finish-idempotent',$w,$m);$m=135;$w+=135;
     $a=MonExecution::finish('deadline',[(object)['task'=>'US_INDEX','code'=>'DETAIL_BENCHMARK_DATE_MISSING']]);$m+=5;$w+=5;$b=MonExecution::finish();
-    ad_ok($a['statistics_snapshot']->sha256===$b['statistics_snapshot']->sha256&&$a['run']['finished_at']===$b['run']['finished_at']);ad_ok(count($b['statistics_snapshot']->samples)===1&&!$b['run']['fully_complete']&&count($b['run']['unfinished'])===1);
+    ad_ok($a['run']['finished_at']===null&&$b['run']['finished_at']===null&&$b['statistics']['last']->elapsed_seconds>=$a['statistics']['last']->elapsed_seconds);ad_ok(count($b['statistics_snapshot']->samples)===1&&!$b['run']['fully_complete']&&count($b['run']['unfinished'])===1);
 });
 ad_case('later confirmed publication updates the same sample rather than adding a run',function(){
     $s=ad_store();$w=microtime(true);$m=0.;ad_start($s,'late-save',$w,$m);MonExecution::event('prepared',['final_available'=>true,'new_analysis_complete'=>true,'save_status'=>'queued']);
     $a=MonExecution::finish();ad_ok(!$a['run']['fully_complete']);$m=20;$w+=20;MonExecution::event('publication_observed',['save_status'=>'saved']);$b=MonExecution::finish();
     ad_ok(count($b['statistics_snapshot']->samples)===1&&$b['run']['fully_complete']&&$b['statistics_snapshot']->samples[0]->elapsed_seconds===20.0);
 });
-ad_case('abandoned run is recovered as censored before the next policy freezes',function(){
+ad_case('pending run is checkpointed without expiry before the next policy freezes',function(){
     $s=ad_store();$w=microtime(true);$m=0.;$old=ad_start($s,'abandoned',$w,$m);$w+=301;$m+=301;$new=ad_start($s,'after-abandoned',$w,$m);
-    $stats=MonRunStatistics::load($s);ad_ok(count($stats->samples)===1&&$stats->samples[0]->censored&&$stats->samples[0]->outcome==='expired');
+    $stats=MonRunStatistics::load($s);ad_ok(count($stats->samples)===1&&$stats->samples[0]->censored&&$stats->samples[0]->outcome==='incomplete'&&$stats->samples[0]->terminal===false);
     ad_ok($new->run->adaptive_policy->limits->publication===240&&MonRunStatistics::summary($stats,'mon',$w)['measured_samples']===0);
 });
 ad_case('busy statistics storage preserves finish journal for an idempotent retry',function(){
     $s=ad_store();$w=microtime(true);$m=0.;$b=ad_start($s,'stats-busy',$w,$m);$lock=fopen($s->path('run-stats.lock'),'c+');flock($lock,LOCK_EX);
-    ad_fault(static function(){MonExecution::finish();},'MON_STATS_BUSY');ad_ok($b->run->finished_at!==null&&$b->run->statistics_status==='MON_STATS_BUSY');flock($lock,LOCK_UN);fclose($lock);
+    ad_fault(static function(){MonExecution::finish();},'MON_STATS_BUSY');ad_ok($b->run->checkpoint_at!==null&&$b->run->finished_at===null&&$b->run->statistics_status==='MON_STATS_BUSY');flock($lock,LOCK_UN);fclose($lock);
     ad_ok(count(MonExecution::finish()['statistics_snapshot']->samples)===1);
 });
 ad_case('auto detail request freezes deadline and attempt policy in its hash',function(){
     $s=ad_store();$w=microtime(true);$m=0.;MonRunStatistics::save($s,ad_history(1,183,120,false));$b=ad_start($s,'detail-policy',$w,$m);$d=reinforcement_fixture(1);$c=reinforcement_context($d);
     $q=MonDetails::register($d,$c,(object)['request_id'=>'adaptive-req','symbol'=>$d->watchlist->symbols[0],'wait_seconds'=>300,'force_refresh'=>true]);$r=$q['request'];
-    ad_ok($r->run_mode==='auto'&&$r->execution_limits->collection_seconds===210&&MonRun::seconds($r->deadline_at)<=$b->end('collection'));$r->execution_limits->attempts=99;
+    ad_ok($r->run_mode==='auto'&&$r->execution_limits->collection_seconds===210&&MonRun::seconds($r->deadline_at)>$b->end('collection'));$r->execution_limits->attempts=99;
     ad_fault(static function()use($r){MonDetails::validRequest($r,$r->symbol_id);},'DETAIL_RUN_DEADLINE_INVALID');
 });
-ad_case('worker actually stops after one statistically ineffective attempt',function(){
+ad_case('ineffective retry reference increases backoff without a terminal attempt limit',function(){
     $s=ad_store();$hist=ad_history(5,160,180,false);foreach($hist->samples as $r)$r->operations->{'detail/fetch'}=ad_op(2,0,1,0,.1,2);MonRunStatistics::seal($hist);MonRunStatistics::save($s,$hist);
-    $w=microtime(true);$m=0.;$b=ad_start($s,'worker-one',$w,$m);$d=reinforcement_fixture(1);$c=reinforcement_context($d);$q=MonDetails::register($d,$c,(object)['request_id'=>'worker-one','symbol'=>$d->watchlist->symbols[0],'wait_seconds'=>300,'force_refresh'=>true]);$d=mon_decode($q['files'][0]['content']);
+    $w=microtime(true);$m=0.;ad_start($s,'worker-one',$w,$m);$d=reinforcement_fixture(1);$c=reinforcement_context($d);$q=MonDetails::register($d,$c,(object)['request_id'=>'worker-one','symbol'=>$d->watchlist->symbols[0],'wait_seconds'=>300,'force_refresh'=>true]);$d=mon_decode($q['files'][0]['content']);
     $now=microtime(true);$settings=MonData::settings($d);$settings['request_spacing_seconds']=0;$worker=ad_worker($s,$d,$now);$one=$worker->processOne($d,microtime(true)+8,$settings);
-    ad_ok($one['response']->attempts===1&&$one['response']->state==='done',mon_json(MonRun::pick($one['response'],['attempts','state','error']),false));$d->collection->detail_responses=$one['responses'];$now+=31;ad_ok(!$worker->processOne($d,microtime(true)+8,$settings)['changed'],'repeated completed attempt');
+    ad_ok($one['response']->attempts===1&&$one['response']->state==='retry_wait');$d->collection->detail_responses=$one['responses'];$now=$one['response']->retry_after+1;
+    $two=$worker->processOne($d,microtime(true)+8,$settings);ad_ok($two['response']->attempts===2&&$two['response']->state==='retry_wait'&&$two['response']->attempt_excess===1);
 });
-ad_case('worker allows three useful transient attempts but never a fourth',function(){
+ad_case('useful retry reference allows fourth transient attempt and preserves cooldown',function(){
     $s=ad_store();$hist=ad_history(5,160,180,true);foreach($hist->samples as $r)$r->operations->{'detail/fetch'}=ad_op(2,1,1,1,1);MonRunStatistics::seal($hist);MonRunStatistics::save($s,$hist);
     $w=microtime(true);$m=0.;ad_start($s,'worker-three',$w,$m);$d=reinforcement_fixture(1);$c=reinforcement_context($d);$q=MonDetails::register($d,$c,(object)['request_id'=>'worker-three','symbol'=>$d->watchlist->symbols[0],'wait_seconds'=>300,'force_refresh'=>true]);$d=mon_decode($q['files'][0]['content']);
     $now=microtime(true);$settings=MonData::settings($d);$settings['request_spacing_seconds']=0;
-    for($i=1;$i<=3;$i++){$job=ad_worker($s,$d,$now)->processOne($d,microtime(true)+8,$settings);ad_ok($job['response']->attempts===$i,mon_json(MonRun::pick($job['response'],['attempts','state','error']),false));ad_ok($job['response']->state===($i<3?'retry_wait':'done'),mon_json(MonRun::pick($job['response'],['attempts','state','error']),false));$d->collection->detail_responses=$job['responses'];$now+=31;}
+    for($i=1;$i<=4;$i++){$job=ad_worker($s,$d,$now)->processOne($d,microtime(true)+8,$settings);ad_ok($job['response']->attempts===$i&&$job['response']->state==='retry_wait');$d->collection->detail_responses=$job['responses'];if($i<4)$now=$job['response']->retry_after+1;}
     ad_ok(!ad_worker($s,$d,$now)->processOne($d,microtime(true)+8,$settings)['changed']);
 });
 ad_case('queued publication is measured and revises one terminal sample after confirmed save',function(){
@@ -207,13 +205,13 @@ ad_case('sequential simulated runs adapt next limits while each current limit st
     $s=ad_store();$w=microtime(true);$m=0.;$rows=[];
     foreach([80,85,90,75,95,183,175,90,85,80,75,70]as $i=>$seconds){$b=ad_start($s,'sequence-'.$i,$w,$m);$limit=(int)($b->end('publication')-$w);$end=$b->end('publication');$w+=$seconds;$m+=$seconds;
         if($seconds<=$limit)MonExecution::event('synthetic_confirmed',['new_analysis_complete'=>true,'final_available'=>true,'save_status'=>'no_change']);
-        $done=MonExecution::finish($seconds>$limit?'deadline':'finished');ad_ok($b->end('publication')===$end&&$done['next_policy']->limits->publication>=120&&$done['next_policy']->limits->publication<=300);
+        $done=MonExecution::finish($seconds>$limit?'deadline':'finished');ad_ok($b->end('publication')===$end&&$done['next_policy']->limits->publication>=120&&$done['next_policy']->maximum_total_seconds===null);
         $rows[]=['run'=>$i+1,'synthetic_elapsed'=>$seconds,'current_limit'=>$limit,'next_limit'=>$done['next_policy']->limits->publication,'outcome'=>$done['statistics_snapshot']->samples[count($done['statistics_snapshot']->samples)-1]->outcome];$w+=1;$m+=1;
     }ad_ok($rows[5]['outcome']==='incomplete'&&$rows[5]['next_limit']===230&&$rows[6]['current_limit']===230);$sim['sequence']=$rows;
 });
 ad_case('portable observed file validates and selects the documented next limit',function(){
-    $s=MonRunStatistics::validate(mon_decode(file_get_contents(dirname(__DIR__).'/mon_execution_stats.json')));$now=MonRun::seconds($s->samples[0]->finished_at)+60;
-    ad_ok(count($s->samples)===1&&$s->samples[0]->measurement==='operator_reported'&&$s->samples[0]->censored);ad_ok(MonRunStatistics::recommend($s,'mon',$now)->limits->publication===230);
+    $s=MonRunStatistics::validate(mon_decode(file_get_contents(__DIR__.'/mon_completion_observed_fixture.json')));$now=MonRun::seconds($s->samples[0]->finished_at)+60;
+    ad_ok(count($s->samples)===2&&$s->samples[0]->measurement==='operator_reported'&&$s->samples[0]->censored);ad_ok(MonRunStatistics::recommend($s,'mon',$now)->limits->publication===230);
 });
 
 function ad_clean(string $p): void {foreach(scandir($p)as $f)if($f!=='.'&&$f!=='..'){if(is_dir($p.'/'.$f))ad_clean($p.'/'.$f);else unlink($p.'/'.$f);}rmdir($p);}

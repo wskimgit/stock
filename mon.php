@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.7.0 -- PHP 7.4+ measured runs / frozen adaptive limits / bounded daemon load.
+ * mon.php 1.8.0 -- PHP 7.4+ completion-first runs / advisory thresholds / bounded daemon load.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.7.0';
+const MON_VERSION = '1.8.0';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -427,7 +427,7 @@ class MonHttp {
         }catch(MonFault $e){$code=$e->faultCode;throw $e;}
         catch(MonStop $e){$code='INTERRUPTED';throw $e;}
         catch(Throwable $e){$code='HTTP_INTERNAL_ERROR';throw $e;}
-        finally{if($sent)MonExecution::measure('http/'.$host,min(300,max(0,(float)($this->mono)()-$begin)),$code,1,'server');}
+        finally{if($sent)MonExecution::measure('http/'.$host,max(0,(float)($this->mono)()-$begin),$code,1,'server');}
     }
     private function perform(string $method, string $url, array $headers, ?string $body, float $deadline, float $timeout, float $spacing,bool &$sent): array {
         if ($this->control) $this->control->check();
@@ -947,7 +947,7 @@ final class MonDaemon {
             try{MonDetails::validRequest($request,$sid);}catch(MonFault $e){continue;}
             $response=mon_get(mon_get($data->collection,'detail_responses'),$sid);
             if(!MonDetails::matching($request,$response))return true;
-            if(mon_get($response,'state')==='retry_wait'&&((int)mon_get($response,'retry_after',0)<=$now||$now>=MonRun::seconds($request->deadline_at)))return true;
+            if(MonDetails::retryPending($response)&&(int)mon_get($response,'retry_after',0)<=$now)return true;
         }return false;
     }
     private function tick(): void {
@@ -956,7 +956,7 @@ final class MonDaemon {
         $this->poll=$cfg->int('MON_IDLE_POLL_SECONDS',60,30,3600);$this->lastAttempted=0;$this->lastSucceeded=0;
         $this->resources=$this->load->sample();$publication=new MonPublication($this->store,$this->http,$cfg);
         if($this->resources['state']==='deferred'){
-            // A zero network budget only expires/records queued work under its ORIGINAL deadline.
+            // Resource pressure yields this tick; durable jobs remain resumable.
             $publication->processNext($deadline(0));$this->poll=$this->resources['wait_seconds'];$this->heartbeat('resource_paused');return;
         }
         $published=$publication->processNext($deadline(8));
@@ -1367,7 +1367,7 @@ function text(id,value){document.getElementById(id).textContent=value;}
 function draw(s){
  current=s;text('state',s.label);text('message',s.message);text('count',s.watchlist_loaded?s.watched:'—');text('collected',s.fresh_quotes||0);
  var pub=s.final_publication;
- text('final-publication',pub?'최종 결과 표시 가능 · 저장 '+({queued:'대기',publishing:'처리 중',saved:'완료',conflict:'동시 변경으로 보류',failed:'실패',expired:'시간 종료',unknown:'확인되지 않음'}[pub.save_status]||'확인 필요')+(pub.pending_analysis?' · 늦게 도착한 자료는 후속 판단 필요':''):'최종 결과 저장 요청 없음');
+ text('final-publication',pub?'최종 결과 표시 가능 · 저장 '+({queued:'대기',publishing:'처리 중',saved:'완료',conflict:'동시 변경으로 보류',failed:'실패',expired:'이전 버전 만료 · 재개 확인',unknown:'확인 재개 대기'}[pub.save_status]||'확인 필요')+(pub.time_excess_seconds>0?' · 기준시간 초과, 계속 처리':'')+(pub.pending_analysis?' · 새 자료는 후속 판단 필요':''):'최종 결과 저장 요청 없음');
  document.getElementById('dot').className='dot'+(s.readiness==='partial'&&s.monitoring_active?' warn':s.monitoring_active?' on':s.running&&s.heartbeat_fresh?' warn':'');
  document.getElementById('start').disabled=busy||s.running;document.getElementById('stop').disabled=busy||!s.running;
  var stamp=s.last_mirrored_at;
@@ -1383,7 +1383,7 @@ function draw(s){
 }
 function detailRows(rows){var list=document.getElementById('detail-cards');
   (rows||[]).forEach(function(row){var item=document.createElement('li');
-   var stage={pending:'수집 대기',retry_wait:'재시도 대기',deadline:'시간 종료',invalid:'요청 오류',done:'자료 처리 완료'}[row.state]||row.state;
+   var stage={pending:'수집 대기',retry_wait:'복구 대기',deadline:'기준시간 초과 · 재개 대상',invalid:'요청 오류',done:'자료 처리 완료'}[row.state]||row.state;
    var basis={latest:'최신 완료봉',reused_current:'완료봉 재사용',previous_verified:'이전 검증자료',no_data:'자료 부족'}[row.data_status]||'';
    item.textContent=(row.name||row.symbol_id)+' · '+stage+(basis?' · '+basis:'')+(row.bars_as_of?' ('+row.bars_as_of+')':'')+(row.publication==='pending'?' · 저장 대기':'');list.appendChild(item);
   });
@@ -2469,6 +2469,11 @@ final class MonDetails {
         return ['date'=>$local->format('Y-m-d'),'verified'=>false];
     }
     public static function requestHash($r): string {return MonRun::digest(MonRun::pick($r,['contract','request_id','symbol_id','symbol','requested_at','deadline_at','target_completed_date','target_verified','criteria_version','force_refresh','run_context_id','run_received_at','run_mode','execution_limits']));}
+    public static function retryPending($response): bool {
+        $code=(string)mon_get($response,'error','');
+        return mon_get($response,'state')==='retry_wait'||(mon_get($response,'state')==='done'&&
+            (MonDaily::retryable($code)||in_array($code,['DETAIL_WAIT_DEADLINE','DETAIL_ATTEMPT_LIMIT','DETAIL_LATE_RESPONSE'],true)));
+    }
     public static function validRequest($r,string $sid): void {
         if(!($r instanceof stdClass)||mon_get($r,'contract')!==self::CONTRACT||mon_get($r,'symbol_id')!==$sid||
             !preg_match('/^[A-Za-z0-9._-]{1,96}$/',(string)mon_get($r,'request_id'))||mon_get($r,'criteria_version')!==MonSwing::CRITERIA||
@@ -2478,10 +2483,11 @@ final class MonDetails {
         if(property_exists($r,'run_context_id')){
             MonExecution::id($r->run_context_id);$mode=mon_get($r,'run_mode');
             $limits=mon_get($r,'execution_limits');$seconds=$mode==='extended'?280:100;
-            if($limits!==null){if(!($limits instanceof stdClass)||!is_int(mon_get($limits,'collection_seconds'))||$limits->collection_seconds<60||$limits->collection_seconds>280||
+            if($limits!==null){if(!($limits instanceof stdClass)||!is_int(mon_get($limits,'collection_seconds'))||$limits->collection_seconds<60||$limits->collection_seconds>2592000||
                 !is_int(mon_get($limits,'attempts'))||$limits->attempts<1||$limits->attempts>3||!is_numeric(mon_get($limits,'symbol_seconds'))||$limits->symbol_seconds<1||$limits->symbol_seconds>8)throw new MonFault('DETAIL_RUN_DEADLINE_INVALID');
                 $seconds=$limits->collection_seconds;}
-            if(!in_array($mode,['auto','normal','extended'],true)||($mode==='auto'&&$limits===null)||$end>MonRun::seconds(mon_get($r,'run_received_at'))+$seconds)throw new MonFault('DETAIL_RUN_DEADLINE_INVALID');
+            if(!in_array($mode,['auto','normal','extended'],true)||($mode==='auto'&&$limits===null))throw new MonFault('DETAIL_RUN_DEADLINE_INVALID');
+            MonRun::utc(mon_get($r,'run_received_at'));
         }
         if($end<$start||$end-$start>300||!preg_match('/^\d{4}-\d{2}-\d{2}$/',(string)$r->target_completed_date)||
             !hash_equals(self::requestHash($r),(string)mon_get($r,'request_hash')))throw new MonFault('DETAIL_REQUEST_INVALID');
@@ -2498,7 +2504,7 @@ final class MonDetails {
         else{unset($symbol->first_seen_at);$symbol->candidate_group='previous';}
         if($old instanceof stdClass&&mon_get($old,'request_id')===$id)foreach(['first_seen_at','candidate_group']as $field){if(property_exists($old->symbol,$field))$symbol->$field=$old->symbol->$field;else unset($symbol->$field);}
         $wait=max(0,min(300,(int)mon_get($item,'wait_seconds',120)));$force=mon_get($item,'force_refresh',false);
-        if(MonExecution::$active){MonExecution::$active->guard('collection');$wait=min($wait,max(0,(int)floor(MonExecution::$active->end('collection')-MonRun::seconds($c->rendered_at))));}
+        if(MonExecution::$active)MonExecution::$active->guard('collection');
         if(!is_bool($force))throw new MonFault('DETAIL_REQUEST_INVALID');
         $r=(object)['contract'=>self::CONTRACT,'request_id'=>$id,'symbol_id'=>$sid,'symbol'=>$symbol,'criteria_version'=>MonSwing::CRITERIA,
             'requested_at'=>$c->rendered_at,'deadline_at'=>MonRun::utc(gmdate('Y-m-d\TH:i:s\Z',(int)MonRun::seconds($c->rendered_at)+$wait)),
@@ -2511,7 +2517,7 @@ final class MonDetails {
             return ['status'=>'reuse','write_required'=>false,'request'=>$old,'files'=>[]];
         }
         if(!property_exists($requests,$sid)&&count(get_object_vars($requests))>=self::MAX_REQUESTS){
-            $expired=[];foreach($requests as $key=>$saved){$response=mon_get(mon_get($d->collection,'detail_responses'),$key);if(MonRun::seconds($saved->deadline_at)<MonRun::seconds($c->rendered_at)||(self::matching($saved,$response)&&mon_get($response,'state')==='done'))$expired[$key]=$saved->requested_at;}
+            $expired=[];foreach($requests as $key=>$saved){$response=mon_get(mon_get($d->collection,'detail_responses'),$key);if(self::matching($saved,$response)&&mon_get($response,'state')==='done'&&!self::retryPending($response))$expired[$key]=$saved->requested_at;}
             asort($expired,SORT_STRING);if(!$expired)throw new MonFault('DETAIL_REQUEST_LIMIT');unset($requests->{array_key_first($expired)});
         }
         $out=mon_decode(MonRun::json($d));$out->watchlist->detail_requests=$requests;$out->watchlist->detail_requests->$sid=$r;
@@ -2700,7 +2706,7 @@ final class MonDetails {
         return ['data'=>$out,'payload'=>$p,'context'=>MonRun::context($context),'prepared'=>$prepared];
     }
     public static function finalize($d,$decision): array {
-        if(MonExecution::$active){MonExecution::$active->guard('decision');if(MonRun::seconds(mon_get($decision,'fixed_as_of'))>MonExecution::$active->end('decision'))throw new MonFault('MON_DECISION_DEADLINE');}
+        if(MonExecution::$active)MonExecution::$active->guard('decision');
         $bundle=self::selectData($d,$decision);$out=$bundle['data'];$p=$bundle['payload'];
         MonConfirmation::apply($d,$out,$p,mon_get($decision,'confirmations'),$out->analysis->as_of);
         $out->analysis->discovery_state=MonDiscovery::counts($out,$p,$bundle['prepared'],$out->analysis->as_of);
@@ -2727,7 +2733,7 @@ final class MonDaily {
     public function __construct(MonHttp $http,MonCollector $collector,MonConfig $config,?MonStore $store=null){$this->http=$http;$this->collector=$collector;$this->config=$config;$this->store=$store;}
     public static function retryable(string $code): bool {
         return preg_match('/^HTTP_TRANSPORT_(5|6|7|28|35|52|55|56|60)$/',$code)===1||
-            in_array($code,['HTTP_CIRCUIT_OPEN','HTTP_408','HTTP_429','BUDGET_EXHAUSTED'],true)||preg_match('/^HTTP_5\d\d$/',$code)===1;
+            in_array($code,['HTTP_CIRCUIT_OPEN','HTTP_408','HTTP_429','BUDGET_EXHAUSTED','HTTP_LATE_RESPONSE','DETAIL_LATE_RESPONSE'],true)||preg_match('/^HTTP_5\d\d$/',$code)===1;
     }
     private function checkpoint($request,?stdClass $source=null): ?stdClass {
         if(!$this->store)return null;
@@ -2743,7 +2749,7 @@ final class MonDaily {
             $row=$this->store->readPrivate($name);
             if(mon_get($row,'contract')!=='MON-STOCK-CHECKPOINT-1.0'||mon_get($row,'request_hash')!==$request->request_hash||
                 mon_get($row,'symbol_id')!==$request->symbol_id||mon_get($row,'target_completed_date')!==$request->target_completed_date||
-                MonRun::seconds(mon_get($row,'expires_at'))<=microtime(true)||!hash_equals((string)mon_get($row,'sha256',''),MonRun::digest(mon_get($row,'source'))))return null;
+                !hash_equals((string)mon_get($row,'sha256',''),MonRun::digest(mon_get($row,'source'))))return null;
             $saved=$row->source;$bars=MonSwing::bars($saved->bars);$last=end($bars);
             if(count($bars)<21||$last[0]!==$request->target_completed_date||mon_get($saved->origin,'price_basis')!==MonDetails::BASIS)return null;
             MonRun::utc(mon_get($saved->origin,'checked_at'));return $saved;
@@ -2844,39 +2850,36 @@ final class MonDetailWorker {
     public function __construct(MonDaily $daily,MonStore $store,?callable $clock=null){$this->daily=$daily;$this->store=$store;$this->clock=$clock?:static function(){return time();};}
     public function processOne($d,float $deadline,array $settings,?stdClass $sourcePayload=null): array {
         $now=(int)($this->clock)();$requests=MonDetails::requests($d);$responses=mon_get($d->collection,'detail_responses',new stdClass());$cache=$this->store->read('detail_cache.json');if(!($cache instanceof stdClass))$cache=new stdClass();
+        // A work slice ends the current handler, never the durable logical request.
+        if(microtime(true)>=$deadline-.05)return ['changed'=>false,'responses'=>$responses,'processed_symbol_id'=>null];
         $list=[];foreach($requests as $sid=>$r){try{MonDetails::validRequest($r,$sid);$list[]=$r;}catch(MonFault $e){continue;}}$list=MonDiscovery::schedule($list);
         foreach($list as $r){$previous=mon_get($responses,$r->symbol_id);$match=MonDetails::matching($r,$previous);
-            if($match&&($previous->state!=='retry_wait'||(mon_get($previous,'retry_after',0)>$now&&$now<MonRun::seconds($r->deadline_at))))continue;
+            if($match&&(!MonDetails::retryPending($previous)||(int)mon_get($previous,'retry_after',0)>$now))continue;
             $cached=MonDetails::cached($d,$r->symbol,$sourcePayload);$local=mon_get($cache,$r->symbol_id);if($local instanceof stdClass)try{$candidate=MonDetails::unpack($local);if($candidate->symbol_id!==$r->symbol_id||$candidate->criteria_version!==MonSwing::CRITERIA||$candidate->history_metadata->price_basis!==MonDetails::BASIS||!hash_equals($candidate->history_metadata->bars_sha256,MonRun::digest(MonSwing::bars($candidate->bars))))throw new MonFault('DETAIL_CACHE_INVALID');if($cached===null||$candidate->metrics->bars_as_of>$cached->metrics->bars_as_of)$cached=$candidate;}catch(MonFault $e){}
             $attempts=$match?(int)mon_get($previous,'attempts',0):0;$snapshot=$cached;$error=null;$conflict=false;$state='done';$status='no_data';$conflictRef=null;$retryDelay=30;$this->daily->partialFields=null;$this->daily->conflictDiagnostics=null;$this->daily->conflictArtifact=null;
             $execution=mon_get($r,'execution_limits');$attemptLimit=(int)mon_get($execution,'attempts',2);$symbolSeconds=min((float)($settings['detail_symbol_budget_seconds']??8),(float)mon_get($execution,'symbol_seconds',8));
             $reuse=$cached instanceof stdClass&&$cached->metrics->bars_as_of===$r->target_completed_date&&$r->target_verified&&!$r->force_refresh;
             if($reuse)$status='reused_current';
-            elseif($now>=MonRun::seconds($r->deadline_at)){$error='DETAIL_WAIT_DEADLINE';$status=$cached?'previous_verified':'no_data';}
-            elseif($attempts>=$attemptLimit){$error='DETAIL_ATTEMPT_LIMIT';$status=$cached?'previous_verified':'no_data';}
             else{$oldActive=MonExecution::$active;$oldStore=MonExecution::$store;$attemptStart=mon_monotonic();$counted=false;
                 try{
                     $rid=mon_get($r,'run_context_id');
                     if(is_string($rid)&&is_file($this->store->path('run-'.$rid.'.php'))){MonExecution::resume($this->store,$rid);$b=MonExecution::$active;
-                        if($b->run->received_at!==$r->run_received_at||$b->run->mode!==$r->run_mode||MonRun::seconds($r->deadline_at)>$b->end('collection'))throw new MonFault('DETAIL_RUN_CONTEXT_INVALID');
-                        $b->guard('collection');$deadline=min($deadline,$b->deadline('collection'));}
-                    $attempts++;$counted=true;$callDeadline=min($deadline,MonRun::seconds($r->deadline_at),microtime(true)+$symbolSeconds);$callMonoEnd=mon_monotonic()+max(0,$callDeadline-microtime(true));$snapshot=$this->daily->fetch($r,$cached,$callDeadline,$settings);$status=$snapshot->metrics->bars_as_of===$r->target_completed_date&&$r->target_verified?'latest':'previous_verified';
+                        if($b->run->received_at!==$r->run_received_at||$b->run->mode!==$r->run_mode)throw new MonFault('DETAIL_RUN_CONTEXT_INVALID');
+                        MonExecution::continueWork();
+                        $b->guard('collection');}
+                    $attempts++;$counted=true;$callDeadline=min($deadline,microtime(true)+$symbolSeconds);$snapshot=$this->daily->fetch($r,$cached,$callDeadline,$settings);$status=$snapshot->metrics->bars_as_of===$r->target_completed_date&&$r->target_verified?'latest':'previous_verified';
                     $cache->{$r->symbol_id}=MonDetails::pack($snapshot);foreach(get_object_vars($cache)as $sid=>$unused)if(!property_exists($requests,$sid))unset($cache->$sid);$this->store->write('detail_cache.json',$cache);
-                    if(mon_monotonic()>$callMonoEnd || microtime(true)>$callDeadline || (float)($this->clock)()>=MonRun::seconds($r->deadline_at)){
-                        $this->store->writePrivate('late-detail-'.$r->request_hash.'.php',(object)['request_hash'=>$r->request_hash,'payload'=>MonDetails::pack($snapshot),'status'=>'not_used_after_deadline']);
-                        $snapshot=$cached;$status=$cached?'previous_verified':'no_data';$error='DETAIL_LATE_RESPONSE';
-                    }
                 }catch(MonFault $e){$error=$e->faultCode;$conflict=$error==='DETAIL_PRICE_BASIS_CONFLICT';$status=$cached?'previous_verified':'no_data';
-                    $retryDelay=max(30,min(300,$e->retryAfter));
-                    if(!$conflict&&MonDaily::retryable($error)&&$attempts<$attemptLimit&&$now+$retryDelay<MonRun::seconds($r->deadline_at))$state='retry_wait';}
+                    $backoff=min(300,30*(2**min(4,max(0,$attempts-$attemptLimit))));$retryDelay=max($backoff,$e->retryAfter);
+                    if(!$conflict&&MonDaily::retryable($error))$state='retry_wait';}
                 finally{
-                    try{if($counted){MonExecution::measure('detail/fetch',min(300,mon_monotonic()-$attemptStart),$error,1,'server',$attempts>1);
+                    try{if($counted){MonExecution::measure('detail/fetch',mon_monotonic()-$attemptStart,$error,1,'server',$attempts>1);
                         MonExecution::event('detail_attempt',['symbol_id'=>$r->symbol_id,'attempts'=>$attempts,'code'=>$error,'previous_data'=>$cached!==null]);}}
                     finally{if($oldActive&&MonExecution::$active&&$oldActive->run->run_context_id===MonExecution::$active->run->run_context_id)$oldActive->run=MonExecution::$active->run;
                         MonExecution::$active=$oldActive;MonExecution::$store=$oldStore;}
                 }
             }
-            $now=(int)($this->clock)();if($state==='retry_wait'&&$now+$retryDelay>=MonRun::seconds($r->deadline_at))$state='done';
+            $now=(int)($this->clock)();
             if($this->daily->conflictArtifact instanceof stdClass){
                 $raw=MonRun::json($this->daily->conflictArtifact);$sha=hash('sha256',$raw);
                 try{MonArtifact::card($this->store,$sha,$this->daily->conflictArtifact);$conflictRef=(object)['sha256'=>$sha,'bytes'=>strlen($raw),'content_ref'=>'mon_card_read','diagnostic_count'=>count($this->daily->conflictDiagnostics)];}
@@ -2884,6 +2887,7 @@ final class MonDetailWorker {
             }
             $response=(object)['contract'=>MonDetails::CONTRACT,'request_id'=>$r->request_id,'request_hash'=>$r->request_hash,'symbol_id'=>$r->symbol_id,'state'=>$state,'data_status'=>$status,
                 'attempts'=>$attempts,'completed_at'=>mon_iso($now),'retry_after'=>$state==='retry_wait'?$now+$retryDelay:null,'error'=>$error,'conflict'=>$conflict,'usable'=>$snapshot!==null&&!$conflict,
+                'limit_behavior'=>'observe_and_continue','time_excess_seconds'=>max(0,$now-MonRun::seconds($r->deadline_at)),'attempt_excess'=>max(0,$attempts-$attemptLimit),
                 'bars_as_of'=>$snapshot?$snapshot->metrics->bars_as_of:null,'source_checked_at'=>$snapshot?$snapshot->history_metadata->checked_at:null,'partial_fields'=>$this->daily->partialFields,
                 'conflict_diagnostics'=>$this->daily->conflictDiagnostics===null?null:array_slice($this->daily->conflictDiagnostics,0,1),'conflict_artifact'=>$conflictRef,'payload'=>$snapshot?MonDetails::pack($snapshot):null];
             $responses->{$r->symbol_id}=$response;
@@ -2910,7 +2914,7 @@ final class MonProgress {
     const CONTRACT='MON-PROGRESS-1.0';
     public static function build($d,int $now,string $since='',array $unpublished=[],int $cursor=0): array {
         if($since!==''&&!preg_match('/^[a-f0-9]{64}$/',$since))throw new MonFault('MON_PROGRESS_TOKEN_INVALID');
-        $counts=['requests'=>0,'done'=>0,'pending'=>0,'retry_wait'=>0,'latest'=>0,'reused'=>0,'previous'=>0,'no_data'=>0,'invalid'=>0,'timed_out'=>0];$rows=[];$first=null;$last=null;$expiredWaiting=0;
+        $counts=['requests'=>0,'done'=>0,'pending'=>0,'retry_wait'=>0,'latest'=>0,'reused'=>0,'previous'=>0,'no_data'=>0,'invalid'=>0,'timed_out'=>0,'threshold_exceeded'=>0];$rows=[];$first=null;$last=null;
         foreach(MonDetails::requests($d)as $sid=>$r){
             $counts['requests']++;$row=(object)['symbol_id'=>$sid,'name'=>mon_get(mon_get($r,'symbol'),'name',$sid),'country'=>explode('|',$sid)[0],
                 'request_id'=>mon_get($r,'request_id'),'request_hash'=>mon_get($r,'request_hash'),'state'=>'pending','data_status'=>'no_response',
@@ -2925,12 +2929,13 @@ final class MonProgress {
                     if(!in_array($row->state,['done','retry_wait'],true))throw new MonFault('DETAIL_RESPONSE_STATE_INVALID');
                     $at=mon_time($row->completed_at);if($at!==null){$first=$first===null?$at:min($first,$at);$last=$last===null?$at:max($last,$at);}
                 }
-                if($row->state!=='done'&&$now>=MonRun::seconds($r->deadline_at))$row->state='deadline';
+                if(MonDetails::retryPending($response))$row->state='retry_wait';
+                $row->time_excess_seconds=max(0,$now-MonRun::seconds($r->deadline_at));$row->limit_behavior='observe_and_continue';
             }catch(MonFault $e){$row->state='invalid';$row->error=$e->faultCode;}
             if(in_array($row->state,['done','retry_wait','invalid'],true))$counts[$row->state]++;
             else $counts['pending']++;
-            if($row->state==='deadline')$expiredWaiting++;
-            if($row->state==='deadline'||$row->error==='DETAIL_WAIT_DEADLINE')$counts['timed_out']++;
+            if(mon_get($row,'time_excess_seconds',0)>0)$counts['threshold_exceeded']++;
+            if(in_array($row->error,['HTTP_TRANSPORT_28','HTTP_408','HTTP_LATE_RESPONSE','DETAIL_LATE_RESPONSE'],true))$counts['timed_out']++;
             if($row->data_status==='latest')$counts['latest']++;
             elseif($row->data_status==='reused_current')$counts['reused']++;
             elseif(in_array($row->data_status,['previous_verified','saved_reference'],true))$counts['previous']++;
@@ -2938,8 +2943,9 @@ final class MonProgress {
             if(isset($unpublished[$sid]))$row->publication='pending';$rows[]=$row;
         }
         usort($rows,static function($a,$b){return strcmp($a->symbol_id,$b->symbol_id);});
-        $phase=$counts['requests']===0?'idle':($counts['done']+$counts['invalid']===$counts['requests']?'collection_complete':($expiredWaiting>0&&$counts['pending']===$expiredWaiting&&$counts['retry_wait']===0?'deadline':'collecting'));
-        $token=MonRun::digest((object)['contract'=>self::CONTRACT,'cards'=>$rows]);$meta=mon_get($d,'_mon_cache');
+        $phase=$counts['requests']===0?'idle':($counts['done']+$counts['invalid']===$counts['requests']?'collection_complete':'collecting');
+        $tokenRows=array_map(static function($row){$copy=clone $row;unset($copy->time_excess_seconds);return $copy;},$rows);
+        $token=MonRun::digest((object)['contract'=>self::CONTRACT,'cards'=>$tokenRows]);$meta=mon_get($d,'_mon_cache');
         if($cursor<0||$cursor>count($rows)||($cursor>0&&$since!==$token))throw new MonFault('MON_PROGRESS_CURSOR_INVALID');
         $out=['contract'=>self::CONTRACT,'version'=>MON_VERSION,'criteria_version'=>MonSwing::CRITERIA,'as_of'=>mon_iso($now),'phase'=>$phase,'counts'=>$counts,
             'snapshot_token'=>$token,'changed'=>$since!==$token,'cards'=>[],'first_response_at'=>$first===null?null:mon_iso($first),'last_response_at'=>$last===null?null:mon_iso($last),
@@ -2971,7 +2977,7 @@ final class MonProgress {
 /* MON reinforcement D1.1. Protected state stays in the existing web directory. */
 /* Small rolling operational statistics. No prices, HTTP bodies, tokens or synthetic success. */
 final class MonRunStatistics {
-    const CONTRACT='MON-STATS-1.0'; const POLICY='MON-ADAPTIVE-1.0';
+    const CONTRACT='MON-STATS-1.0'; const POLICY='MON-ADAPTIVE-1.1';
     const WINDOW=60; const MAX_BYTES=262144;
     public static function empty(): stdClass {return (object)['contract'=>self::CONTRACT,'generation'=>0,'samples'=>[]];}
     public static function seal(stdClass $s): stdClass {$s->sha256=MonRun::digest(MonRun::pick($s,['contract','generation','samples']));return $s;}
@@ -2987,23 +2993,29 @@ final class MonRunStatistics {
                 !is_bool(mon_get($r,'partial_timing'))||!is_bool(mon_get($r,'censored'))||!is_bool(mon_get($r,'deadline_missed'))||
                 !is_bool(mon_get($r,'new_analysis_complete'))||!is_bool(mon_get($r,'fully_complete'))||
                 !in_array(mon_get($r,'measurement'),['server','operator_reported'],true)||
-                !is_numeric(mon_get($r,'elapsed_seconds'))||!is_finite((float)$r->elapsed_seconds)||$r->elapsed_seconds<0||$r->elapsed_seconds>86400||
-                !is_int(mon_get($r,'total_limit_seconds'))||$r->total_limit_seconds<120||$r->total_limit_seconds>300||
-                !(mon_get($r,'operations') instanceof stdClass)||count(get_object_vars($r->operations))>16||
-                !(mon_get($r,'counts') instanceof stdClass)||count(get_object_vars($r->counts))>12||!is_array(mon_get($r,'unfinished'))||count($r->unfinished)>30)throw new MonFault('MON_STATS_INVALID');
-            if(array_diff(array_keys((array)$r),['run_context_id','revision','workload','received_at','finished_at','elapsed_seconds','first_control_seconds','first_display_seconds','total_limit_seconds','measurement','partial_timing','censored','deadline_missed','new_analysis_complete','fully_complete','outcome','operations','counts','unfinished']))throw new MonFault('MON_STATS_INVALID');
+                !is_numeric(mon_get($r,'elapsed_seconds'))||!is_finite((float)$r->elapsed_seconds)||$r->elapsed_seconds<0||$r->elapsed_seconds>2592000||
+                !is_int(mon_get($r,'total_limit_seconds'))||$r->total_limit_seconds<120||$r->total_limit_seconds>2592000||
+                !(mon_get($r,'operations') instanceof stdClass)||count(get_object_vars($r->operations))>64||
+                !(mon_get($r,'counts') instanceof stdClass)||count(get_object_vars($r->counts))>32||!is_array(mon_get($r,'unfinished'))||count($r->unfinished)>30)throw new MonFault('MON_STATS_INVALID');
+            if(array_diff(array_keys((array)$r),['run_context_id','revision','workload','received_at','finished_at','elapsed_seconds','first_control_seconds','first_display_seconds','total_limit_seconds','measurement','partial_timing','censored','deadline_missed','new_analysis_complete','fully_complete','outcome','operations','counts','unfinished','terminal','limit_behavior','time_excess_seconds','count_excess']))throw new MonFault('MON_STATS_INVALID');
+            if(property_exists($r,'terminal')&&!is_bool($r->terminal))throw new MonFault('MON_STATS_INVALID');
+            if(property_exists($r,'limit_behavior')&&$r->limit_behavior!=='observe_and_continue')throw new MonFault('MON_STATS_INVALID');
+            foreach(['time_excess_seconds','count_excess']as $key)if(property_exists($r,$key)){
+                if(!($r->$key instanceof stdClass)||count(get_object_vars($r->$key))>8)throw new MonFault('MON_STATS_INVALID');
+                foreach($r->$key as $name=>$value)if(!preg_match('/^[a-z_]{1,40}$/',$name)||!is_numeric($value)||!is_finite((float)$value)||$value<0)throw new MonFault('MON_STATS_INVALID');
+            }
             if(!is_int(mon_get($r,'revision',0))||mon_get($r,'revision',0)<0||mon_get($r,'revision',0)>1000000)throw new MonFault('MON_STATS_INVALID');
-            foreach(['first_control_seconds','first_display_seconds']as $key){$v=mon_get($r,$key);if($v!==null&&(!is_numeric($v)||!is_finite((float)$v)||$v<0||$v>86400))throw new MonFault('MON_STATS_INVALID');}
+            foreach(['first_control_seconds','first_display_seconds']as $key){$v=mon_get($r,$key);if($v!==null&&(!is_numeric($v)||!is_finite((float)$v)||$v<0||$v>2592000))throw new MonFault('MON_STATS_INVALID');}
             MonRun::utc($r->received_at);MonRun::utc($r->finished_at);$ids[$r->run_context_id]=true;
-            if($r->fully_complete&&(!$r->new_analysis_complete||$r->outcome!=='complete'))throw new MonFault('MON_STATS_INVALID');
-            foreach($r->counts as $k=>$v)if(!preg_match('/^[a-z_]{1,40}$/',$k)||!is_int($v)||$v<0||$v>100000)throw new MonFault('MON_STATS_INVALID');
+            if($r->fully_complete&&(!$r->new_analysis_complete||$r->outcome!=='complete'||mon_get($r,'terminal',true)!==true))throw new MonFault('MON_STATS_INVALID');
+            foreach($r->counts as $k=>$v)if(!preg_match('/^[a-z_]{1,40}$/',$k)||!is_int($v)||$v<0)throw new MonFault('MON_STATS_INVALID');
             foreach($r->operations as $key=>$o){
                 if(!preg_match('/^(http|handler|detail|external|connector)\/[A-Za-z0-9._-]{1,64}$/',$key)||!($o instanceof stdClass)||
                     !in_array(mon_get($o,'measurement'),['server','operator_reported'],true)||!is_array(mon_get($o,'seconds'))||count($o->seconds)>20)throw new MonFault('MON_STATS_INVALID');
                 if(array_diff(array_keys((array)$o),['measurement','count','successes','timeouts','failures','retries','retry_successes','units','seconds']))throw new MonFault('MON_STATS_INVALID');
-                foreach(['count','successes','timeouts','failures','retries','retry_successes','units']as $k)if(!is_int(mon_get($o,$k))||$o->$k<0||$o->$k>100000)throw new MonFault('MON_STATS_INVALID');
+                foreach(['count','successes','timeouts','failures','retries','retry_successes','units']as $k)if(!is_int(mon_get($o,$k))||$o->$k<0)throw new MonFault('MON_STATS_INVALID');
                 if($o->successes+$o->failures!==$o->count||$o->timeouts>$o->failures||$o->retry_successes>$o->retries||$o->retries>$o->count)throw new MonFault('MON_STATS_INVALID');
-                foreach($o->seconds as $v)if(!is_numeric($v)||!is_finite((float)$v)||$v<0||$v>300)throw new MonFault('MON_STATS_INVALID');
+                foreach($o->seconds as $v)if(!is_numeric($v)||!is_finite((float)$v)||$v<0||$v>2592000)throw new MonFault('MON_STATS_INVALID');
             }
             foreach($r->unfinished as $item)if(!($item instanceof stdClass)||!preg_match('/^[A-Za-z0-9._: -]{1,96}$/',(string)mon_get($item,'task'))||
                 !preg_match('/^[A-Z0-9_.-]{1,96}$/',(string)mon_get($item,'code'))||array_diff(array_keys((array)$item),['task','code']))throw new MonFault('MON_STATS_INVALID');
@@ -3041,10 +3053,13 @@ final class MonRunStatistics {
         if(!$values)return null;sort($values,SORT_NUMERIC);return (float)$values[max(0,(int)ceil($q*count($values))-1)];
     }
     public static function summary(stdClass $s,string $workload,float $now): array {
-        self::validate($s);$all=[];$dur=[];$complete=0;$missed=0;$operations=[];$counts=[];$firstControl=[];$firstDisplay=[];
+        self::validate($s);$all=[];$dur=[];$complete=0;$missed=0;$operations=[];$counts=[];$firstControl=[];$firstDisplay=[];$excess=[];$countExcess=[];$pending=0;
         foreach($s->samples as $r){if($r->workload!==$workload||MonRun::seconds($r->finished_at)<$now-30*86400||MonRun::seconds($r->finished_at)>$now+5)continue;
             $all[]=$r;if($r->fully_complete)$complete++;if($r->deadline_missed)$missed++;
-            if(!$r->partial_timing&&!$r->censored)$dur[]=$r->elapsed_seconds;
+            if(mon_get($r,'terminal',true)===false)$pending++;
+            $excess[]=max(0,$r->elapsed_seconds-$r->total_limit_seconds);
+            foreach(mon_get($r,'count_excess',new stdClass())as $key=>$value)$countExcess[$key]=($countExcess[$key]??0)+$value;
+            if(!$r->partial_timing&&!$r->censored&&mon_get($r,'terminal',true))$dur[]=$r->elapsed_seconds;
             if(!$r->partial_timing&&mon_get($r,'first_control_seconds')!==null)$firstControl[]=$r->first_control_seconds;
             if(!$r->partial_timing&&mon_get($r,'first_display_seconds')!==null)$firstDisplay[]=$r->first_display_seconds;
             foreach($r->counts as $key=>$v)$counts[$key][]=$v;
@@ -3058,6 +3073,7 @@ final class MonRunStatistics {
         $countStats=[];foreach($counts as $key=>$values)$countStats[$key]=['samples'=>count($values),'p50'=>self::percentile($values,.5),'p90'=>self::percentile($values,.9)];
         return ['generation'=>$s->generation,'samples'=>count($all),'measured_samples'=>count($dur),'completed'=>$complete,'incomplete'=>count($all)-$complete,
             'deadline_miss_rate'=>count($all)?$missed/count($all):null,'p50_seconds'=>self::percentile($dur,.5),'p90_seconds'=>self::percentile($dur,.9),
+            'pending'=>$pending,'time_excess_total_seconds'=>array_sum($excess),'time_excess_p90_seconds'=>self::percentile($excess,.9),'count_excess_totals'=>$countExcess,
             'first_control_p90_seconds'=>self::percentile($firstControl,.9),'first_display_p90_seconds'=>self::percentile($firstDisplay,.9),'display_timing_measurement'=>'operator_reported_or_unmeasured',
             'operations'=>$operations,'counts'=>$countStats,'last'=>$all?end($all):null];
     }
@@ -3066,33 +3082,38 @@ final class MonRunStatistics {
         $total=$previous;$why=$last?'retain_until_enough_samples':'cold_start';
         // Short censored/partial observations never reduce a full-run limit.
         $recent=array_values(array_filter($s->samples,static function($r)use($workload,$now){return $r->workload===$workload&&MonRun::seconds($r->finished_at)>=$now-30*86400&&MonRun::seconds($r->finished_at)<=$now+5;}));
-        $tail=array_slice($recent,-5);$pressure=[];
-        foreach($tail as $r)if(!$r->partial_timing&&($r->deadline_missed||$r->censored))$pressure[]=max($r->elapsed_seconds,$r->total_limit_seconds);
-        if($pressure){$target=(int)(ceil(max($pressure)*1.25/10)*10);$total=min(300,max($previous,min($previous*2,$target)));$why='deadline_pressure';}
-        elseif($a['measured_samples']>=5){$target=max(120,min(300,(int)(ceil($a['p90_seconds']*1.25/10)*10)));
+        $tail=array_slice($recent,-5);$pressure=[];$completePressure=[];
+        foreach($tail as $r)if(!$r->partial_timing&&($r->deadline_missed||$r->censored)){
+            $pressure[]=max($r->elapsed_seconds,$r->total_limit_seconds);
+            if($r->fully_complete&&!$r->censored)$completePressure[]=$r->elapsed_seconds;
+        }
+        if($pressure){$target=(int)(ceil(max($pressure)*1.25/10)*10);$total=max($previous,min($previous*2,$target));$why='threshold_pressure';
+            if($completePressure)$total=max($total,(int)(ceil(max($completePressure)*1.25/10)*10));}
+        elseif($a['measured_samples']>=5){$target=max(120,(int)(ceil($a['p90_seconds']*1.25/10)*10));
             $fiveGood=count($tail)===5;foreach($tail as $r)if(!$r->fully_complete||$r->censored||$r->partial_timing)$fiveGood=false;
             if($target>=$previous){$total=min($target,$previous+30);$why='p90_with_margin';}
             elseif($fiveGood){$total=max($target,$previous-10);$why='five_complete_runs_slow_decrease';}
         }
         $httpCalls=30;$attempts=2;$symbolSeconds=8.0;$searches=2;$http=new stdClass();
         $httpCount=$a['counts']['http_calls']??null;
-        if($httpCount&&$httpCount['samples']>=5)$httpCalls=max(20,min(60,(int)ceil($httpCount['p90']*1.25)+12));
-        if($last&&mon_get($last->counts,'http_limit_hits',0)>0)$httpCalls=min(60,max($httpCalls,(int)mon_get($last->counts,'http_calls',30)+10));
+        if($httpCount&&$httpCount['samples']>=5)$httpCalls=max(20,(int)ceil($httpCount['p90']*1.25)+12);
+        if($last&&mon_get($last->counts,'http_limit_hits',0)>0)$httpCalls=max($httpCalls,(int)ceil(mon_get($last->counts,'http_calls',30)*1.25)+12);
         foreach($a['operations']as $key=>$o){
             if(strpos($key,'http/')===0){$host=substr($key,5);$cap=$host==='api.github.com'?3.0:5.0;$v=$cap;
                 if($o['count']>=5&&$o['p90_seconds']!==null){$v=max(1.0,min($cap,ceil(($o['p90_seconds']*1.5+.25)*10)/10));if($o['timeouts']/$o['count']>=.2)$v=$cap;}$http->$host=$v;
             }elseif($key==='detail/fetch'&&$o['retries']>=5){$rate=$o['retry_successes']/$o['retries'];
                 if($rate<.1)$attempts=1;elseif($rate>=.4&&$total>=180)$attempts=3;
                 if($o['count']>=5&&$o['p90_seconds']!==null)$symbolSeconds=max(3,min(8,ceil($o['p90_seconds']*1.5+.5)));
-            }elseif($key==='external/search'&&$o['sample_runs']>=5&&$o['successes']>0)$searches=max(2,min(4,(int)ceil($o['p90_count'])));
+            }elseif($key==='external/search'&&$o['sample_runs']>=5&&$o['successes']>0)$searches=max(2,(int)ceil($o['p90_count']*1.25));
         }
+        if($last&&mon_get($last->counts,'search_limit_hits',0)>0)$searches=max($searches,(int)ceil(mon_get($last->counts,'search_batches',2)*1.25));
         $pub=10;$dec=10;
         foreach(['handler/mon_detail_finalize'=>&$dec,'handler/mon_publish_process'=>&$pub]as $key=>&$reserve){$o=$a['operations'][$key]??null;
             if($o&&$o['count']>=5&&$o['p90_seconds']!==null)$reserve=(int)max(10,min(30,ceil($o['p90_seconds']*1.25)));}unset($reserve);
         return (object)['contract'=>self::POLICY,'statistics_sha256'=>$s->sha256,'statistics_generation'=>$s->generation,'sample_runs'=>$a['samples'],
-            'workload'=>$workload,'reason'=>$why,'limits'=>(object)['collection'=>$total-$pub-$dec,'decision'=>$total-$pub,'publication'=>$total,'recovery'=>300],
+            'workload'=>$workload,'reason'=>$why,'limit_behavior'=>'observe_and_continue','limits'=>(object)['collection'=>$total-$pub-$dec,'decision'=>$total-$pub,'publication'=>$total,'recovery'=>max(300,$total)],
             'http_calls'=>$httpCalls,'publication_call_reserve'=>12,'detail_attempts'=>$attempts,'detail_symbol_seconds'=>(float)$symbolSeconds,
-            'external_search_batches'=>$searches,'http_timeouts'=>$http,'maximum_total_seconds'=>300];
+            'external_search_batches'=>$searches,'http_timeouts'=>$http,'maximum_total_seconds'=>null];
     }
 }
 
@@ -3120,14 +3141,21 @@ final class MonBudget {
         return MonRun::seconds($this->run->received_at)+$limits[$phase];
     }
     public function remaining(string $phase): float {return max(0,$this->end($phase)-$this->now());}
-    public function deadline(string $phase): float {return microtime(true)+$this->remaining($phase);}
-    public function guard(string $phase): void {if($this->remaining($phase)<.05)throw new MonFault('MON_'.strtoupper($phase).'_DEADLINE');}
+    public function deadline(string $phase): float {return microtime(true)+max(10,$this->remaining($phase));}
+    public function guard(string $phase): void {
+        $this->end($phase);
+        if(mon_get($this->run,'finish_reason')==='interrupted'&&mon_get($this->run,'finished_at')!==null)throw new MonFault('MON_RUN_INTERRUPTED');
+        if($this->remaining($phase)<.05)MonExecution::observeThreshold($phase);
+    }
+    public function excess(): stdClass {
+        $out=new stdClass();foreach(['collection','decision','publication','recovery']as $phase)$out->$phase=round(max(0,$this->now()-$this->end($phase)),6);return $out;
+    }
     public function timing(): array {
         return ['received_at'=>$this->run->received_at,'first_control_at'=>$this->run->first_control_at,
             'elapsed_seconds'=>round($this->elapsed(),6),'partial_timing'=>$this->run->partial_timing,
             'collection_deadline_at'=>self::iso($this->end('collection')),'decision_deadline_at'=>self::iso($this->end('decision')),
             'publication_deadline_at'=>self::iso($this->end('publication')),'recovery_deadline_at'=>self::iso($this->end('recovery')),
-            'deadline_missed'=>$this->now()>$this->end('publication'),'mode'=>$this->run->mode,
+            'deadline_missed'=>$this->now()>$this->end('publication'),'mode'=>$this->run->mode,'limit_behavior'=>'observe_and_continue','time_excess_seconds'=>$this->excess(),
             'limits_seconds'=>['collection'=>$this->end('collection')-MonRun::seconds($this->run->received_at),'decision'=>$this->end('decision')-MonRun::seconds($this->run->received_at),
                 'publication'=>$this->end('publication')-MonRun::seconds($this->run->received_at),'recovery'=>$this->end('recovery')-MonRun::seconds($this->run->received_at)]];
     }
@@ -3189,7 +3217,7 @@ final class MonExecution {
                 if(mon_get($r,'statistics_status')==='recorded')continue;
                 if($sweep&&$checked++<8){$b=self::resume($store,$prior,static function()use($now){return $now;});
                     if(mon_get($r,'finished_at')!==null)self::finish((string)mon_get($r,'finish_reason','deadline'),mon_get($r,'unfinished',[]),mon_get($r,'censored',false));
-                    elseif($now>=$b->end('recovery'))self::finish('deadline',[(object)['task'=>'unconfirmed_run','code'=>'MON_ABANDONED_RUN']],true);
+                    elseif($now>=$b->end('recovery')){ $b->guard('recovery');self::finish('deadline',[(object)['task'=>'pending_run','code'=>'MON_RESUME_REQUIRED']],true); }
                 }
                 if(self::$active&&mon_get(self::$active->run,'run_context_id')===$prior&&mon_get(self::$active->run,'statistics_status')==='recorded')continue;
                 $keep[]=$prior;
@@ -3211,9 +3239,31 @@ final class MonExecution {
     public static function consumeHttp(string $host): void {
         if(!self::$active)return;$p=mon_get(self::$active->run,'adaptive_policy');if(!$p)return;
         self::mutate(static function($r)use($host,$p){$n=(int)mon_get($r->counts,'http_calls',0);$data=(int)mon_get($r->counts,'data_http_calls',0);
-            if($n>=$p->http_calls||($host!=='api.github.com'&&$data>=$p->http_calls-$p->publication_call_reserve))throw new MonFault('MON_HTTP_COUNT_LIMIT');
             $r->counts->http_calls=$n+1;if($host!=='api.github.com')$r->counts->data_http_calls=$data+1;
+            if($n+1>$p->http_calls)$r->counts->http_limit_hits=(int)mon_get($r->counts,'http_limit_hits',0)+1;
         });
+    }
+    public static function observeThreshold(string $phase): void {
+        if(!self::$active||!self::$store||mon_get(mon_get(self::$active->run,'threshold_phases'),$phase,false))return;
+        self::mutate(static function($r)use($phase){
+            if(!(mon_get($r,'threshold_phases')instanceof stdClass))$r->threshold_phases=new stdClass();
+            if(mon_get($r->threshold_phases,$phase,false))return;$r->threshold_phases->$phase=true;
+            $r->events[]=(object)['phase'=>'threshold_exceeded','at'=>MonBudget::iso(self::$active->now()),'code'=>'MON_'.strtoupper($phase).'_THRESHOLD_EXCEEDED','recovery'=>'continue_pending_work'];
+            $r->events=array_slice($r->events,-100);$r->last_seen_at=MonBudget::iso(self::$active->now());
+        });
+    }
+    public static function continueWork(): void {
+        if(!self::$active||mon_get(self::$active->run,'finished_at')===null)return;
+        if(mon_get(self::$active->run,'finish_reason')==='interrupted')throw new MonFault('MON_RUN_INTERRUPTED');
+        if(mon_get(self::$active->run,'finish_fully_complete',false))throw new MonFault('MON_RUN_FINISHED');
+        self::mutate(static function($r){$r->finished_at=null;$r->terminal=false;$r->finish_reason='pending';$r->statistics_status='pending';});
+    }
+    public static function countExcess($run): stdClass {
+        $p=mon_get($run,'adaptive_policy');$c=mon_get($run,'counts',new stdClass());
+        return (object)['http_calls'=>max(0,(int)mon_get($c,'http_calls',0)-(int)mon_get($p,'http_calls',30)),
+            'data_http_calls'=>max(0,(int)mon_get($c,'data_http_calls',0)-max(0,(int)mon_get($p,'http_calls',30)-(int)mon_get($p,'publication_call_reserve',12))),
+            'search_batches'=>max(0,(int)mon_get($c,'search_batches',0)-(int)mon_get($p,'external_search_batches',2)),
+            'detail_attempts'=>max(0,(int)mon_get($c,'detail_attempt_excess',0))];
     }
     public static function httpTimeout(string $host,float $fallback): float {
         return self::$active?(float)mon_get(mon_get(mon_get(self::$active->run,'adaptive_policy'),'http_timeouts'),$host,$fallback):$fallback;
@@ -3222,9 +3272,12 @@ final class MonExecution {
         if(!self::$active||!self::$store)return;
         if(mon_get(self::$active->run,'finished_at')!==null&&!(in_array(self::$active->run->save_status,['queued','publishing'],true)&&
             (strpos($operation,'http/')===0||$operation==='handler/mon_publish_process')))return;
-        if(!preg_match('/^(http|handler|detail|external|connector)\/[A-Za-z0-9._-]{1,64}$/',$operation)||!is_finite($seconds)||$seconds<0||$seconds>300||$units<0||$units>1000)throw new MonFault('MON_MEASUREMENT_INVALID');
+        if(!preg_match('/^(http|handler|detail|external|connector)\/[A-Za-z0-9._-]{1,64}$/',$operation)||!is_finite($seconds)||$seconds<0||$seconds>2592000||$units<0||$units>1000)throw new MonFault('MON_MEASUREMENT_INVALID');
         $id=self::$active->run->run_context_id;if(!isset(self::$pending[$id]))self::$pending[$id]=[];
-        if(!isset(self::$pending[$id][$operation])){if(count(self::$pending[$id])>=16)throw new MonFault('MON_MEASUREMENT_LIMIT');
+        $known=array_unique(array_merge(array_keys(get_object_vars(mon_get(self::$active->run,'operations',new stdClass()))),array_keys(self::$pending[$id])));
+        // Bound metric cardinality without cancelling work or losing counts/outcomes.
+        if(!in_array($operation,$known,true)&&count($known)>=58)$operation=explode('/',$operation,2)[0].'/other';
+        if(!isset(self::$pending[$id][$operation])){
             self::$pending[$id][$operation]=(object)['measurement'=>$measurement,'count'=>0,'successes'=>0,'timeouts'=>0,'failures'=>0,'retries'=>0,'retry_successes'=>0,'units'=>0,'seconds'=>[]];}
         $o=self::$pending[$id][$operation];$o->count++;$o->units+=$units;$ok=$code===null;$o->successes+=(int)$ok;$o->failures+=(int)!$ok;
         $o->timeouts+=(int)($code!==null&&(strpos($code,'DEADLINE')!==false||strpos($code,'TIMEOUT')!==false||in_array($code,['HTTP_TRANSPORT_28','HTTP_408','HTTP_LATE_RESPONSE','DETAIL_LATE_RESPONSE','BUDGET_EXHAUSTED'],true)));
@@ -3241,20 +3294,19 @@ final class MonExecution {
     public static function report($report): void {
         if(!($report instanceof stdClass)||!preg_match('/^[A-Za-z0-9._:-]{1,96}$/',(string)mon_get($report,'operation_id'))||
             !in_array(mon_get($report,'operation'),['external/nas','external/search','connector/github'],true)||
-            !is_bool(mon_get($report,'success'))||!is_numeric(mon_get($report,'seconds'))||!is_finite((float)$report->seconds)||$report->seconds<0||$report->seconds>300||
+            !is_bool(mon_get($report,'success'))||!is_numeric(mon_get($report,'seconds'))||!is_finite((float)$report->seconds)||$report->seconds<0||$report->seconds>2592000||
             !is_int(mon_get($report,'units',1))||mon_get($report,'units',1)<1||mon_get($report,'units',1)>1000||
             (mon_get($report,'code')!==null&&(!is_string($report->code)||!preg_match('/^[A-Z0-9_.-]{1,96}$/',$report->code))))throw new MonFault('MON_MEASUREMENT_INVALID');
         $accepted=false;$over=false;self::mutate(static function($r)use($report,&$accepted,&$over){
             if(mon_get($r,'finished_at')!==null)throw new MonFault('MON_RUN_FINISHED');
             if(!is_array(mon_get($r,'reported_operations')))$r->reported_operations=[];
             if(in_array($report->operation_id,$r->reported_operations,true))return;
-            if(count($r->reported_operations)>=100)throw new MonFault('MON_MEASUREMENT_LIMIT');
             $over=$report->operation==='external/search'&&(int)mon_get(mon_get($r,'counts'),'search_batches',0)>=(int)mon_get(mon_get($r,'adaptive_policy'),'external_search_batches',2);
             $r->reported_operations[]=$report->operation_id;if(!(mon_get($r,'counts')instanceof stdClass))$r->counts=new stdClass();
             $k=$report->operation==='external/search'?'search_batches':'reported_external_calls';$r->counts->$k=(int)mon_get($r->counts,$k,0)+1;$accepted=true;
         });
         if($accepted){self::measure($report->operation,(float)$report->seconds,$report->success?null:(string)mon_get($report,'code','EXTERNAL_FAILED'),(int)mon_get($report,'units',1),'operator_reported');
-            self::event('external_operation_reported',$over?['code'=>'MON_SEARCH_COUNT_LIMIT']:[]);}
+            self::event('external_operation_reported',$over?['code'=>'MON_SEARCH_THRESHOLD_EXCEEDED']:[]);}
     }
     public static function finish(string $reason='finished',array $unfinished=[],bool $censored=false): array {
         if(!self::$active||!self::$store)throw new MonFault('MON_RUN_CONTEXT_REQUIRED');
@@ -3264,26 +3316,33 @@ final class MonExecution {
         $b=self::$active;
         self::mutate(static function($r)use($reason,$unfinished,$b,$censored){self::drain($r);
             $fully=$r->new_analysis_complete&&$r->final_available&&in_array($r->save_status,['saved','no_change'],true);
-            $state=MonRun::digest(MonRun::pick($r,['final_available','new_analysis_complete','save_status','counts','operations']));
+            if(mon_get($r,'finished_at')!==null&&!$fully&&$reason==='finished'&&in_array(mon_get($r,'finish_reason'),['failed','interrupted'],true))$reason=$r->finish_reason;
+            if(!$unfinished&&!$fully)$unfinished=mon_get($r,'unfinished',[]);
+            $terminal=$fully||in_array($reason,['interrupted','failed'],true);
+            $state=MonRun::digest((object)['state'=>MonRun::pick($r,['final_available','new_analysis_complete','save_status','counts','operations']),'terminal'=>$terminal,
+                'elapsed_bucket'=>$terminal?null:(int)floor($b->elapsed()/10),'unfinished'=>$unfinished]);
             if(mon_get($r,'finished_at')!==null&&mon_get($r,'finish_state_sha256')===$state)return;
-            if(mon_get($r,'finished_at')!==null&&!$fully)$reason=(string)mon_get($r,'finish_reason',$reason);
-            if(mon_get($r,'finished_at')!==null&&!$unfinished)$unfinished=mon_get($r,'unfinished',[]);
+            if(mon_get($r,'checkpoint_at')!==null&&!$terminal&&mon_get($r,'finish_state_sha256')===$state)return;
+            if(mon_get($r,'finished_at')!==null&&!$unfinished&&!$fully)$unfinished=mon_get($r,'unfinished',[]);
             $r->finish_state_sha256=$state;$r->finish_revision=(int)mon_get($r,'finish_revision',0)+1;
-            $r->finished_at=MonBudget::iso($b->now());$r->elapsed_seconds=round($b->elapsed(),6);$r->finish_reason=$reason;
+            $at=MonBudget::iso($b->now());$r->finished_at=$terminal?$at:null;$r->checkpoint_at=$at;$r->terminal=$terminal;
+            $r->elapsed_seconds=round($b->elapsed(),6);$r->finish_reason=$terminal?$reason:'pending';
             $r->censored=$censored;$r->finish_fully_complete=$fully;
-            if($censored)$r->elapsed_seconds=min($r->elapsed_seconds,$b->end('recovery')-MonRun::seconds($r->received_at));
             $r->unfinished=$unfinished;$r->statistics_status='pending';
         });
         $r=$b->run;$fully=$r->new_analysis_complete&&$r->final_available&&in_array($r->save_status,['saved','no_change'],true);
-        $sample=(object)['run_context_id'=>$r->run_context_id,'revision'=>$r->finish_revision,'workload'=>mon_get($r,'workload','mon'),'received_at'=>$r->received_at,'finished_at'=>$r->finished_at,
+        $observed=MonRun::seconds(mon_get($r,'checkpoint_at',$r->finished_at));$timeExcess=new stdClass();
+        foreach(['collection','decision','publication','recovery']as $phase)$timeExcess->$phase=round(max(0,$observed-$b->end($phase)),6);
+        $sample=(object)['run_context_id'=>$r->run_context_id,'revision'=>$r->finish_revision,'workload'=>mon_get($r,'workload','mon'),'received_at'=>$r->received_at,'finished_at'=>mon_get($r,'checkpoint_at',$r->finished_at),
             'elapsed_seconds'=>$r->elapsed_seconds,'first_control_seconds'=>round(max(0,MonRun::seconds($r->first_control_at)-MonRun::seconds($r->received_at)),6),
             'first_display_seconds'=>mon_get($r,'first_display_seconds'),'total_limit_seconds'=>(int)($b->end('publication')-MonRun::seconds($r->received_at)),
-            'measurement'=>'server','partial_timing'=>$r->partial_timing,'censored'=>mon_get($r,'censored',false),'deadline_missed'=>MonRun::seconds($r->finished_at)>$b->end('publication'),
+            'measurement'=>'server','partial_timing'=>$r->partial_timing,'censored'=>mon_get($r,'censored',false),'deadline_missed'=>MonRun::seconds(mon_get($r,'checkpoint_at',$r->finished_at))>$b->end('publication'),
             'new_analysis_complete'=>$r->new_analysis_complete,'fully_complete'=>$fully&&!mon_get($r,'censored',false),
-            'outcome'=>mon_get($r,'censored',false)?'expired':($fully?'complete':($r->finish_reason==='interrupted'?'interrupted':($r->finish_reason==='failed'?'failed':'incomplete'))),
+            'terminal'=>mon_get($r,'terminal',true),'limit_behavior'=>'observe_and_continue','time_excess_seconds'=>$timeExcess,'count_excess'=>self::countExcess($r),
+            'outcome'=>mon_get($r,'terminal',true)===false?'incomplete':(mon_get($r,'censored',false)?'expired':($fully?'complete':($r->finish_reason==='interrupted'?'interrupted':($r->finish_reason==='failed'?'failed':'incomplete')))),
             'operations'=>mon_get($r,'operations',new stdClass()),'counts'=>mon_get($r,'counts',new stdClass()),'unfinished'=>mon_get($r,'unfinished',[])];
         $incoming=MonRunStatistics::seal((object)['contract'=>MonRunStatistics::CONTRACT,'generation'=>0,'samples'=>[$sample]]);
-        try{$stats=MonRunStatistics::save(self::$store,$incoming);self::mutate(static function($r){$r->statistics_status='recorded';});
+        try{$stats=MonRunStatistics::save(self::$store,$incoming);self::mutate(static function($r){$r->statistics_status=mon_get($r,'terminal',true)?'recorded':'checkpoint_recorded';});
             return ['run'=>self::view($b),'statistics'=>MonRunStatistics::summary($stats,$sample->workload,$b->now()),'next_policy'=>MonRunStatistics::recommend($stats,$sample->workload,$b->now()),'statistics_snapshot'=>$stats];
         }catch(MonFault $e){self::mutate(static function($r)use($e){$r->statistics_status=$e->faultCode;});throw $e;}
     }
@@ -3306,7 +3365,8 @@ final class MonExecution {
                 }
             }
             if(mon_get($fields,'code')==='MON_HTTP_COUNT_LIMIT')$run->counts->http_limit_hits=(int)mon_get($run->counts,'http_limit_hits',0)+1;
-            if(mon_get($fields,'code')==='MON_SEARCH_COUNT_LIMIT')$run->counts->search_limit_hits=(int)mon_get($run->counts,'search_limit_hits',0)+1;
+            if(in_array(mon_get($fields,'code'),['MON_SEARCH_COUNT_LIMIT','MON_SEARCH_THRESHOLD_EXCEEDED'],true))$run->counts->search_limit_hits=(int)mon_get($run->counts,'search_limit_hits',0)+1;
+            if($phase==='detail_attempt'&&(int)mon_get($fields,'attempts',0)>(int)mon_get(mon_get($run,'adaptive_policy'),'detail_attempts',2))$run->counts->detail_attempt_excess=(int)mon_get($run->counts,'detail_attempt_excess',0)+1;
             if($phase==='failure')$run->counts->handler_failures=(int)mon_get($run->counts,'handler_failures',0)+1;
             $run->events[]= $row; $run->events=array_slice($run->events,-100);$run->last_seen_at=$row->at;
             foreach(['final_available','new_analysis_complete','analysis_origin','save_status','job_id','artifact_id']as $k)if(array_key_exists($k,$fields))$run->$k=$fields[$k];
@@ -3318,14 +3378,16 @@ final class MonExecution {
             'final_available'=>$b->run->final_available,'save_status'=>$b->run->save_status,
             'new_analysis_complete'=>$complete,'analysis_origin'=>mon_get($b->run,'analysis_origin','unmeasured'),
             'fully_complete'=>$complete&&$b->run->final_available&&in_array($b->run->save_status,['saved','no_change'],true),
-            'next_action'=>$b->remaining('decision')<.05?'display_secured_result':($b->remaining('collection')<.05?'decide_secured_data':'collect_with_reserved_fallbacks'),
+            'limit_behavior'=>'observe_and_continue','stop_on_threshold'=>false,'count_excess'=>self::countExcess($b->run),
+            'next_action'=>$complete?(in_array($b->run->save_status,['saved','no_change'],true)?'complete':'continue_publication'):'continue_pending_work',
             'remaining_seconds'=>['collection'=>round($b->remaining('collection'),3),'decision'=>round($b->remaining('decision'),3),'publication'=>round($b->remaining('publication'),3)],
             'remaining_counts'=>['http_calls'=>max(0,(int)mon_get(mon_get($b->run,'adaptive_policy'),'http_calls',30)-(int)mon_get(mon_get($b->run,'counts'),'http_calls',0)),
                 'search_batches'=>max(0,(int)mon_get(mon_get($b->run,'adaptive_policy'),'external_search_batches',2)-(int)mon_get(mon_get($b->run,'counts'),'search_batches',0))],
             'job_id'=>mon_get($b->run,'job_id'),'artifact_id'=>mon_get($b->run,'artifact_id'),'events'=>$b->run->events,
             'adaptive_policy'=>mon_get($b->run,'adaptive_policy'),'counts'=>mon_get($b->run,'counts',new stdClass()),
             'operations'=>mon_get($b->run,'operations',new stdClass()),'unfinished'=>mon_get($b->run,'unfinished',[]),
-            'finished_at'=>mon_get($b->run,'finished_at'),'statistics_status'=>mon_get($b->run,'statistics_status','legacy_unmeasured')];
+            'finished_at'=>mon_get($b->run,'finished_at'),'checkpoint_at'=>mon_get($b->run,'checkpoint_at'),'terminal'=>mon_get($b->run,'terminal',mon_get($b->run,'finished_at')!==null),
+            'statistics_status'=>mon_get($b->run,'statistics_status','legacy_unmeasured')];
     }
 }
 
@@ -3770,7 +3832,7 @@ final class MonPublication {
             $job=(object)['contract'=>self::CONTRACT,'job_id'=>$id,'run_context_id'=>$budget->run->run_context_id,'artifact_id'=>$artifactId,
                 'original_artifact_id'=>$artifactId,'expected_head'=>$baseHead,'decision_sha256'=>$decision,'queued_by'=>$operator,
                 'received_at'=>$budget->run->received_at,'created_at'=>MonBudget::iso($this->now()),'expires_at'=>MonBudget::iso($budget->end('recovery')),
-                'status'=>$this->now()>=$budget->end('recovery')?'expired':'queued','stage'=>'source','parent_head'=>null,'base_tree'=>null,
+                'status'=>'queued','stage'=>'source','parent_head'=>null,'base_tree'=>null,
                 'blob_shas'=>new stdClass(),'tree_sha'=>null,'candidate_commit_sha'=>null,'ref_attempted'=>false,'ref_acknowledged'=>false,
                 'confirmation_checked'=>false,'rebase_count'=>0,'safe_failures'=>0,'retry_after'=>null,'last_error'=>null,'published_commit_sha'=>null,'completed_at'=>null,
                 'pending_analysis'=>false,'pending_analysis_countries'=>[]];
@@ -3782,6 +3844,7 @@ final class MonPublication {
             'save_status'=>$job->status,'stage'=>$job->stage,'final_available'=>true,'fully_complete'=>$job->status==='saved',
             'expected_head'=>$job->expected_head,'candidate_commit_sha'=>$job->candidate_commit_sha,'published_commit_sha'=>$job->published_commit_sha,
             'completed_at'=>$job->completed_at,'expires_at'=>$job->expires_at,'elapsed_seconds'=>round(max(0,$this->now()-MonRun::seconds($job->received_at)),6),
+            'limit_behavior'=>'observe_and_continue','time_excess_seconds'=>round(max(0,$this->now()-MonRun::seconds($job->expires_at)),6),
             'last_error'=>$job->last_error,'rebase_count'=>$job->rebase_count,'safe_failures'=>$job->safe_failures,
             'pending_analysis'=>$job->pending_analysis,'pending_analysis_countries'=>$job->pending_analysis_countries];
     }
@@ -3810,29 +3873,33 @@ final class MonPublication {
     private function source($job,float $deadline): void {
         $a=MonArtifact::load($this->store,$job->artifact_id);$head=$this->head($deadline);$root=$this->root($head,$deadline);
         if($head!==$job->expected_head||($root['files']['mon_data.json']??null)!==$a->source_blob_sha){
-            if($job->rebase_count>=1)throw new MonFault('MON_ANALYSIS_SOURCE_CONFLICT');
             $raw=$this->api('GET','/contents/mon_data.json?ref='.$head,null,$deadline,true);
             $latest=mon_run_source((object)['source_json'=>$raw],'source_json',(string)($root['files']['mon_data.json']??''));
             $base=mon_decode($a->source_json);$candidate=mon_decode($a->files[0]->content);$merged=MonRun::rebase($base,$candidate,$latest);
-            $text=MonRun::json($merged);$summary=MonRun::render($merged,$merged->analysis->as_of,['동시 수집 한 번 병합; 판단시각 보존']);
+            $text=MonRun::json($merged);$summary=MonRun::render($merged,$merged->analysis->as_of,['동시 수집 병합; 판단시각 보존']);
             $manifest=MonArtifact::create($this->store,$raw,[['path'=>'mon_data.json','content'=>$text,'blob_sha'=>MonRun::gitSha($text)],['path'=>'mon_result.md','content'=>$summary,'blob_sha'=>MonRun::gitSha($summary)]],(array)$a->metadata);
             $job->artifact_id=$manifest['artifact_id'];$job->rebase_count++;$a=MonArtifact::load($this->store,$job->artifact_id);
             $job->pending_analysis=mon_get($merged->analysis,'pending_analysis',false);$job->pending_analysis_countries=mon_get($merged->analysis,'pending_analysis_countries',[]);
         }
         $same=true;foreach($a->files as $f)if(($root['files'][$f->path]??null)!==$f->blob_sha)$same=false;
-        if($same){$job->status='saved';$job->published_commit_sha=$head;$job->completed_at=MonBudget::iso($this->now());$job->stage='complete';}
+        if($same){$job->status='saved';$job->published_commit_sha=$head;$job->completed_at=MonBudget::iso($this->now());$job->stage='complete';$job->last_error=null;$job->retry_after=null;}
         else{$job->parent_head=$head;$job->base_tree=$root['tree'];$job->stage='blobs';$job->blob_shas=new stdClass();$job->tree_sha=null;$job->candidate_commit_sha=null;$job->ref_attempted=false;$job->ref_acknowledged=false;}
         $this->save($job);
     }
     private function confirm($job,float $deadline): void {
-        if($job->confirmation_checked){$job->status='unknown';return;}
         if($this->http->remaining($deadline)<.05)throw new MonFault('BUDGET_EXHAUSTED');
         $job->confirmation_checked=true;$this->save($job);$head=$this->head($deadline);$saved=$head===$job->candidate_commit_sha;
         if(!$saved){$root=$this->root($head,$deadline);$a=MonArtifact::load($this->store,$job->artifact_id);$saved=true;
             foreach($a->files as $f)if(($root['files'][$f->path]??null)!==$f->blob_sha)$saved=false;}
-        $job->status=$saved?'saved':'unknown';$job->published_commit_sha=$saved?$head:null;
-        $job->completed_at=$saved?MonBudget::iso($this->now()):null;$job->stage=$saved?'complete':'confirmation';
-        $job->last_error=$saved?null:'MON_PUBLICATION_UNCONFIRMED';$this->save($job);
+        $job->status=$saved?'saved':'queued';$job->published_commit_sha=$saved?$head:null;
+        $job->completed_at=$saved?MonBudget::iso($this->now()):null;
+        if($saved){$job->stage='complete';$job->last_error=null;}
+        else{
+            // A successful current-head/file-pair read proves the intended result is absent.
+            // Start from that source again; a real concurrent analysis conflict remains protected.
+            $job->stage='source';$job->ref_attempted=false;$job->ref_acknowledged=false;$job->confirmation_checked=false;
+            $job->last_error='MON_PUBLICATION_NOT_YET_SAVED';$job->retry_after=$this->now()+30;
+        }$this->save($job);
     }
     public function process(string $id,float $deadline): array {
         MonExecution::id($id);
@@ -3845,14 +3912,14 @@ final class MonPublication {
                 MonExecution::resume($this->store,$job->run_context_id,$this->clock,$this->mono);$metered=true;
             }
             if($hasBudget)MonArtifact::load($this->store,$job->artifact_id);
+            if(($job->status==='expired'&&$job->last_error==='MON_PUBLICATION_DEADLINE')||
+                ($job->status==='failed'&&MonDaily::retryable((string)$job->last_error)))$job->status=$job->ref_attempted?'publishing':'queued';
+            if($job->status==='unknown'&&$job->ref_attempted)$job->status='publishing';
             if(in_array($job->status,['saved','failed','conflict','expired','unknown'],true))return $this->receipt($job);
             if($this->now()+5<MonRun::seconds(mon_get($job,'last_seen_at',$job->created_at))){$job->status=$job->ref_attempted?'unknown':'failed';$job->last_error='MON_CLOCK_REWIND';$this->save($job);return $this->receipt($job);}
-            if($this->now()>=MonRun::seconds($job->expires_at)){
-                $job->status=$job->ref_attempted?'unknown':'expired';$job->last_error='MON_PUBLICATION_DEADLINE';$this->save($job);return $this->receipt($job);
-            }
             if(!$hasBudget)return $this->receipt($job);
+            if($metered){MonExecution::continueWork();MonExecution::$active->guard('recovery');}
             if(mon_get($job,'retry_after')!==null&&$this->now()<$job->retry_after)return $this->receipt($job);
-            $deadline=min($deadline,microtime(true)+max(0,MonRun::seconds($job->expires_at)-$this->now()));
             $this->http->rememberDeadline($deadline);
             $job->status='publishing';$this->save($job);
             if($job->ref_attempted){$this->confirm($job,$deadline);return $this->receipt($job);}
@@ -3896,22 +3963,21 @@ final class MonPublication {
                 elseif(!$job->ref_acknowledged&&in_array($e->faultCode,['HTTP_409','HTTP_422'],true)){
                     $job->ref_attempted=false;$job->stage='source';
                     try{$this->source($job,$deadline);if($job->status!=='saved')$job->status='queued';}
-                    catch(MonFault $conflict){$job->status=$conflict->faultCode==='BUDGET_EXHAUSTED'?'queued':'conflict';$job->last_error=$conflict->faultCode;}
-                }elseif($e->faultCode==='BUDGET_EXHAUSTED'&&$job->ref_acknowledged&&!$job->confirmation_checked){$job->status='publishing';}
-                elseif(!$job->confirmation_checked&&$this->http->remaining($deadline)>=.05){
-                    try{$this->confirm($job,$deadline);}catch(MonFault $ignore){$job->status='unknown';}
+                    catch(MonFault $conflict){$job->status=MonDaily::retryable($conflict->faultCode)?'queued':'conflict';$job->last_error=$conflict->faultCode;}
+                }elseif(MonDaily::retryable($e->faultCode)||$e->faultCode==='MON_PUBLICATION_UNCONFIRMED'){
+                    $job->status='publishing';$job->retry_after=$this->now()+max(30,$e->retryAfter);
                 }else $job->status='unknown';
             }elseif($e->faultCode==='BUDGET_EXHAUSTED')$job->status='queued';
             elseif($e->faultCode==='MON_ANALYSIS_SOURCE_CONFLICT')$job->status='conflict';
-            elseif(strpos($e->faultCode,'HTTP_TRANSPORT_')===0||in_array($e->faultCode,['HTTP_429','HTTP_500','HTTP_502','HTTP_503','HTTP_504'],true)){
-                $job->safe_failures++;$job->status=$job->safe_failures>=2?'failed':'queued';$job->retry_after=$this->now()+max(30,$e->retryAfter);
+            elseif(MonDaily::retryable($e->faultCode)){
+                $job->safe_failures++;$job->status='queued';$job->retry_after=$this->now()+max(min(300,30*(2**min(4,$job->safe_failures-1))),$e->retryAfter);
             }else $job->status='failed';
             $this->save($job);return $this->receipt($job);
         }finally{
             try{if($metered&&$job){
-                MonExecution::measure('handler/mon_publish_process',min(300,max(0,(float)($this->mono)()-$processStart)),mon_get($job,'last_error'));
+                MonExecution::measure('handler/mon_publish_process',max(0,(float)($this->mono)()-$processStart),mon_get($job,'last_error'));
                 $receipt=$this->receipt($job);MonExecution::event('publication_observed',['save_status'=>$receipt['save_status'],'job_id'=>$id]);
-                if(mon_get(MonExecution::$active->run,'finished_at')!==null)MonExecution::finish();
+                MonExecution::finish(in_array($job->status,['failed','conflict'],true)?'failed':'finished');
             }}catch(MonFault $e){$this->store->log('run_metrics_unavailable',['code'=>$e->faultCode]);}
             finally{if($oldActive&&MonExecution::$active&&$oldActive->run->run_context_id===MonExecution::$active->run->run_context_id)$oldActive->run=MonExecution::$active->run;
                 MonExecution::$active=$oldActive;MonExecution::$store=$oldStore;flock($lock,LOCK_UN);fclose($lock);}
@@ -3920,7 +3986,9 @@ final class MonPublication {
     public function processNext(float $deadline): ?array {
         $files=glob($this->store->path('publish-*.php'))?:[];sort($files,SORT_STRING);
         foreach($files as $file)if(preg_match('/^mon_publish-([a-f0-9]{64})\.php$/',basename($file),$m)){
-            try{$j=$this->load($m[1]);if(in_array($j->status,['queued','publishing'],true)&&($j->retry_after===null||$this->now()>=$j->retry_after||$this->now()>=MonRun::seconds($j->expires_at)))return $this->process($m[1],$deadline);}
+            try{$j=$this->load($m[1]);$resumable=in_array($j->status,['queued','publishing'],true)||($j->status==='unknown'&&$j->ref_attempted)||
+                    ($j->status==='expired'&&$j->last_error==='MON_PUBLICATION_DEADLINE')||($j->status==='failed'&&MonDaily::retryable((string)$j->last_error));
+                if($resumable&&($j->retry_after===null||$this->now()>=$j->retry_after))return $this->process($m[1],$deadline);}
             catch(MonFault $e){$this->store->log('publication_job_invalid',['code'=>$e->faultCode]);continue;}
         }return null;
     }
@@ -4011,7 +4079,6 @@ function mon_run_web(string $api): int {
             elseif($select){
                 $decision=mon_get($request,'decision');$fixed=MonRun::seconds(mon_get($decision,'fixed_as_of'));
                 if($fixed>microtime(true)+5)throw new MonFault('MON_TIME_FUTURE');
-                if(MonExecution::$active&&$fixed>MonExecution::$active->end('decision'))throw new MonFault('MON_DECISION_DEADLINE');
                 $decisionSha=hash('sha256',MonRun::json($decision));$prior=MonExecution::$active?mon_get(MonExecution::$active->run,'artifact_id'):null;
                 if($api==='mon_detail_finalize'&&is_string($prior)){
                     $a=MonArtifact::load($store,$prior);
@@ -4057,7 +4124,7 @@ function mon_run_web(string $api): int {
                     $publication=new MonPublication($store,new MonHttp(),$cfg);$receipt=$publication->enqueue($result['manifest']['artifact_id'],(string)mon_get($request,'expected_head',''),MonExecution::$active,$operator);
                     $publicationJobId=$receipt['job_id'];$publicationReceipt=$receipt;
                     MonExecution::event('publication_queued',['save_status'=>$receipt['save_status'],'job_id'=>$receipt['job_id']]);
-                    if($mode==='inline'){$publicationAttempted=true;$receipt=$publication->process($receipt['job_id'],MonExecution::$active->deadline('publication'));$publicationReceipt=$receipt;}
+                    if($mode==='inline'){$publicationAttempted=true;$receipt=$publication->process($receipt['job_id'],min(microtime(true)+8,MonExecution::$active->deadline('publication')));$publicationReceipt=$receipt;}
                     $result['publication']=$receipt;$result['save_status']=$receipt['save_status'];
                     $result['manifest']=MonArtifact::manifest(MonArtifact::load($store,$receipt['artifact_id']));
                     MonExecution::event('publication_observed',['save_status'=>$receipt['save_status'],'job_id'=>$receipt['job_id']]);
@@ -4079,7 +4146,7 @@ function mon_run_web(string $api): int {
         }
         if(MonExecution::$active&&!in_array($api,['mon_run_finish','mon_publish_process'],true)){
             $operation=in_array($api,['mon_detail_finalize','mon_publish_process'],true)?$api:(in_array($api,['mon_detail_prepare','mon_swing_prepare'],true)?'preparation':(in_array($api,['mon_detail_request','mon_detail_requests','mon_discovery_plan'],true)?'collection':'control'));
-            MonExecution::measure('handler/'.$operation,min(300,mon_monotonic()-$mono));MonExecution::event('handler_measured');
+            MonExecution::measure('handler/'.$operation,mon_monotonic()-$mono);MonExecution::event('handler_measured');
             if(in_array($api,['mon_run_start','mon_run_status','mon_run_observe','mon_run_report'],true))$result=array_merge($result,MonExecution::view(MonExecution::$active));
         }
         $timing=MonExecution::$active?MonExecution::$active->timing():['partial_timing'=>true,'received_at'=>null,'first_control_at'=>MonBudget::iso($start),'timing_basis'=>'handler_only'];
@@ -4095,14 +4162,14 @@ function mon_run_web(string $api): int {
         elseif(in_array($code,['MON_ANALYSIS_SOURCE_CONFLICT','MON_STATE_TOKEN_INVALID','MON_SOURCE_SHA_MISMATCH','MON_FINAL_DECISION_IMMUTABLE'],true))http_response_code(409);
         else http_response_code(400);
         if($publication&&is_string($publicationJobId))try{$publicationReceipt=$publication->receipt($publication->load($publicationJobId));}catch(Throwable $ignore){if($publicationAttempted)$publicationReceipt=['save_status'=>'unknown','job_id'=>$publicationJobId,'fully_complete'=>false];}
-        try{MonExecution::measure('handler/control',min(300,mon_monotonic()-$mono),$code);MonExecution::event('failure',['code'=>$code,'result_impact'=>'publication_receipt_authoritative_no_substitute_selection']);}catch(Throwable $ignore){}
+        try{MonExecution::measure('handler/control',mon_monotonic()-$mono,$code);MonExecution::event('failure',['code'=>$code,'result_impact'=>'publication_receipt_authoritative_no_substitute_selection']);}catch(Throwable $ignore){}
         $fallback=MonBootstrap::recover($data,$request,$store);
         echo mon_json(['ok'=>false,'api'=>$api,'processor_version'=>MON_VERSION,'error_code'=>$code,'write_required'=>false,
             'remote_written'=>mon_get($publicationReceipt,'save_status')==='saved'?true:(in_array(mon_get($publicationReceipt,'save_status'),['publishing','unknown'],true)?null:false),
             'publication'=>$publicationReceipt,'fallback_result'=>$fallback,'new_analysis_complete'=>MonExecution::$active?mon_get(MonExecution::$active->run,'new_analysis_complete',false):false,'fallback_summary'=>MonBootstrap::summary($fallback,$code),'handler_seconds'=>mon_monotonic()-$mono,
             'run_timing'=>MonExecution::$active?MonExecution::$active->timing():['partial_timing'=>true]],false);return 1;
     }catch(Throwable $e){
-        try{MonExecution::measure('handler/control',min(300,mon_monotonic()-$mono),'MON_HANDLER_INTERNAL_ERROR');MonExecution::event('failure',['code'=>'MON_HANDLER_INTERNAL_ERROR']);}catch(Throwable $ignore){}
+        try{MonExecution::measure('handler/control',mon_monotonic()-$mono,'MON_HANDLER_INTERNAL_ERROR');MonExecution::event('failure',['code'=>'MON_HANDLER_INTERNAL_ERROR']);}catch(Throwable $ignore){}
         $fallback=MonBootstrap::recover($data,$request,$store);
         http_response_code(500);echo mon_json(['ok'=>false,'api'=>$api,'processor_version'=>MON_VERSION,'error_code'=>'MON_HANDLER_INTERNAL_ERROR','write_required'=>false,'remote_written'=>$publicationAttempted?null:false,
             'publication'=>$publicationReceipt,'fallback_result'=>$fallback,'new_analysis_complete'=>MonExecution::$active?mon_get(MonExecution::$active->run,'new_analysis_complete',false):false,'fallback_summary'=>MonBootstrap::summary($fallback,'MON_HANDLER_INTERNAL_ERROR')],false);return 1;

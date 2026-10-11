@@ -1,3 +1,31 @@
+# MON D1.5 — 완료 우선 설계
+
+2026-10-11 KST · mon.php **1.8.0** · monitor.md **v4.8** · MON-STATS-1.0 / MON-ADAPTIVE-1.1
+
+사용자의 최신 요청에 따라 시간·횟수 초과의 강제 종료를 제거했다. 기존 비교 기준과 접수/문맥은 유지해 실제 초과를 측정하고 다음 기준에 반영한다. 아래 과거 D1.0~D1.4의 마감/최대 호출/최대 시도/만료 설계는 역사적 기록이며 현재 규칙이 아니다. 현재 운영 규칙은 v4.8 실행 블록과 이 절을 따른다. 선정·자료 유효성·인증·원자 저장·NAS 수동 시작·부하 제어는 유지한다.
+
+| 경로 | 변경과 근거 | 검증 관점 |
+|---|---|---|
+| MonBudget.guard / prepare / finalize | 기준 초과를 기록하되 새 검증/판단/확정 허용 | 가상700초 경과 후 새 결론/원자 파일 생성·저장 |
+| consumeHttp / 외부 report | 횟수 초과를 계측하며 전송/보고 계속 | 90회 전송·105건 보고·중복 ID 방지·640.5초 외부 시간 보존 |
+| MonDetailWorker / 성공 원문 | done 전환을 없애고 retry_wait·원천/지수 체크포인트·대기 강화 | 상세4번째 복구·옛 DETAIL_ATTEMPT_LIMIT 재개·0 회차는 시도하지 않고 보존 |
+| MonPublication | 기한/실패2회/병합1회 종료 제거·같은 journal·원격 확인 재개 | 4회 실패 후 저장·유실 확인 재개·중복 ref 없음·collection 병합2회 |
+| MonExecution.finish / 시작 인덱스 | 미완료는 nonterminal checkpoint·finished_at=null·revision upsert |300초 뒤 강제 만료 없음·명시 interrupted는 존중·실제 완료만 terminal |
+| MonRunStatistics | 초과 초/횟수·진행 하한/종료 실측 분리·참조 상한 제거 | 완료 초과×1.25·미완료 보수 증가·현재 기준 고정·다음만 조정 |
+| MonProgress / 웹 | collecting 유지·시간만 바뀌어도 페이지 토큰 유지 | 늦은 요청/준비/확정·manifest 청크·자율 결정 불변·성공 위조 방지 |
+
+시간/횟수는 종료 조건이 아닌 계획 기준이다. 단일 소켓과 데몬 회차는 제한해 NAS 부하를 낮추고 대기 작업을 다음 회차로 이월한다. 외부 장애가 영구 지속하거나 인증/데이터가 손상되면 실제 미해결을 표시하며 성공으로 위장하지 않는다. 정상 HTTP가 항상 성공하거나 NAS 전체 부하가 항상 일정하다고 보장하지 않는다.
+
+운영 이력2회(183초 하한/290.10초 미완료)와 시험 표본은 분리했다. 현재 다음350/360/370초는 통계 계획 기준이며300초 강제 종료 상한이 아니다. 현재 가상700초 완전 완료처럼 종료 실측이 확보되면25% 여유의 기준을 적용하고, 미완료 하한은 보수적으로 반영한다. protected rolling snapshot은60회/256KiB이고 같은 ID는 revision으로 갱신한다.
+
+이번 변경 검증은 함수/복구22 PASS + 로컬 웹 HTTP25 PASS = **47 PASS / 0 FAIL**이다. 기존 시험 전체는 반복하거나 합산하지 않았다.
+
+신규 검증: [함수·복구](tests/mon_completion_tests.json), [실제 로컬 웹 HTTP](tests/mon_completion_http_tests.json). 합성 시장자료와 가상 시간이며 실제 NAS/외부 공급자/주문 호출은 없다. 기존 PASS를 이번 성적에 합산하지 않는다. GitHub 반영과 NAS /web/mon.php 실제 교체·수동 재시작은 별도다.
+
+---
+
+## 과거 구현 이력 — 현재 종료 규칙과 구분
+
 # MON 보강 설계 D1.4
 
 2026-10-11 KST · mon.php1.7.0 · monitor.md v4.7 · MON-STATS-1.0 / MON-ADAPTIVE-1.0
