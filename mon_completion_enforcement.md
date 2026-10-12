@@ -2,6 +2,8 @@
 
 mon.php **1.8.4** · 지시문 **v4.12** · MON-COMPLETION-1.0 · PHP7.4 호환
 
+이 계약의 완료는 분석·필수 시장 확인·원격 파일 저장 범위다. NAS 수집 정상화와 운영 후처리의 완료 scope는 [차기 ERR-C 설계 D2.0](mon_errc_upgrade_design.md)에 정의한 구현 예정 사항이며 기존 영수증의 의미를 소급 변경하지 않는다.
+
 ## 문제와 결과
 
 기존 실행은 new_analysis_complete/final_available와 saved/no_change만으로 완료를 판정했다. 장중 가격·기업 확인이 미완료 목록에 남아 있어도 종료·통계·저장 응답에서 완료가 될 수 있었다. 새 구현은 서버가 검증한 파일 쌍의 보호 scope와 실제 원격 저장 증명을 확인하고 필수 작업0건일 때만 완료한다. ChatGPT도 영수증을 확인하고 남은 실제 작업을 수행해야 한다.
@@ -27,7 +29,7 @@ snapshot은 native 검증 뒤 서버가 만들며 최대196,608바이트의 보�
 4. 완료일/계획/신규 입력/중대한 사건 등 새 분석이 필요하면 action=reprepare로 이전 artifact 이력을 보존하고 같은 run_id에서 prepare/finalize를 진행한다. 과거 확정 decision은 덮어쓰지 않는다.
 5. 직전 게시가 불명확하면 먼저 확인한다. 권한/설정을 정정한 job은 mon_publish_process(resume=true)로 재개하며 ref intent가 있으면 GET 확인부터 한다. 다른 분석/설정 충돌은 덮어쓰지 않는다.
 6. 커넥터로 저장했어도 native 게시 경로가 SHA를 읽어 확인한다. 이미 반영된 결과에는 새 POST/ref를 만들지 않는다. collection만 나중에 바뀌면 그 원문을 보존한 읽기 검증을 한다. 공개 저장소 GET은 쓰기 토큰 없이 허용하고 실제 POST/PATCH는 기존 토큰이 필수다.
-7. mon_run_finish가 finish_accepted=true, fully_complete=true와 올바른 완료 영수증을 반환해야 완료 보고가 가능하다. false이면 checkpoint를 보존하고 next_required_job을 처리한다.
+7. mon_run_finish 응답의 finish_accepted=true, run.fully_complete=true, run.completion.required_checks_pending=0과 올바른 완료 영수증을 함께 확인해야 분석 범위 완료 보고가 가능하다. false이면 checkpoint를 보존하고 run.next_required_job을 처리한다. mon_run_status는 직접 completion/next_required_job 구조다.
 
 ## 판단과 미완료 구분
 
