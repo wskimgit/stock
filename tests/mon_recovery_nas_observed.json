@@ -1,0 +1,39 @@
+{
+  "kind": "actual_read_only_NAS_observation",
+  "captured_heartbeat_at": "2026-10-12T15:41:00Z",
+  "processor_version": "1.8.5",
+  "running": true,
+  "heartbeat_fresh": true,
+  "readiness": "resource_paused",
+  "resources": {
+    "state": "deferred",
+    "reason": "recovering",
+    "wait_seconds": 120,
+    "cores": 1,
+    "load1": 0.78,
+    "memory_available_bytes": 73166848.0,
+    "memory_floor_bytes": 33554432,
+    "measurement_available": true,
+    "priority_applied": true,
+    "memory_limit_applied": true
+  },
+  "counts": {
+    "requests": 11,
+    "done": 9,
+    "pending": 0,
+    "retry_wait": 0,
+    "serialization_pending": 0,
+    "blocked": 0,
+    "conflict": 2,
+    "current_missing": 2,
+    "latest": 2,
+    "reused": 7,
+    "previous": 2,
+    "no_data": 0,
+    "invalid": 0,
+    "timed_out": 0,
+    "threshold_exceeded": 11
+  },
+  "raw_capture_sha256": "bb6854229504ffb40d77dadb62482f053b3cc3ca6449034c2c2ab19f9610c5f5",
+  "new_code_deployed": false
+}

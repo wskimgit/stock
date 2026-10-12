@@ -1,0 +1,303 @@
+{
+    "code": "1.8.6",
+    "design": "MON-RECOVERY-D2.1",
+    "cases_total": 55,
+    "passed": 52,
+    "failed": 3,
+    "seconds": 0.44486374901316594,
+    "peak_memory_bytes": 12582912,
+    "external_market_requests": 0,
+    "orders": 0,
+    "nas_deployed": false,
+    "observations": {
+        "observed_load_replay": {
+            "policy": "MON-RESOURCE-1.1",
+            "state": "throttled",
+            "reason": "load",
+            "wait_seconds": 30,
+            "cores": 1,
+            "load1": 2.7,
+            "cpu_busy_percent": null,
+            "cpu_measurement_available": false,
+            "work_allowed": true,
+            "memory_available_bytes": 63721472.0,
+            "memory_floor_bytes": 33554432,
+            "measurement_available": true,
+            "priority_applied": false,
+            "memory_limit_applied": false
+        },
+        "recovery_check_seconds": {
+            "old_observed": 120,
+            "new_simulated": 5
+        },
+        "krx_whole_window_proof": {
+            "policy": "whole_new_provider_window_preserve_old_no_row_merge",
+            "verified_close_count": 70,
+            "stock_bars_sha256": "176cb5de56d34c65deefef063642f4e92d7b1459b4ea66cd4aba0cbc1dab9a76",
+            "close_comparison": "half_display_unit",
+            "currency": "KRW",
+            "approximate_close_count": 0,
+            "maximum_close_difference": 0.0,
+            "raw_prices_preserved": true,
+            "corroborating_source_url": "https://openapi.koreainvestment.com:9443/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice?FID_COND_MRKT_DIV_CODE=J&FID_INPUT_ISCD=000001&FID_INPUT_DATE_1=20260105&FID_INPUT_DATE_2=20260410&FID_PERIOD_DIV_CODE=D&FID_ORG_ADJ_PRC=0",
+            "corroborating_record_sha256": "6ef6ece5d517d39db85b696e0aef507b152f929ca13407e070ce12de6412ab58",
+            "volume_difference_count": 0,
+            "volume_basis": "use_new_provider_entire_window_differences_preserved",
+            "checked_at": "2026-10-12T16:17:04Z",
+            "symbol_id": "KR|KOSPI|000001",
+            "reference_market": "KRX",
+            "reference_adjustment": "0",
+            "corroborating_source": "KIS_KRX_REFERENCE"
+        },
+        "reference_page_resume": {
+            "logical_HTTP": 3,
+            "pages": 2,
+            "rows": 130,
+            "external_network": 0
+        },
+        "independent_review_times": {
+            "issuer": "2026-10-12T16:17:05.000000Z",
+            "trading": "2026-10-12T16:17:15.000000Z"
+        },
+        "native_krx_recovery": {
+            "rows": 130,
+            "pages": 2,
+            "source_replay_HTTP": 0,
+            "old_new_reference_preserved": true,
+            "external_network": 0
+        },
+        "publication_recovery": {
+            "same_run_context": true,
+            "same_received_at": true,
+            "issuer_review_age_seconds": 350,
+            "fresh_trading_only": true,
+            "remote": "synthetic Git transport",
+            "actual_external_Git_mutations": 0
+        }
+    },
+    "cases": [
+        {
+            "case": "A01 observed load2.7 with61MiB and first CPU sample degrades without full suspension",
+            "pass": true
+        },
+        {
+            "case": "A01 actual memory floor still blocks heavy work",
+            "pass": true
+        },
+        {
+            "case": "A01 memory at the floor degrades without detail collection",
+            "pass": true
+        },
+        {
+            "case": "A02 CPU percentage comes from actual counter deltas",
+            "pass": true
+        },
+        {
+            "case": "A02 missing or reset counters never manufacture zero CPU usage",
+            "pass": true
+        },
+        {
+            "case": "A02 measured saturation retains hard protection",
+            "pass": true
+        },
+        {
+            "case": "A02 moderate measured CPU pressure uses throttling",
+            "pass": true
+        },
+        {
+            "case": "A02 healthy samples restore after a short recovery check",
+            "pass": true
+        },
+        {
+            "case": "A02 memory recovery may resume slowly while average load remains high",
+            "pass": true
+        },
+        {
+            "case": "A02 missing all metrics is explicit and conservative",
+            "pass": true
+        },
+        {
+            "case": "A03 normal caps remain unchanged while throttled quotas decrease",
+            "pass": true
+        },
+        {
+            "case": "A03 critical tick performs no remote read or publication",
+            "pass": true
+        },
+        {
+            "case": "A03 soft pressure still refreshes settings from GitHub",
+            "pass": true
+        },
+        {
+            "case": "A04 complete independent KRX window approves explicit whole-source replacement",
+            "pass": true
+        },
+        {
+            "case": "A04 actual100won discrepancy is never rounded into agreement",
+            "pass": true
+        },
+        {
+            "case": "A04 half-display-unit approximation preserves unrounded new prices",
+            "pass": true
+        },
+        {
+            "case": "A04 reject incorrect reference market",
+            "pass": true
+        },
+        {
+            "case": "A04 reject incorrect reference adjustment",
+            "pass": true
+        },
+        {
+            "case": "A04 reject incorrect reference symbol",
+            "pass": true
+        },
+        {
+            "case": "A04 reject incorrect reference currency",
+            "pass": true
+        },
+        {
+            "case": "A04 reject incorrect reference host",
+            "pass": true
+        },
+        {
+            "case": "A04 reject incorrect reference hash",
+            "pass": true
+        },
+        {
+            "case": "A04 reject incorrect reference partial",
+            "pass": true
+        },
+        {
+            "case": "A05 more than100rows checkpoints and resumes one page per call",
+            "pass": true
+        },
+        {
+            "case": "A05 complete checkpoint reuses exact reference without additional HTTP",
+            "pass": true
+        },
+        {
+            "case": "A05 changed stock window invalidates old page checkpoint",
+            "pass": true
+        },
+        {
+            "case": "A05 damaged checkpoint cannot be silently approved",
+            "pass": true
+        },
+        {
+            "case": "A05 independent fetch rejects identity",
+            "pass": true
+        },
+        {
+            "case": "A05 independent fetch rejects date",
+            "pass": true
+        },
+        {
+            "case": "A05 independent fetch rejects duplicate",
+            "pass": true
+        },
+        {
+            "case": "A05 independent fetch rejects timeout",
+            "pass": true
+        },
+        {
+            "case": "A05 page pending and network timeout remain retryable",
+            "pass": true
+        },
+        {
+            "case": "A06 trading-only patch preserves issuer time scope evidence and selected identity",
+            "pass": true
+        },
+        {
+            "case": "A06 stale price cannot become verified through trading-only patch",
+            "pass": true
+        },
+        {
+            "case": "A06 trading confirmation requires the linked independent price observation",
+            "pass": true
+        },
+        {
+            "case": "A06 trading-only update cannot promote an unchecked issuer",
+            "pass": true
+        },
+        {
+            "case": "A07 legacy review timestamps retain their original freshness behavior",
+            "pass": true
+        },
+        {
+            "case": "A07 fresh trading does not extend issuer review into another local date",
+            "pass": true
+        },
+        {
+            "case": "A07 malformed issuer time does not erase an independently valid trade",
+            "pass": true
+        },
+        {
+            "case": "A07 trading review timestamp cannot be in the future",
+            "pass": true
+        },
+        {
+            "case": "A07 explicit halted trading and issuer adverse flags remain blockers",
+            "pass": true
+        },
+        {
+            "case": "A08 old conflict signature resumes once after code upgrade",
+            "pass": true
+        },
+        {
+            "case": "A02 memory protection cannot recover from missing memory measurements",
+            "pass": false,
+            "error": "assertion failed"
+        },
+        {
+            "case": "A02 actual CPU-only measurement is not reported as unavailable",
+            "pass": false,
+            "error": "assertion failed"
+        },
+        {
+            "case": "A03 native web state distinguishes soft",
+            "pass": true
+        },
+        {
+            "case": "A03 native web state distinguishes hard",
+            "pass": true
+        },
+        {
+            "case": "A03 native web state distinguishes recovering",
+            "pass": false,
+            "error": "assertion failed"
+        },
+        {
+            "case": "A03 native web state distinguishes conflict",
+            "pass": true
+        },
+        {
+            "case": "A04/A05 native fetch resumes KRX pages and preserves old new and independent rows",
+            "pass": true
+        },
+        {
+            "case": "A04 native fetch keeps genuine disagreement blocked and saves no accepted replacement",
+            "pass": true
+        },
+        {
+            "case": "A03 native NAS completion gate throttled",
+            "pass": true
+        },
+        {
+            "case": "A03 native NAS completion gate resource_paused",
+            "pass": true
+        },
+        {
+            "case": "A03 native NAS completion gate conflict_under_throttle",
+            "pass": true
+        },
+        {
+            "case": "A06/A07 native finalize supports fresh trading with older same-day issuer proof",
+            "pass": true
+        },
+        {
+            "case": "A06/A07 saved stale trading recovers in the same run and completes only after publication",
+            "pass": true
+        }
+    ]
+}

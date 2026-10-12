@@ -6,13 +6,13 @@ PHP=os.environ.get('MON_TEST_PHP',shutil.which('php') or 'php')
 started=time.monotonic(); cases=[]
 def check(name, condition, detail=''):
     cases.append({'case':name,'pass':bool(condition),**({'error':detail} if not condition else {})})
-meta=json.loads(subprocess.check_output([PHP,str(ROOT/'tests/mon_completion_gate_http_fixture.php')],text=True))
+meta=json.loads(subprocess.check_output([PHP,'-d','memory_limit=96M',str(ROOT/'tests/mon_completion_gate_http_fixture.php')],text=True))
 state=pathlib.Path(meta['state_dir'])
 with socket.socket() as s: s.bind(('127.0.0.1',0)); port=s.getsockname()[1]
 env={k:v for k,v in os.environ.items() if k in ['PATH','LANG','LC_ALL','TMPDIR']}
 env.update(MON_STATE_DIR=str(state),MON_ENV_FILE=str(state/'fixture.env'))
 log=open(state/'http-server.log','w')
-server=subprocess.Popen([PHP,'-S',f'127.0.0.1:{port}','-t',str(ROOT)],env=env,stdout=log,stderr=log)
+server=subprocess.Popen([PHP,'-d','memory_limit=96M','-S',f'127.0.0.1:{port}','-t',str(ROOT)],env=env,stdout=log,stderr=log)
 base=f'http://127.0.0.1:{port}/mon.php'
 def request(api=None,payload=None,view=None):
     url=base+('?'+'api='+api if api else '?view='+view)
@@ -44,7 +44,7 @@ try:
     check('invalid recovery mode is refused before revision mutation',status==400 and body.get('error_code')=='MON_PUBLICATION_MODE_INVALID',repr(body)[:500])
     status,body=request('mon_run_status',{'run_context_id':meta['run_id']})
     check('a refused recovery preserves the original artifact and receipt clock',body.get('result',{}).get('artifact_id')==meta['artifact_id'] and body.get('result',{}).get('timing',{}).get('received_at')==meta['received_at'])
-    payload=json.loads(subprocess.check_output([PHP,str(ROOT/'tests/mon_completion_gate_patch_fixture.php'),str(state/'http-source.json'),meta['run_id']],text=True))
+    payload=json.loads(subprocess.check_output([PHP,'-d','memory_limit=96M',str(ROOT/'tests/mon_completion_gate_patch_fixture.php'),str(state/'http-source.json'),meta['run_id']],text=True))
     status,body=request('mon_run_recover',payload)
     result=body.get('result',{});run=result.get('run',{})
     check('independent supplemental proof creates a new revision in the same run',status==200 and result.get('status')=='recovery_confirmation_prepared' and result.get('manifest',{}).get('artifact_id')!=meta['artifact_id'] and run.get('timing',{}).get('received_at')==meta['received_at'],repr(body)[:700])
@@ -54,7 +54,7 @@ try:
     for mode in ['manifest','inline']:
         status,body=request('mon_run_start',{'run_id':'http-no-change-'+mode,'mode':'auto'})
         new_id=body.get('result',{}).get('run_context_id')
-        packet=json.loads(subprocess.check_output([PHP,str(ROOT/'tests/mon_completion_gate_finalize_fixture.php'),str(state/'http-source.json'),new_id,mode],text=True))
+        packet=json.loads(subprocess.check_output([PHP,'-d','memory_limit=96M',str(ROOT/'tests/mon_completion_gate_finalize_fixture.php'),str(state/'http-source.json'),new_id,mode],text=True))
         check('fixture reaches the real native no-change path '+mode,packet.get('native_status')=='no_change',repr(packet.get('native_status')))
         status,body=request('mon_detail_finalize',packet['request']);result=body.get('result',{})
         check('no-change '+mode+' requires a server artifact and publication readback',status==200 and result.get('status')=='verification_pending' and result.get('manifest',{}).get('artifact_id') and result.get('save_status')=='not_requested',repr(body)[:700])
@@ -66,6 +66,6 @@ finally:
     except subprocess.TimeoutExpired: server.kill();server.wait(timeout=5)
     log.close();shutil.rmtree(state)
 failed=sum(not c['pass'] for c in cases)
-result={'version':subprocess.check_output([PHP,'-r','require $argv[1];echo MON_VERSION;',str(ROOT/'mon.php')],text=True),'tests':len(cases),'passed':len(cases)-failed,'failed':failed,'wall_seconds':round(time.monotonic()-started,6),'server':'PHP '+meta['php_version']+' localhost','external_requests':0,'orders':0,'cases':cases}
+result={'version':subprocess.check_output([PHP,'-d','memory_limit=96M','-r','require $argv[1];echo MON_VERSION;',str(ROOT/'mon.php')],text=True),'tests':len(cases),'passed':len(cases)-failed,'failed':failed,'wall_seconds':round(time.monotonic()-started,6),'server':'PHP '+meta['php_version']+' localhost','external_requests':0,'orders':0,'cases':cases}
 print(json.dumps(result,ensure_ascii=False,indent=2))
 raise SystemExit(1 if failed else 0)

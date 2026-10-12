@@ -1,0 +1,170 @@
+{
+  "code": "1.8.6",
+  "instructions": "v4.14",
+  "design": "MON-RECOVERY-D2.1",
+  "baseline_commit": "6237ef215d3553291ceef83fa444ceca15cd989a",
+  "baseline_code_blob": "5d9e1db9d8a5c6937eaffed90e3d712cedce0b46",
+  "runtime": "PHP7.4.33",
+  "memory_limit_bytes": 100663296,
+  "maximum_measured_memory_bytes": 86638592,
+  "tests": {
+    "new_functions_integration": 55,
+    "new_HTTP": 10,
+    "real_source_compatibility": 5,
+    "related_functions": 28,
+    "related_HTTP": 16,
+    "total": 114,
+    "passed": 114,
+    "failed": 0
+  },
+  "syntax": {
+    "files": 11,
+    "passed": 11,
+    "failed": 0
+  },
+  "external_market_requests": 0,
+  "orders": 0,
+  "nas_deployed": false,
+  "nas_auto_started_or_restarted": false,
+  "market_files_changed_by_release": [],
+  "files": [
+    {
+      "path": "mon.php",
+      "bytes": 573864,
+      "sha256": "1b5ba40d41c6aa52615b3dbb8b2ada7c07908f7abe805a009045b3cb3f0e4688",
+      "blob_sha": "0155e009fce92a0d2080c14c7e03389e5eb32712"
+    },
+    {
+      "path": "monitor.md",
+      "bytes": 101735,
+      "sha256": "f58d192e69b79729061cef204c797c7939c2963d81a57ec2ba0d41397875e325",
+      "blob_sha": "3d1c44d2609f287067bd785c7adb265751d12a6c"
+    },
+    {
+      "path": "mon_wiki.md",
+      "bytes": 20043,
+      "sha256": "daa569f923c2f5ed9e7bd87fb190c64fabe951914c718025f3499a361282243e",
+      "blob_sha": "0ed96961ffd0455986602b862b8b4059863bbe1e"
+    },
+    {
+      "path": "mon_recovery_upgrade_design.md",
+      "bytes": 8470,
+      "sha256": "593b4e6a1265323bfa5956360014d6b1d0ae2310be82ee4ec0325bb6556fb737",
+      "blob_sha": "a4d080dec34f777da863a516b88211a7ffaa512c"
+    },
+    {
+      "path": "mon_recovery_upgrade_implementation.md",
+      "bytes": 11107,
+      "sha256": "650088db209e549a1e9a52ff7c55a4dd92a3fa5f39844580a02d9cdba8ccf3a4",
+      "blob_sha": "3b548939e1471770ef0c3beb3331714bef339982"
+    },
+    {
+      "path": "tests/mon_recovery_design_review.json",
+      "bytes": 2126,
+      "sha256": "430f78fc3f1ee471d98b313f1cb579ba268c7b95afa0d514226f5a8aceb45a67",
+      "blob_sha": "8d776113ab928232394d694a0a6b7341f1fdda0f"
+    },
+    {
+      "path": "tests/mon_recovery_upgrade_test.php",
+      "bytes": 30643,
+      "sha256": "63e9ff6e60651471087a3e0d901b64aec16771843fdc8374d42fc0eab65e0470",
+      "blob_sha": "805e5b8fce6174ce6ecf7a78d76e8cb54c6ecd48"
+    },
+    {
+      "path": "tests/mon_recovery_upgrade_tests.json",
+      "bytes": 9998,
+      "sha256": "3e5ed60e4e56d544ea24859311574d37071bfe7314067e6b0282011f30af8dba",
+      "blob_sha": "d887415c5fa32e7c0de4b14f122d9cd7c3be132f"
+    },
+    {
+      "path": "tests/mon_recovery_simulation_initial.json",
+      "bytes": 10127,
+      "sha256": "d8d9467ed26042721857859198c5e8b9d944b73f80f410ba78411cd2a4a0c7da",
+      "blob_sha": "f4239a85e1608a2bee9254b9def4bfed5a717f61"
+    },
+    {
+      "path": "tests/mon_recovery_http_fixture.php",
+      "bytes": 1964,
+      "sha256": "a419c85c9de644a9bd1892bc6ae6e40c860dec9d3866e48058abdd2949c9d253",
+      "blob_sha": "40c430e0a0387820afefe71834b345c3863b5b1b"
+    },
+    {
+      "path": "tests/mon_recovery_http_patch_fixture.php",
+      "bytes": 858,
+      "sha256": "cf0518d8e0d721d8c4ef69ab61712450198e28360d1d735709107174009f8878",
+      "blob_sha": "a12bddc26b3f3a61dd5328b95537e4738fb1f105"
+    },
+    {
+      "path": "tests/mon_recovery_http_test.py",
+      "bytes": 5446,
+      "sha256": "ad1750a55c0a8b8480bf94830a15b1f189761f531aabf2112c4aeddc02692f97",
+      "blob_sha": "eaa3a3d98721971e3d1eae5b9faae9f8a53f5820"
+    },
+    {
+      "path": "tests/mon_recovery_http_tests.json",
+      "bytes": 1327,
+      "sha256": "ba525ed99610602a3bc3e91734ea625d6223935813da7b50d619c76d69430407",
+      "blob_sha": "ed163b3ba913459c02018297868d1563f2da0f18"
+    },
+    {
+      "path": "tests/mon_recovery_observed_fixture.php",
+      "bytes": 2322,
+      "sha256": "de0420c0d2e51759479026896a1f8690605dd4df53d63b50da3449b55788fe1d",
+      "blob_sha": "36f2183bcc49decd784f153d24967bf295753efc"
+    },
+    {
+      "path": "tests/mon_recovery_observed_test.py",
+      "bytes": 2040,
+      "sha256": "a50a6c8c62fa70c792128a65658807c6b6e8eaf7c859d805b56542395acb577e",
+      "blob_sha": "ebff27b1cfc99fe0a86781e632850feeace910ca"
+    },
+    {
+      "path": "tests/mon_recovery_observed_baseline.json",
+      "bytes": 1305,
+      "sha256": "8b4ec5f06b9bffb51e9cf9131d3ef795abfc962e3592783b1f591c9659259fd2",
+      "blob_sha": "6eb14ae056f810e223f70b070699a46480dc4d19"
+    },
+    {
+      "path": "tests/mon_recovery_observed_current.json",
+      "bytes": 1305,
+      "sha256": "36652ebee83491fc3083d513d74b31e453ec652659b978e8660e4b2f674bac6a",
+      "blob_sha": "1832554d894c70678ccef9d2ce68400b79574e1a"
+    },
+    {
+      "path": "tests/mon_recovery_observed_tests.json",
+      "bytes": 3362,
+      "sha256": "1427cfc53be6bfc9c5b563de65ea29595fe2d0aee7c0a4121aa284f30f81831c",
+      "blob_sha": "40fbd2fe796446f1d5a7a93affaa33d71a602ed9"
+    },
+    {
+      "path": "tests/mon_recovery_related_gate_tests.json",
+      "bytes": 4461,
+      "sha256": "195242241d3467a52553bec2c0aeee257cd0e12fe0fa7b4a7bb70da28a2183b5",
+      "blob_sha": "fd5660cc7a7e38066de5cae8bf9c87ab8864288a"
+    },
+    {
+      "path": "tests/mon_recovery_related_http_tests.json",
+      "bytes": 1980,
+      "sha256": "0310322f87c07ead976f1f0818b1cefb61897d7b8024c7175147da33512db0f8",
+      "blob_sha": "bf4fe29729093e6c7807c710c7a1514d7284538d"
+    },
+    {
+      "path": "tests/mon_completion_gate_http_test.py",
+      "bytes": 7073,
+      "sha256": "f7667ebefd77fc9272cd498bb5d738a244eba8d50a51439da9b747be5590ee3d",
+      "blob_sha": "1ace8f47bb518be09931247314102a20a629905e"
+    },
+    {
+      "path": "tests/mon_recovery_nas_observed.json",
+      "bytes": 971,
+      "sha256": "06bcfbee5267b1a4c8d6acf1d7c19ac9639813f728572fdb609708b8d14c4c88",
+      "blob_sha": "b59c0b5f794c2a8a14ebc3cbb39c12ac625ca680"
+    },
+    {
+      "path": "tests/mon_recovery_syntax.json",
+      "bytes": 2498,
+      "sha256": "28cf2748c8bcdaca61a15f1fa70aedda3b160cdeb08d7c1a193df36bb1f39036",
+      "blob_sha": "2f54d40d04c8ff48de5fdb4bdef451dff3b59ee3"
+    }
+  ]
+}

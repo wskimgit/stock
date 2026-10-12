@@ -1,80 +1,53 @@
 {
-  "suite": "MON recovery HTTP 1.6.1",
-  "duration_seconds": 0.23121965100290254,
-  "pass": 17,
-  "fail": 0,
+  "code": "1.8.6",
+  "tests": 10,
+  "passed": 10,
+  "failed": 0,
+  "wall_seconds": 0.49218665099760983,
+  "server": "PHP 7.4.33 localhost",
+  "memory_limit": "96M",
+  "external_requests": 0,
+  "orders": 0,
   "cases": [
     {
-      "case": "read-only initial endpoint returns an old card without operator login",
+      "case": "HTTP detects expired trading without discarding a same-day issuer proof",
       "pass": true
     },
     {
-      "case": "initial source date and previous-origin state never claim new analysis or saving",
+      "case": "HTTP rejects stale price paired with verified trading",
       "pass": true
     },
     {
-      "case": "initial response is below 12 KiB without source JSON",
+      "case": "HTTP rejection preserves the original artifact stale",
       "pass": true
     },
     {
-      "case": "initial read leaves shared data unchanged",
+      "case": "HTTP rejects missing price paired with verified trading",
       "pass": true
     },
     {
-      "case": "initial endpoint rejects a write method",
+      "case": "HTTP rejection preserves the original artifact missing",
       "pass": true
     },
     {
-      "case": "initial endpoint rejects a backdated display timestamp",
+      "case": "HTTP accepts fresh trading-only evidence in the same execution",
       "pass": true
     },
     {
-      "case": "fixed connector-input bootstrap works without NAS operator credentials",
+      "case": "HTTP preserves issuer time scope and evidence while refreshing only trading",
       "pass": true
     },
     {
-      "case": "expired start includes an immediate previous result",
+      "case": "HTTP repaired evidence still requires verified publication",
       "pass": true
     },
     {
-      "case": "expired start preserves missed deadline and refuses a new analysis claim",
+      "case": "HTTP trading-only recovery preserves a separate identity quota blocker",
       "pass": true
     },
     {
-      "case": "expired prepare returns a structured secured fallback",
-      "pass": true
-    },
-    {
-      "case": "deadline fallback writes nothing and keeps the old analysis time",
-      "pass": true
-    },
-    {
-      "case": "live start includes the first result and phase-specific remaining budget",
-      "pass": true
-    },
-    {
-      "case": "a display report cannot claim server-side analysis or publication completion",
-      "pass": true
-    },
-    {
-      "case": "secured numerical preparation covers the full stored pool within the original budget",
-      "pass": true
-    },
-    {
-      "case": "inline finalization marks new analysis independently from remote saving",
-      "pass": true
-    },
-    {
-      "case": "completed analysis without publication is still not fully complete",
-      "pass": true
-    },
-    {
-      "case": "all recovery operations preserve production input cache",
+      "case": "HTTP cannot finish an unpublished recovery revision",
       "pass": true
     }
-  ],
-  "initial_response_bytes": 1742,
-  "external_requests": 0,
-  "daemon_starts": 0,
-  "orders": 0
+  ]
 }

@@ -1,0 +1,22 @@
+{
+  "design": "MON-RECOVERY-D2.1",
+  "review_type": "pre_implementation_design_review",
+  "result": "accepted_for_implementation",
+  "checks": [
+    {"id":"A01","component":"MonDaemonLoad::sample/settings","decision":"Soft load pressure reduces work; memory floor remains a hard gate."},
+    {"id":"A02","component":"MonDaemonLoad::system/sample","decision":"Counter resets/missing samples yield unknown CPU usage, not a fabricated zero. Recovery uses two safe samples and a short check interval."},
+    {"id":"A03","component":"MonDaemon::tick + mon_web_state + MonExecution::operation","decision":"One resource state drives work limits and display; unfinished collection cannot pass operational completion."},
+    {"id":"A04","component":"MonDaily::krWindowProof","decision":"Verify full new-provider dates and closes against an identity-bound KIS KRX reference; do not mutate either window."},
+    {"id":"A05","component":"MonDaily::krReference + retryable","decision":"One page per cycle with a hash-bound checkpoint; no total page/time expiry; malformed or contradictory rows cannot be approved."},
+    {"id":"A06","component":"MonTradingReview::apply + MonRiskState::at","decision":"A fresh trading observation requires a linked valid regular-session price; issuer state/time/evidence are retained."},
+    {"id":"A07","component":"current/patch/finalize/completion","decision":"Legacy checked_at remains a fallback. Stale trading, unverified issuer and hard collection blockers remain pending."},
+    {"id":"A08","component":"PHP7.4 simulations and related existing gate/HTTP cases","decision":"No production data/results/statistics edits or broker orders; deployment evidence remains separate."}
+  ],
+  "resolved_design_risks": [
+    "Do not classify KIS raw-price choice as a proven bug: existing split guard is intentional.",
+    "Do not enable large publication during a critical memory pause.",
+    "Do not redate issuer evidence while refreshing the trade.",
+    "Do not accept KRX/NXT mixing or fill missing reference dates.",
+    "Do not claim the observed live conflicts are resolved by synthetic tests."
+  ]
+}

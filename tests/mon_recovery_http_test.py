@@ -1,127 +1,50 @@
 #!/usr/bin/env python3
-"""New 1.6.1 recovery endpoints against real local PHP 7.4; no daemon/network providers."""
-import hashlib
-import json
-import os
-from pathlib import Path
-import socket
-import subprocess
-import tempfile
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
-from datetime import datetime, timedelta, timezone
-
-ROOT = Path(__file__).resolve().parents[1]
-PHP = os.environ.get('MON_TEST_PHP', 'php')
-cases = []
-
-def check(name, condition):
-    cases.append({'case': name, 'pass': bool(condition)})
-    if not condition:
-        raise AssertionError(name)
-
-def iso(offset=0):
-    return (datetime.now(timezone.utc)+timedelta(seconds=offset)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-
-def sha(raw):
-    return hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest()
-
-def main():
-    started = time.monotonic()
-    raw = subprocess.check_output([PHP, '-n', '-r', 'require "tests/mon_reinforcement_fixture.php"; $d=reinforcement_fixture(); $r=MonDetails::finalize($d,reinforcement_decision($d,reinforcement_context($d))); echo $r["files"][0]["content"];'], cwd=ROOT)
-    source = raw.decode()
-    data = json.loads(raw)
-    source_sha = sha(raw)
-    token = 'synthetic-recovery-test-only'
-    with tempfile.TemporaryDirectory(prefix='mon-recovery-http-') as tmp:
-        store = Path(tmp)
-        (store/'mon_remote_cache.json').write_bytes(raw)
-        (store/'fixture.env').write_text('MON_OPERATOR_TOKEN='+token+'\n')
-        env = dict(os.environ, MON_STATE_DIR=tmp, MON_ENV_FILE=str(store/'fixture.env'))
-        with socket.socket() as sock:
-            sock.bind(('127.0.0.1', 0))
-            port = sock.getsockname()[1]
-        url = f'http://127.0.0.1:{port}/mon.php?'
-        with open(store/'server.log', 'wb') as log:
-            server = subprocess.Popen([PHP, '-n', '-S', f'127.0.0.1:{port}', '-t', str(ROOT)], env=env, stdout=log, stderr=log)
-
-            def req(query, body=None, auth=True):
-                headers = {'Accept': 'application/json'}
-                if auth:
-                    headers['X-Mon-Operator-Token'] = token
-                payload = None
-                if body is not None:
-                    headers['Content-Type'] = 'application/json'
-                    payload = json.dumps(body, ensure_ascii=False).encode()
-                request = urllib.request.Request(url+query, data=payload, headers=headers)
-                try:
-                    response = urllib.request.urlopen(request, timeout=5)
-                except urllib.error.HTTPError as e:
-                    response = e
-                with response:
-                    content = response.read()
-                    return response.status, json.loads(content), len(content)
-
-            try:
-                for _ in range(100):
-                    try:
-                        status, initial, initial_bytes = req('view=bootstrap', auth=False)
-                        break
-                    except urllib.error.URLError:
-                        time.sleep(.02)
-                else:
-                    raise RuntimeError('server start failed')
-                check('read-only initial endpoint returns an old card without operator login', status==200 and len(initial['result']['cards'])==1)
-                check('initial source date and previous-origin state never claim new analysis or saving', initial['result']['header']['analysis_as_of']==data['analysis']['as_of'] and initial['result']['header']['new_analysis_complete'] is False and initial['result']['header']['analysis_origin']=='previous_saved_result' and initial['result']['header']['save_status']=='not_requested')
-                check('initial response is below 12 KiB without source JSON', initial_bytes<=12288 and 'source_json' not in initial and 'files' not in initial)
-                check('initial read leaves shared data unchanged', (store/'mon_remote_cache.json').read_bytes()==raw)
-                status, j, _ = req('view=bootstrap', {}, auth=False)
-                check('initial endpoint rejects a write method', status==405 and j['error_code']=='MON_METHOD_INVALID')
-                status, j, _ = req('view=bootstrap&at='+urllib.parse.quote(iso(-61)), auth=False)
-                check('initial endpoint rejects a backdated display timestamp', status==400 and j['error_code']=='MON_BOOTSTRAP_TIME_INVALID')
-
-                context = {'source_blob_sha': source_sha, 'rendered_at': iso(), 'countries': ['KR'], 'important_ids': []}
-                status, j, _ = req('api=mon_bootstrap', {'context': context, 'source_json': source}, auth=False)
-                check('fixed connector-input bootstrap works without NAS operator credentials', status==200 and j['result']['header']['source_blob_sha']==source_sha)
-
-                request = {'run_id': 'expired-start', 'received_at': iso(-259)}
-                status, j, _ = req('api=mon_run_start', request)
-                expired = j['result']['run_context_id']
-                check('expired start includes an immediate previous result', status==200 and len(j['result']['initial_result']['cards'])==1)
-                check('expired start preserves missed deadline and refuses a new analysis claim', j['result']['timing']['deadline_missed'] and j['result']['next_action']=='display_secured_result' and not j['result']['fully_complete'])
-                expired_context = dict(context, run_context_id=expired, rendered_at=iso())
-                status, j, _ = req('api=mon_detail_prepare', {'context': expired_context, 'source_json': source})
-                check('expired prepare returns a structured secured fallback', status==400 and j['error_code']=='MON_DECISION_DEADLINE' and len(j['fallback_result']['cards'])==1)
-                check('deadline fallback writes nothing and keeps the old analysis time', j['write_required'] is False and j['remote_written'] is False and j['fallback_result']['header']['analysis_as_of']==data['analysis']['as_of'])
-
-                status, j, _ = req('api=mon_run_start', {'run_id':'live-start','received_at':iso()})
-                run = j['result']['run_context_id']
-                check('live start includes the first result and phase-specific remaining budget', status==200 and j['result']['remaining_seconds']['collection']>0 and len(j['result']['initial_result']['cards'])==1)
-                status, j, _ = req('api=mon_run_observe', {'run_context_id':run,'event':'final_display_reported','fields':{'new_analysis_complete':True,'final_available':True,'save_status':'saved'}})
-                check('a display report cannot claim server-side analysis or publication completion', status==200 and not j['result']['new_analysis_complete'] and not j['result']['final_available'] and not j['result']['fully_complete'])
-
-                context = dict(context, run_context_id=run, rendered_at=iso())
-                status, j, _ = req('api=mon_detail_prepare', {'context':context,'source_json':source})
-                if status!=200:
-                    raise AssertionError('secured preparation returned '+str(status)+' '+str(j.get('error_code')))
-                check('secured numerical preparation covers the full stored pool within the original budget', status==200 and j['result']['candidate_count']==len(data['watchlist']['symbols']))
-                prepared = j['result']
-                decision = {'view_context':context,'state_token':prepared['state_token'],'prepared_fingerprint':prepared['prepared_fingerprint'],'fixed_as_of':context['rendered_at'],
-                            'selected':[{'symbol_id':data['watchlist']['symbols'][0]['symbol_id'],'reason':'synthetic recovered decision'}], 'references':[], 'live_observations':[]}
-                status, j, _ = req('api=mon_detail_finalize', {'decision':decision,'source_json':source,'response_mode':'inline'})
-                check('inline finalization marks new analysis independently from remote saving', status==200 and j['result']['new_analysis_complete'] and len(j['result']['files'])==2)
-                status, j, _ = req('api=mon_run_status', {'run_context_id':run})
-                check('completed analysis without publication is still not fully complete', status==200 and j['result']['new_analysis_complete'] and j['result']['save_status']=='not_requested' and not j['result']['fully_complete'])
-                check('all recovery operations preserve production input cache', (store/'mon_remote_cache.json').read_bytes()==raw)
-            finally:
-                server.terminate()
-                server.wait(timeout=5)
-        result = {'suite':'MON recovery HTTP 1.6.1','duration_seconds':time.monotonic()-started,'pass':sum(c['pass'] for c in cases),'fail':sum(not c['pass'] for c in cases),
-                  'cases':cases,'initial_response_bytes':initial_bytes,'external_requests':0,'daemon_starts':0,'orders':0}
-        print(json.dumps(result, ensure_ascii=False, indent=2))
-        return 0 if result['fail']==0 else 1
-
-if __name__=='__main__':
-    raise SystemExit(main())
+"""New trading-only recovery through real HTTP. Synthetic fixtures, no network providers."""
+import json, os, pathlib, shutil, socket, subprocess, time, urllib.request, urllib.error
+ROOT=pathlib.Path(__file__).resolve().parents[1]
+PHP=os.environ.get('MON_TEST_PHP',shutil.which('php') or 'php')
+CMD=[PHP,'-d','memory_limit=96M']; started=time.monotonic(); cases=[]
+def check(name,condition,detail=''):
+    cases.append({'case':name,'pass':bool(condition),**({'error':detail} if not condition else {})})
+meta=json.loads(subprocess.check_output(CMD+[str(ROOT/'tests/mon_recovery_http_fixture.php')],text=True))
+state=pathlib.Path(meta['state_dir'])
+with socket.socket() as sock: sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]
+env={k:v for k,v in os.environ.items() if k in ['PATH','LANG','LC_ALL','TMPDIR']}; env.update(MON_STATE_DIR=str(state),MON_ENV_FILE=str(state/'fixture.env'))
+log=open(state/'http-server.log','w'); server=subprocess.Popen(CMD+['-S',f'127.0.0.1:{port}','-t',str(ROOT)],env=env,stdout=log,stderr=log)
+def request(api,payload):
+    req=urllib.request.Request(f'http://127.0.0.1:{port}/mon.php?api={api}',data=json.dumps(payload).encode(),headers={'Accept':'application/json','Content-Type':'application/json','X-Mon-Operator-Token':'synthetic-gate-operator-token-123456'},method='POST')
+    try:
+        with urllib.request.urlopen(req,timeout=15) as response: return response.status,json.load(response)
+    except urllib.error.HTTPError as error: return error.code,json.loads(error.read())
+try:
+    for _ in range(60):
+        try:
+            with socket.create_connection(('127.0.0.1',port),timeout=.2): break
+        except OSError: time.sleep(.05)
+    status,body=request('mon_run_status',{'run_context_id':meta['run_id']}); run=body.get('result',{})
+    check('HTTP detects expired trading without discarding a same-day issuer proof',status==200 and not run.get('fully_complete') and 'issuer_review' not in [x.get('kind') for x in run.get('completion',{}).get('pending_jobs',[])],repr(body)[:600])
+    for mode in ['stale','missing']:
+        payload=json.loads(subprocess.check_output(CMD+[str(ROOT/'tests/mon_recovery_http_patch_fixture.php'),str(state/'http-source.json'),meta['run_id'],mode],text=True))
+        status,body=request('mon_run_recover',payload)
+        check('HTTP rejects '+mode+' price paired with verified trading',status==400 and body.get('error_code')=='MON_TRADING_OBSERVATION_REQUIRED',repr(body)[:600])
+        status,body=request('mon_run_status',{'run_context_id':meta['run_id']})
+        check('HTTP rejection preserves the original artifact '+mode,body.get('result',{}).get('artifact_id')==meta['artifact_id'])
+    payload=json.loads(subprocess.check_output(CMD+[str(ROOT/'tests/mon_recovery_http_patch_fixture.php'),str(state/'http-source.json'),meta['run_id'],'valid'],text=True))
+    status,body=request('mon_run_recover',payload); result=body.get('result',{}); run=result.get('run',{})
+    check('HTTP accepts fresh trading-only evidence in the same execution',status==200 and result.get('status')=='recovery_confirmation_prepared' and run.get('run_context_id')==meta['run_id'] and run.get('timing',{}).get('received_at')==meta['received_at'],repr(body)[:600])
+    files=result.get('files',[]); data=json.loads(files[0]['content']) if files else {}; import base64,gzip
+    packed=data.get('analysis',{}).get('input_snapshot',{}).get('lossless_payload',{}); full=json.loads(gzip.decompress(base64.b64decode(packed['data']))) if packed else {}
+    review=full.get('final_results_details',{}).get(meta['symbol_id'],{}).get('risk_review',{})
+    check('HTTP preserves issuer time scope and evidence while refreshing only trading',all(review.get(k)==meta['issuer_review'].get(k) for k in ['status','checked_at','scope','evidence_ids']) and review.get('trading_checked_at')==payload['decision_patch']['fixed_as_of'],repr(review)[:600])
+    pending=run.get('completion',{}).get('pending_jobs',[])
+    check('HTTP repaired evidence still requires verified publication',not run.get('fully_complete') and not run.get('completion',{}).get('publication_verified') and any(x.get('kind')=='publication' for x in pending) and run.get('completion',{}).get('outcomes',[{}])[0].get('state')=='ENTRY_CONFIRMED',repr(run.get('completion'))[:1600])
+    check('HTTP trading-only recovery preserves a separate identity quota blocker',any(x.get('kind')=='new_identity_quota' for x in pending))
+    status,body=request('mon_run_finish',{'run_context_id':meta['run_id'],'reason':'finished','unfinished':[]})
+    check('HTTP cannot finish an unpublished recovery revision',status==200 and not body.get('result',{}).get('finish_accepted') and not body.get('result',{}).get('run',{}).get('fully_complete'),repr(body)[:600])
+finally:
+    server.terminate()
+    try: server.wait(timeout=5)
+    except subprocess.TimeoutExpired: server.kill();server.wait(timeout=5)
+    log.close();shutil.rmtree(state)
+failed=sum(not c['pass'] for c in cases); result={'code':'1.8.6','tests':len(cases),'passed':len(cases)-failed,'failed':failed,'wall_seconds':time.monotonic()-started,'server':'PHP '+meta['php_version']+' localhost','memory_limit':'96M','external_requests':0,'orders':0,'cases':cases}
+(ROOT/'tests/mon_recovery_http_tests.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n');print(json.dumps(result,ensure_ascii=False,indent=2));raise SystemExit(1 if failed else 0)
