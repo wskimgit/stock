@@ -2,7 +2,7 @@
 
 mon.php **1.8.4** · 지시문 **v4.12** · MON-COMPLETION-1.0 · PHP7.4 호환
 
-이 계약의 완료는 분석·필수 시장 확인·원격 파일 저장 범위다. NAS 수집 정상화와 운영 후처리의 완료 scope는 [차기 ERR-C 설계 D2.0](mon_errc_upgrade_design.md)에 정의한 구현 예정 사항이며 기존 영수증의 의미를 소급 변경하지 않는다.
+이 문서는 1.8.4에서 도입한 시장 분석·원격 파일 저장 계약의 기록이다. 현재 1.8.5/v4.13은 [ERR-C 구현 보고](mon_errc_upgrade_implementation.md)의 MON-OPERATION-COMPLETION-1.0을 추가한다. 기존 금융 영수증은 보존하며 NAS 정상화·원격 통계 확인을 별도 보호 scope로 검증한다. 실행 절차는 monitor.md의 최신 블록을 따른다.
 
 ## 문제와 결과
 

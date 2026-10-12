@@ -66,6 +66,6 @@ finally:
     except subprocess.TimeoutExpired: server.kill();server.wait(timeout=5)
     log.close();shutil.rmtree(state)
 failed=sum(not c['pass'] for c in cases)
-result={'version':'1.8.4','tests':len(cases),'passed':len(cases)-failed,'failed':failed,'wall_seconds':round(time.monotonic()-started,6),'server':'PHP '+meta['php_version']+' localhost','external_requests':0,'orders':0,'cases':cases}
+result={'version':subprocess.check_output([PHP,'-r','require $argv[1];echo MON_VERSION;',str(ROOT/'mon.php')],text=True),'tests':len(cases),'passed':len(cases)-failed,'failed':failed,'wall_seconds':round(time.monotonic()-started,6),'server':'PHP '+meta['php_version']+' localhost','external_requests':0,'orders':0,'cases':cases}
 print(json.dumps(result,ensure_ascii=False,indent=2))
 raise SystemExit(1 if failed else 0)

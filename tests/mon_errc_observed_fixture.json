@@ -1,0 +1,11 @@
+{
+    "source_blob_sha": "10afad012bd3da6b0bfbbe1bbadd374afd7326aa",
+    "baseline_version": "1.8.4",
+    "snapshot_sha256": {
+        "JP|TSE|6098": "3f77edd51edf7c700777efefa7da83a1f081e2e0a9d6150eec50f05c8e773c3d",
+        "KR|KOSPI|006400": "2ca4fb99349a63e1d3c90bf3d4c0dbad67e882ad407201827619660b5d3f0897",
+        "KR|KOSPI|051910": "55cf6a98d9d12001a0f0cdb8294de03669d30ce610c83f803d91b29d6eaba208",
+        "KR|KOSPI|096770": "3deb5568e0db81406c1ddb2f940754a822e9aa3a44641b18d490757bd7c7d826",
+        "US|NASDAQ|WMT": "8d93d4679a2e34511b82ba78aa2c9fff152ad6d367312368daa143f11f1a7ab7"
+    }
+}

@@ -1,16 +1,14 @@
 # MON 실행·복구·통계 안내
 
-2026-10-12 KST · mon.php **1.8.4** · 지시문 **v4.12** · MON-P3.1 · MACD(12,26,9)
+2026-10-12 KST · mon.php **1.8.5** · 지시문 **v4.13** · MON-P3.1 · MACD(12,26,9)
 
-ChatGPT가 후보를 발굴·비교하고 최종 종목/근거를 판단한다. PHP는 검증 자료·수치·독립 진행·저장을 보조한다. [실행 지시문](monitor.md)의 MON:INSTRUCTION 블록을 먼저 읽는다.
+ChatGPT가 자율 선정하고 PHP가 검증·수치·진행·저장을 보조한다. 실제 절차는 [monitor.md](monitor.md)의 MON:INSTRUCTION 블록 하나를 따른다.
 
-차기 코드 수정의 단일 설계 원본은 [MON-ERRC-D2.0](mon_errc_upgrade_design.md)이다. ERR-C(제거·축소·강화·추가)로 원문/pack/종료 중복, 종목별 오류 격리, 저장 공간, 계측, NAS 정상화 scope를 정리하고 인수 조건 A01–A20을 연결했다. **설계 완료이며 1.8.5 구현·NAS 적용은 아직 아니다.** 현행 코드/지시문은 1.8.4/v4.12이며 실행 절차를 이곳에 다시 복제하지 않는다.
+[ERR-C 설계 D2.0](mon_errc_upgrade_design.md)을 구현하고 [시뮬레이션·관련 회귀 보고](mon_errc_upgrade_implementation.md)에 변경과 인수 조건을 연결했다. 원문 3중 중복·이중 pack·이중 종료를 제거하고 종목별 복구, 반복 아카이브 분리, 수치/지수 재사용, 운영 scope와 계측 ACK를 보강했다.
 
-## 완료 강제·같은 실행 복구 — 1.8.4
+MON-COMPLETION-1.0은 분석·시장 확인·저장 범위다. 새 MON-OPERATION-COMPLETION-1.0은 보호된 required scope와 실제 NAS/원격 통계 증명을 확인한다. status는 `operation`, finish는 `run.operation`, 운영 전체 판정은 `overall_complete`와 운영 영수증을 확인한다. 기존 영수증과 과거 운영 표본은 소급 변경하지 않는다.
 
-현행 MON-COMPLETION-1.0의 영수증은 분석·필수 시장 확인·원격 파일 쌍 저장 범위를 증명한다. NAS 수집 정상화는 별도로 실제 status/progress와 미완료 종목을 확인해야 한다. 자세한 복구·확정 절차는 [실행 지시문](monitor.md)과 [완료 계약·검증](mon_completion_enforcement.md)을 따른다.
-
-finish 응답의 정확한 완료 경로는 `finish_accepted`, `run.fully_complete`, `run.completion.required_checks_pending`이며 미완료 작업은 `run.next_required_job`이다. 코드 개선 성적은 시장 실행 통계에 넣지 않는다. GitHub 코드 저장과 NAS 실물 교체·수동 시작 확인은 별개다.
+검증은 **101 PASS / 0 FAIL**(변경 57·관련 회귀 44)이다. 실제 실패 입력 5개는 16,372–17,948바이트로 20,480 한도를 충족하고 기존 1.8.4 snapshot과 정확히 일치했다. 최대 메모리는 70.35MiB였다. 외부 API/주문/실제 NAS 적용은 시험에 포함하지 않았다. 코드 저장과 NAS 실물 교체·수동 시작 확인은 별개다.
 
 ## 2026-10-11 보강 이력 — 1.8.3
 

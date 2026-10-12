@@ -7,8 +7,9 @@ function cg_fault(callable $f,string $code): void {try{$f();}catch(MonFault $e){
 function cg_case(string $name,callable $f): void {global $cases;MonExecution::$active=null;MonExecution::$store=null;MonPreparation::reset();
     try{$f();$cases[]=['case'=>$name,'pass'=>true];}catch(Throwable $e){$cases[]=['case'=>$name,'pass'=>false,'error'=>$e->getMessage()];}}
 function cg_store(): MonStore {global $dirs;$dir=sys_get_temp_dir().'/mon-gate-'.bin2hex(random_bytes(8));mkdir($dir,0700);$dirs[]=$dir;return new MonStore($dir);}
-function cg_start(MonStore $s,string $id,float &$wall,float &$mono): MonBudget {
-    return MonExecution::start($s,(object)['run_id'=>$id,'received_at'=>MonBudget::iso($wall-700)],static function()use(&$wall){return $wall;},static function()use(&$mono){return $mono;});}
+function cg_start(MonStore $s,string $id,float &$wall,float &$mono,$policy=null): MonBudget {
+    $request=(object)(['run_id'=>$id,'received_at'=>MonBudget::iso($wall-700)]+($policy===null?[]:['operation_policy'=>$policy]));
+    return MonExecution::start($s,$request,static function()use(&$wall){return $wall;},static function()use(&$mono){return $mono;});}
 function cg_patch(stdClass $d,string $runId,string $at,bool $risk=true,?float $price=null): stdClass {
     $c=(object)['source_blob_sha'=>MonRun::gitSha(MonRun::json($d)),'rendered_at'=>$at,'countries'=>['KR'],'important_ids'=>[],'run_context_id'=>$runId];
     $sid=$d->analysis->results[0]->symbol_id;$r=MonRun::payload($d)->final_results_details->$sid;
@@ -24,8 +25,8 @@ function cg_patch(stdClass $d,string $runId,string $at,bool $risk=true,?float $p
     return (object)['run_mode'=>'evaluate','base_source_blob_sha'=>$c->source_blob_sha,'base_analysis_run_id'=>$d->analysis->run_id,'fixed_as_of'=>$at,
         'changes'=>[$change],'new_evidence'=>$evidence,'pending'=>[],'short_reasons'=>['Synthetic missing checks repaired'],'view_context'=>$c,'state_token'=>MonRun::token($d,$c)];
 }
-function cg_publication(bool $confirmed=false,?float $price=null,bool $beforeOpen=false,int $identityCount=20,bool $missingPlan=false): array {
-    $s=cg_store();$wall=microtime(true);$mono=0.;$b=cg_start($s,'gate-'.bin2hex(random_bytes(5)),$wall,$mono);
+function cg_publication(bool $confirmed=false,?float $price=null,bool $beforeOpen=false,int $identityCount=20,bool $missingPlan=false,$policy=null): array {
+    $s=cg_store();$wall=microtime(true);$mono=0.;$b=cg_start($s,'gate-'.bin2hex(random_bytes(5)),$wall,$mono,$policy);
     $d=reinforcement_fixture(1);
     if($beforeOpen){$sessions=$d->watchlist->calendar->markets[0]->sessions;$sessions[1]->open_at=mon_iso(time()+3600);$sessions[1]->close_at=mon_iso(time()+7200);}
     // Complete the declared discovery goal through the existing native identity path.
