@@ -1,0 +1,76 @@
+{
+  "version": "1.8.4",
+  "tests": 16,
+  "passed": 16,
+  "failed": 0,
+  "wall_seconds": 0.659507,
+  "server": "PHP 7.4.33 localhost",
+  "external_requests": 0,
+  "orders": 0,
+  "cases": [
+    {
+      "case": "status revalidates a cached false completion claim",
+      "pass": true
+    },
+    {
+      "case": "authenticated run status returns a concrete recovery job",
+      "pass": true
+    },
+    {
+      "case": "finish refuses completion and checkpoints rather than discarding work",
+      "pass": true
+    },
+    {
+      "case": "new protected statistics preserve pending required checks",
+      "pass": true
+    },
+    {
+      "case": "final-complete display is rejected over actual HTTP",
+      "pass": true
+    },
+    {
+      "case": "invalid recovery mode is refused before revision mutation",
+      "pass": true
+    },
+    {
+      "case": "a refused recovery preserves the original artifact and receipt clock",
+      "pass": true
+    },
+    {
+      "case": "independent supplemental proof creates a new revision in the same run",
+      "pass": true
+    },
+    {
+      "case": "repaired evidence still waits for actual remote publication",
+      "pass": true
+    },
+    {
+      "case": "status tracks the active recovery revision rather than an old saved draft",
+      "pass": true
+    },
+    {
+      "case": "fixture reaches the real native no-change path manifest",
+      "pass": true
+    },
+    {
+      "case": "no-change manifest requires a server artifact and publication readback",
+      "pass": true
+    },
+    {
+      "case": "no-change manifest cannot bypass required evidence and remote proof",
+      "pass": true
+    },
+    {
+      "case": "fixture reaches the real native no-change path inline",
+      "pass": true
+    },
+    {
+      "case": "no-change inline requires a server artifact and publication readback",
+      "pass": true
+    },
+    {
+      "case": "no-change inline cannot bypass required evidence and remote proof",
+      "pass": true
+    }
+  ]
+}

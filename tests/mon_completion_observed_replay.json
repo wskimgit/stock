@@ -1,0 +1,20 @@
+{
+    "version": "1.8.4",
+    "php": "7.4.33",
+    "tests": 1,
+    "passed": 1,
+    "failed": 0,
+    "test_scope": "observed 2026-10-12 payload at original analysis time; simulated remote readback; no market run",
+    "source_blob_sha": "91c23abc191cace8945c532ea64fe7ac7938e006",
+    "selected_count": 7,
+    "publication_complete": true,
+    "fully_complete": false,
+    "required_checks_pending": 7,
+    "pending_kinds": {
+        "issuer_review": 5,
+        "current_entry": 2
+    },
+    "peak_memory_bytes": 58253312,
+    "external_requests": 0,
+    "orders": 0
+}

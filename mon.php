@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.3 -- PHP 7.4+ verified source alternatives / explicit gaps / bounded daemon load.
+ * mon.php 1.8.4 -- PHP 7.4+ server-verified completion / resumable confirmations / bounded daemon load.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.3';
+const MON_VERSION = '1.8.4';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -1466,7 +1466,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
         'connection'=>['github'=>$configured,'kis'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!==''],
         'github_token_source'=>$cfg->githubTokenSource(),
         'kis_credentials_source'=>$cfg->kisCredentialsSource(),'kis_config_error'=>$cfg->kisConfigError(),
-        'final_publication'=>$store->readPrivate('publication-receipt.php'),
+        'final_publication'=>MonCompletion::publicationView($store),
         'publication_operator_configured'=>MonOperator::configured($cfg)
     ];
 }
@@ -1544,7 +1544,7 @@ function text(id,value){document.getElementById(id).textContent=value;}
 function draw(s){
  current=s;text('state',s.label);text('message',s.message);text('count',s.watchlist_loaded?s.watched:'—');text('collected',s.fresh_quotes||0);
  var pub=s.final_publication;
- text('final-publication',pub?'최종 결과 표시 가능 · 저장 '+({queued:'대기',publishing:'처리 중',saved:'완료',conflict:'동시 변경으로 보류',failed:'실패',expired:'이전 버전 만료 · 재개 확인',unknown:'확인 재개 대기'}[pub.save_status]||'확인 필요')+(pub.time_excess_seconds>0?' · 기준시간 초과, 계속 처리':'')+(pub.pending_analysis?' · 새 자료는 후속 판단 필요':''):'최종 결과 저장 요청 없음');
+ text('final-publication',pub?'결과 저장 '+({queued:'대기',publishing:'처리 중',saved:'완료',conflict:'동시 변경으로 보류',failed:'실패',expired:'이전 버전 만료 · 재개 확인',unknown:'확인 재개 대기'}[pub.save_status]||'확인 필요')+(pub.fully_complete?' · 필수 확인 완료':' · 필수 확인/복구 진행 중')+(pub.completion&&pub.completion.required_checks_pending?' · 남은 작업 '+pub.completion.required_checks_pending+'건':'')+(pub.time_excess_seconds>0?' · 기준시간 초과, 계속 처리':'')+(pub.pending_analysis?' · 새 자료는 후속 판단 필요':''):'최종 결과 저장 요청 없음');
  document.getElementById('dot').className='dot'+(s.readiness==='partial'&&s.monitoring_active?' warn':s.monitoring_active?' on':s.running&&s.heartbeat_fresh?' warn':'');
  document.getElementById('start').disabled=busy||s.running||mutationUnconfirmed;document.getElementById('stop').disabled=busy||(!s.running&&!mutationUnconfirmed);
  var stamp=s.last_mirrored_at;
@@ -1670,6 +1670,9 @@ final class MonRun {
     const VIEW_BYTES = 12288;
     const BLOCKERS = ['identity_needs_check', 'quote_time_unknown', 'current_price_needs_check', 'quote_delay_needs_check', 'quote_basis_needs_check', 'price_invalid', 'market_date_needs_check', 'regular_session_needs_check', 'outside_entry_zone', 'entry_plan_needs_data', 'plan_expired', 'latest_comparison_pending', 'corporate_risk_needs_check', 'trading_status_needs_check', 'confirmed_material_adverse', 'swing_signal_invalid', 'swing_price_confirmation_required'];
     private static $payloadCache = [];
+    public static function signalMap(stdClass $signals): stdClass {
+        $rows=get_object_vars($signals);ksort($rows,SORT_STRING);return (object)$rows;
+    }
 
     public static function json($v): string {
         if ($v instanceof stdClass) {
@@ -2346,7 +2349,7 @@ final class MonSwing {
         foreach($out->watchlist->symbols as $row)if(!$row->is_held)$row->purpose='스윙 후보 관찰';
         $a->criteria_version=self::CRITERIA;$a->as_of=$c->rendered_at;$a->analyzed_at=$c->rendered_at;$a->run_id=$out->watchlist->run_id;
         $a->watchlist_version=$out->watchlist->watchlist_version;$a->collection_id=$d->collection->collection_id;$a->status='partial';
-        $oldFull=$p->final_results_details;$p->swing_signals=$prepared['full_signals'];$p->final_results_details=new stdClass();$p->independent_results=new stdClass();
+        $oldFull=$p->final_results_details;$p->swing_signals=MonRun::signalMap($prepared['full_signals']);$p->final_results_details=new stdClass();$p->independent_results=new stdClass();
         $a->results=[];$a->independent_results=[];$audit=[];
         foreach($out->watchlist->symbols as $wr)if($wr->is_held && property_exists($oldFull,$wr->symbol_id)){
             $held=mon_decode(MonRun::json($oldFull->{$wr->symbol_id}));if($held->action==='BUY_REVIEW')$held->action='HOLD';
@@ -2380,7 +2383,7 @@ final class MonSwing {
             if($before!==$after)throw new MonFault('MON_PERIOD_CHANGED_PREPARATION_REQUIRED');
             $perCountry[$country]=($perCountry[$country]??0)+1;if($perCountry[$country]>3)throw new MonFault('MON_RESULT_LIMIT_INVALID');$ids[$sid]=$r;}
         $p=MonRun::payload($d);self::archive($d,$p);$out=mon_decode(MonRun::json($d));$a=$out->analysis;$watch=MonRun::rows($out->watchlist->symbols);$oldFull=$p->final_results_details;
-        $p->swing_signals=$prepared['full_signals'];$p->final_results_details=new stdClass();$p->independent_results=new stdClass();$a->results=[];$a->independent_results=[];
+        $p->swing_signals=MonRun::signalMap($prepared['full_signals']);$p->final_results_details=new stdClass();$p->independent_results=new stdClass();$a->results=[];$a->independent_results=[];
         // Preserve all registered holdings, whether or not they qualify for a new entry.
         foreach($watch as $sid=>$wr)if($wr->is_held && property_exists($oldFull,$sid)){$p->final_results_details->$sid=$oldFull->$sid;$a->results[]=$oldFull->$sid;}
         $selectedFacts=[];$usedPrices=[];$positions=mon_get($p->selection_facts,'positions',[]);$corporate=mon_get($p->selection_facts,'corporate_risk',new stdClass());
@@ -3457,7 +3460,11 @@ final class MonRunStatistics {
                 !is_int(mon_get($r,'total_limit_seconds'))||$r->total_limit_seconds<120||$r->total_limit_seconds>2592000||
                 !(mon_get($r,'operations') instanceof stdClass)||count(get_object_vars($r->operations))>64||
                 !(mon_get($r,'counts') instanceof stdClass)||count(get_object_vars($r->counts))>32||!is_array(mon_get($r,'unfinished'))||count($r->unfinished)>30)throw new MonFault('MON_STATS_INVALID');
-            if(array_diff(array_keys((array)$r),['run_context_id','revision','workload','received_at','finished_at','elapsed_seconds','first_control_seconds','first_display_seconds','total_limit_seconds','measurement','partial_timing','censored','deadline_missed','new_analysis_complete','fully_complete','outcome','operations','counts','unfinished','terminal','limit_behavior','time_excess_seconds','count_excess']))throw new MonFault('MON_STATS_INVALID');
+            if(array_diff(array_keys((array)$r),['run_context_id','revision','workload','received_at','finished_at','elapsed_seconds','first_control_seconds','first_display_seconds','total_limit_seconds','measurement','partial_timing','censored','deadline_missed','new_analysis_complete','fully_complete','outcome','operations','counts','unfinished','terminal','limit_behavior','time_excess_seconds','count_excess','completion_contract','required_checks_pending','publication_verified','completion_receipt_id']))throw new MonFault('MON_STATS_INVALID');
+            if(property_exists($r,'completion_contract')){
+                if($r->completion_contract!=='MON-COMPLETION-1.0'||!is_int(mon_get($r,'required_checks_pending'))||$r->required_checks_pending<0||!is_bool(mon_get($r,'publication_verified')))throw new MonFault('MON_STATS_INVALID');
+                if($r->fully_complete&&($r->required_checks_pending!==0||!$r->publication_verified||!preg_match('/^[a-f0-9]{64}$/',(string)mon_get($r,'completion_receipt_id'))))throw new MonFault('MON_STATS_INVALID');
+            }
             if(property_exists($r,'terminal')&&!is_bool($r->terminal))throw new MonFault('MON_STATS_INVALID');
             if(property_exists($r,'limit_behavior')&&$r->limit_behavior!=='observe_and_continue')throw new MonFault('MON_STATS_INVALID');
             foreach(['time_excess_seconds','count_excess']as $key)if(property_exists($r,$key)){
@@ -3513,9 +3520,9 @@ final class MonRunStatistics {
         if(!$values)return null;sort($values,SORT_NUMERIC);return (float)$values[max(0,(int)ceil($q*count($values))-1)];
     }
     public static function summary(stdClass $s,string $workload,float $now): array {
-        self::validate($s);$all=[];$dur=[];$complete=0;$missed=0;$operations=[];$counts=[];$firstControl=[];$firstDisplay=[];$excess=[];$countExcess=[];$pending=0;
+        self::validate($s);$all=[];$dur=[];$complete=0;$verifiedComplete=0;$legacyComplete=0;$missed=0;$operations=[];$counts=[];$firstControl=[];$firstDisplay=[];$excess=[];$countExcess=[];$pending=0;
         foreach($s->samples as $r){if($r->workload!==$workload||MonRun::seconds($r->finished_at)<$now-30*86400||MonRun::seconds($r->finished_at)>$now+5)continue;
-            $all[]=$r;if($r->fully_complete)$complete++;if($r->deadline_missed)$missed++;
+            $all[]=$r;if($r->fully_complete){$complete++;if(mon_get($r,'completion_contract')==='MON-COMPLETION-1.0')$verifiedComplete++;else $legacyComplete++;}if($r->deadline_missed)$missed++;
             if(mon_get($r,'terminal',true)===false)$pending++;
             $excess[]=max(0,$r->elapsed_seconds-$r->total_limit_seconds);
             foreach(mon_get($r,'count_excess',new stdClass())as $key=>$value)$countExcess[$key]=($countExcess[$key]??0)+$value;
@@ -3531,7 +3538,7 @@ final class MonRunStatistics {
         foreach($operations as &$o){$o['p50_seconds']=self::percentile($o['seconds'],.5);$o['p90_seconds']=self::percentile($o['seconds'],.9);
             $o['p90_count']=self::percentile($o['per_run_counts'],.9);$o['sample_runs']=count($o['per_run_counts']);unset($o['seconds'],$o['per_run_counts']);}unset($o);
         $countStats=[];foreach($counts as $key=>$values)$countStats[$key]=['samples'=>count($values),'p50'=>self::percentile($values,.5),'p90'=>self::percentile($values,.9)];
-        return ['generation'=>$s->generation,'samples'=>count($all),'measured_samples'=>count($dur),'completed'=>$complete,'incomplete'=>count($all)-$complete,
+        return ['generation'=>$s->generation,'samples'=>count($all),'measured_samples'=>count($dur),'completed'=>$complete,'verified_completed'=>$verifiedComplete,'legacy_completed'=>$legacyComplete,'incomplete'=>count($all)-$complete,
             'deadline_miss_rate'=>count($all)?$missed/count($all):null,'p50_seconds'=>self::percentile($dur,.5),'p90_seconds'=>self::percentile($dur,.9),
             'pending'=>$pending,'time_excess_total_seconds'=>array_sum($excess),'time_excess_p90_seconds'=>self::percentile($excess,.9),'count_excess_totals'=>$countExcess,
             'first_control_p90_seconds'=>self::percentile($firstControl,.9),'first_display_p90_seconds'=>self::percentile($firstDisplay,.9),'display_timing_measurement'=>'operator_reported_or_unmeasured',
@@ -3550,7 +3557,7 @@ final class MonRunStatistics {
         if($pressure){$target=(int)(ceil(max($pressure)*1.25/10)*10);$total=max($previous,min($previous*2,$target));$why='threshold_pressure';
             if($completePressure)$total=max($total,(int)(ceil(max($completePressure)*1.25/10)*10));}
         elseif($a['measured_samples']>=5){$target=max(120,(int)(ceil($a['p90_seconds']*1.25/10)*10));
-            $fiveGood=count($tail)===5;foreach($tail as $r)if(!$r->fully_complete||$r->censored||$r->partial_timing)$fiveGood=false;
+            $fiveGood=count($tail)===5;foreach($tail as $r)if(!$r->fully_complete||$r->censored||$r->partial_timing||mon_get($r,'completion_contract')!=='MON-COMPLETION-1.0')$fiveGood=false;
             if($target>=$previous){$total=min($target,$previous+30);$why='p90_with_margin';}
             elseif($fiveGood){$total=max($target,$previous-10);$why='five_complete_runs_slow_decrease';}
         }
@@ -3618,6 +3625,118 @@ final class MonBudget {
             'deadline_missed'=>$this->now()>$this->end('publication'),'mode'=>$this->run->mode,'limit_behavior'=>'observe_and_continue','time_excess_seconds'=>$this->excess(),
             'limits_seconds'=>['collection'=>$this->end('collection')-MonRun::seconds($this->run->received_at),'decision'=>$this->end('decision')-MonRun::seconds($this->run->received_at),
                 'publication'=>$this->end('publication')-MonRun::seconds($this->run->received_at),'recovery'=>$this->end('recovery')-MonRun::seconds($this->run->received_at)]];
+    }
+}
+/* Completion is derived from a protected, validated file pair, never caller flags. */
+final class MonCompletion {
+    const CONTRACT='MON-COMPLETION-1.0';
+    const MAX_BYTES=196608;
+    public static function bind(MonStore $store,$data,string $artifactId,array $files,array $metadata): void {
+        $runId=mon_get($metadata,'run_context_id');if(!is_string($runId))return;MonExecution::id($runId);
+        $p=MonRun::payload($data);$rows=[];
+        foreach($data->analysis->results as $plain){$full=mon_get($p->final_results_details,$plain->symbol_id,$plain);
+            $rows[]=MonRun::pick($full,['symbol_id','country','action','price','price_as_of','price_type','price_checks','risk_checks','risk_review','entry_plans','plan_valid_until','swing_signal']);}
+        $scope=(object)['watchlist'=>MonRun::pick($data->watchlist,['criteria_version','settings','calendar']),
+            'analysis'=>MonRun::pick($data->analysis,['as_of','market_summary','pending_analysis','pending_analysis_countries','discovery_state']),'results'=>$rows,
+            'countries'=>mon_get($metadata,'countries',array_map(static function($m){return $m->country;},$data->analysis->market_summary))];
+        $snapshot=(object)['contract'=>self::CONTRACT,'artifact_id'=>$artifactId,'run_context_id'=>$runId,
+            'received_at'=>mon_get($metadata,'received_at'),'decision_sha256'=>mon_get($metadata,'decision_sha256'),
+            'files'=>array_map(static function($f){return MonRun::pick($f,['path','blob_sha']);},$files),'scope'=>$scope];
+        $snapshot->sha256=MonRun::digest($snapshot);if(strlen(MonRun::json($snapshot))>self::MAX_BYTES)throw new MonFault('MON_COMPLETION_SCOPE_TOO_LARGE');
+        $store->writePrivate('completion-snapshot-'.$artifactId.'.php',$snapshot);
+    }
+    private static function snapshot(MonStore $store,string $id): stdClass {
+        MonExecution::id($id);$s=$store->readPrivate('completion-snapshot-'.$id.'.php');$copy=$s instanceof stdClass?clone $s:new stdClass();unset($copy->sha256);
+        if(!($s instanceof stdClass)||mon_get($s,'contract')!==self::CONTRACT||mon_get($s,'artifact_id')!==$id||
+            !hash_equals((string)mon_get($s,'sha256'),MonRun::digest($copy)))throw new MonFault('MON_COMPLETION_SNAPSHOT_INVALID');return $s;
+    }
+    public static function publicationView(MonStore $store): ?stdClass {
+        $receipt=$store->readPrivate('publication-receipt.php');if(!($receipt instanceof stdClass))return null;
+        $receipt->publication_complete=mon_get($receipt,'save_status')==='saved';$receipt->fully_complete=false;
+        try{$run=$store->readPrivate('run-'.(string)mon_get($receipt,'run_context_id').'.php');
+            if($run instanceof stdClass){$gate=self::assess($store,$run,mon_iso());$receipt->completion=(object)$gate;$receipt->fully_complete=$gate['fully_complete'];$receipt->current_artifact_id=mon_get($run,'artifact_id');}
+        }catch(MonFault $e){$receipt->completion=(object)['fully_complete'=>false,'code'=>$e->faultCode,'next_action'=>'repair_verification_binding'];}
+        return $receipt;
+    }
+    public static function assess(MonStore $store,$run,string $at,?string $jobId=null): array {
+        $jobs=[];$outcomes=[];$deferred=[];$artifactId=mon_get($run,'artifact_id');$publicationVerified=false;$commit=null;$snapshot=null;$job=null;
+        $add=static function(string $sid,string $kind,string $code,array $checks=[])use(&$jobs,$run){
+            $task=$kind.($sid!==''?':'.str_replace('|',':',$sid):'');
+            $jobs[]=(object)['task_id'=>hash('sha256',self::CONTRACT.'|'.$run->run_context_id.'|'.$task),'task'=>$task,'symbol_id'=>$sid,
+                'kind'=>$kind,'code'=>$code,'state'=>'pending','resolved'=>false,'required_checks'=>$checks];};
+        $jobId=$jobId??mon_get($run,'job_id');
+        try{
+            if(is_string($jobId)){$job=MonPublication::journal($store,$jobId);
+                if($job->run_context_id!==$run->run_context_id||$job->received_at!==$run->received_at)throw new MonFault('MON_PUBLICATION_RUN_MISMATCH');
+                if(is_string(mon_get($run,'job_id'))&&$run->job_id!==$jobId)throw new MonFault('MON_PUBLICATION_RUN_MISMATCH');
+                if(is_string($artifactId)&&$artifactId!==$job->artifact_id&&$artifactId!==mon_get($job,'original_artifact_id'))throw new MonFault('MON_PUBLICATION_RUN_MISMATCH');
+                $artifactId=$job->artifact_id;$commit=mon_get($job,'published_commit_sha');
+                $publicationVerified=$job->status==='saved'&&$job->stage==='complete'&&preg_match('/^[a-f0-9]{40}$/',(string)$commit)===1;
+            }
+            if(is_string($artifactId)){$snapshot=self::snapshot($store,$artifactId);
+                if($snapshot->run_context_id!==$run->run_context_id||$snapshot->received_at!==$run->received_at||
+                    ($job&&$snapshot->decision_sha256!==$job->decision_sha256))throw new MonFault('MON_COMPLETION_BINDING_INVALID');
+            }
+        }catch(MonFault $e){$snapshot=null;$publicationVerified=false;$add('','verification_binding',$e->faultCode);}
+        if(mon_get($run,'new_analysis_complete')!==true||mon_get($run,'final_available')!==true)$add('','analysis','MON_ANALYSIS_VALIDATION_PENDING');
+        if(!$snapshot)$add('','verified_artifact','MON_COMPLETION_ARTIFACT_REQUIRED');
+        if($snapshot){
+            $d=$snapshot->scope;$periods=MonRun::periods($d,$at);
+            if(mon_get($d->analysis,'pending_analysis',false)||($job&&mon_get($job,'pending_analysis',false)))$add('','analysis_reprepare','MON_NEW_DETAIL_REVIEW_REQUIRED');
+            $missingPeriods=[];foreach($periods as $country=>$period)if(in_array($country,$d->countries,true)&&!$period->current_period)$missingPeriods[]=$country;
+            if($missingPeriods)$add('','analysis_reprepare','MON_PERIOD_CHANGED_PREPARATION_REQUIRED',$missingPeriods);
+            foreach(mon_get(mon_get($d->analysis,'discovery_state'),'countries',[])as $quota)if(in_array($quota->country,$d->countries,true)&&
+                (mon_get($quota,'goal_status')==='shortfall'||(mon_get($quota,'target_verified')===true&&mon_get($quota,'shortfall',0)>0)))
+                $add($quota->country,'new_identity_quota','MON_NEW_IDENTITY_QUOTA_PENDING',['primary_listing_unique_ids','current_trading_day_or_verified_next_session_credit']);
+            foreach($d->results as $r){$sid=$r->symbol_id;$country=$r->country;$action=mon_get($r,'action');
+                if($action==='REFERENCE_REVIEW'){$outcomes[]=(object)['symbol_id'=>$sid,'state'=>'REFERENCE','current_entry_confirmed'=>false];continue;}
+                $review=mon_get($r,'risk_review',new stdClass());$age=null;$sameDay=false;
+                try{$age=MonRun::seconds($at)-MonRun::seconds(mon_get($review,'checked_at'));$z=MonMarket::timezone($country);
+                    $sameDay=$age>=-5&&(new DateTimeImmutable($review->checked_at))->setTimezone($z)->format('Y-m-d')===(new DateTimeImmutable($at))->setTimezone($z)->format('Y-m-d');}catch(MonFault $ignore){}
+                $riskVerified=$sameDay&&mon_get($review,'status')==='verified'&&!mon_get($review,'pending_items',[]);
+                $adverse=$sameDay&&mon_get($review,'confirmed_material_adverse')===true;
+                $halted=$sameDay&&$age!==null&&$age<=300&&mon_get($review,'trading_status')==='halted';
+                if($adverse||$halted){$outcomes[]=(object)['symbol_id'=>$sid,'state'=>'EXCLUDE','current_entry_confirmed'=>false,
+                    'reason'=>$halted?'verified_trading_halt':'confirmed_material_adverse'];continue;}
+                if(!$riskVerified)$add($sid,'issuer_review','MON_ISSUER_REVIEW_PENDING',['latest_financial_filing','material_events_since_filing','known_pending_items']);
+                $period=$periods[$country]??null;
+                if(!mon_get($period,'current_period',false))continue;
+                $session=MonMarket::state($d->watchlist,$country,(int)MonRun::seconds($at));
+                if($session['session']==='unknown'){$add($sid,'calendar','MON_MARKET_CALENDAR_PENDING');continue;}
+                if($session['session']!=='regular'){
+                    $day=MonDiscovery::day($d->watchlist,$country,$at);$deferred[]=(object)['symbol_id'=>$sid,'state'=>'WAIT_SESSION','next_trading_date'=>$day['next_trading_date'],'current_entry_confirmed'=>false];
+                    $outcomes[]=end($deferred);continue;
+                }
+                $current=clone $r;$current->risk_checks=clone mon_get($r,'risk_checks',new stdClass());
+                $current->risk_checks->current_corporate_risk_verified=$riskVerified;
+                $current->risk_checks->current_trading_status_verified=$sameDay&&$age!==null&&$age<=300&&mon_get($review,'trading_status')==='verified';
+                $current->risk_checks->verified_as_of=mon_get($review,'checked_at');
+                $state=MonRun::current($current,$d->watchlist,$at,true);
+                $blocking=array_values(array_diff($state->blockers,['outside_entry_zone','swing_price_confirmation_required','corporate_risk_needs_check','confirmed_material_adverse']));
+                if($action!=='BUY_REVIEW')$blocking=array_values(array_diff($blocking,['entry_plan_needs_data','plan_expired','swing_signal_invalid']));
+                $prepareNeeded=array_intersect($blocking,['entry_plan_needs_data','plan_expired','swing_signal_invalid','latest_comparison_pending']);
+                if($blocking)$add($sid,$prepareNeeded?'analysis_reprepare':'current_entry',$prepareNeeded?'MON_ENTRY_PLAN_PREPARATION_REQUIRED':'MON_CURRENT_ENTRY_CHECKS_PENDING',$blocking);
+                if(!$riskVerified||$blocking)continue;
+                $waiting=$action==='BUY_REVIEW'&&($state->readiness!=='ready');
+                $outcomes[]=(object)['symbol_id'=>$sid,'state'=>$waiting?'WAIT_ENTRY':($action==='BUY_REVIEW'?'ENTRY_CONFIRMED':$action),
+                    'current_entry_confirmed'=>$action==='BUY_REVIEW'&&!$waiting,'reason_codes'=>$waiting?$state->blockers:[]];
+            }
+        }
+        if(!$publicationVerified)$add('','publication','MON_REMOTE_SAVE_VERIFICATION_PENDING');
+        foreach(mon_get($run,'reported_unfinished',[])as $row)$jobs[]=(object)['task_id'=>hash('sha256',self::CONTRACT.'|'.$run->run_context_id.'|'.$row->task),
+            'task'=>$row->task,'symbol_id'=>'','kind'=>'reported_work','code'=>$row->code,'state'=>'pending','resolved'=>false,'required_checks'=>[]];
+        $priority=['analysis'=>0,'verified_artifact'=>0,'verification_binding'=>0,'analysis_reprepare'=>1,'calendar'=>1,'new_identity_quota'=>1,'issuer_review'=>2,'reported_work'=>2,'current_entry'=>3,'publication'=>4];
+        usort($jobs,static function($a,$b)use($priority){return (($priority[$a->kind]??2)<=>($priority[$b->kind]??2))?:strcmp($a->task,$b->task);});
+        foreach($jobs as $required)if($required->kind==='publication'){$required->artifact_id=$artifactId;$required->publication_job_id=$jobId;
+            $required->next_api=is_string($jobId)?'mon_publish_process':'mon_publish_queue';}
+        $fully=!$jobs&&$snapshot!==null&&$publicationVerified;
+        if(mon_get($run,'finish_reason')==='interrupted'||mon_get($run,'finish_reason')==='failed')$fully=false;
+        $receipt=$fully?(object)['contract'=>self::CONTRACT,'run_context_id'=>$run->run_context_id,'artifact_id'=>$artifactId,'published_commit_sha'=>$commit,
+            'checked_at'=>$at,'snapshot_sha256'=>$snapshot->sha256,'files'=>$snapshot->files,'outcomes'=>$outcomes,'required_checks_pending'=>0]:null;
+        if($receipt){$identity=MonRun::pick($receipt,['contract','run_context_id','artifact_id','published_commit_sha','snapshot_sha256','outcomes']);$receipt->receipt_id=MonRun::digest($identity);}
+        return ['contract'=>self::CONTRACT,'checked_at'=>$at,'fully_complete'=>$fully,'publication_verified'=>$publicationVerified,'required_checks_pending'=>count($jobs),
+            'pending_jobs'=>$jobs,'deferred_checks'=>$deferred,'outcomes'=>$outcomes,'completion_receipt'=>$receipt,
+            'code'=>$fully?null:'MON_COMPLETION_PENDING','next_action'=>$fully?'complete':($jobs[0]->kind??'continue_pending_work')];
     }
 }
 final class MonExecution {
@@ -3715,8 +3834,25 @@ final class MonExecution {
     public static function continueWork(): void {
         if(!self::$active||mon_get(self::$active->run,'finished_at')===null)return;
         if(mon_get(self::$active->run,'finish_reason')==='interrupted')throw new MonFault('MON_RUN_INTERRUPTED');
-        if(mon_get(self::$active->run,'finish_fully_complete',false))throw new MonFault('MON_RUN_FINISHED');
+        if(self::completion(self::$active)['fully_complete'])throw new MonFault('MON_RUN_FINISHED');
         self::mutate(static function($r){$r->finished_at=null;$r->terminal=false;$r->finish_reason='pending';$r->statistics_status='pending';});
+    }
+    public static function completion(MonBudget $budget): array {
+        if(!self::$store)throw new MonFault('MON_RUN_CONTEXT_REQUIRED');
+        return MonCompletion::assess(self::$store,$budget->run,MonBudget::iso($budget->now()));
+    }
+    public static function recoverFinal(string $action): void {
+        if(!self::$active||!self::$store)throw new MonFault('MON_RUN_CONTEXT_REQUIRED');
+        if(mon_get(self::$active->run,'finish_reason')==='interrupted')throw new MonFault('MON_RUN_INTERRUPTED');
+        if(self::completion(self::$active)['fully_complete'])throw new MonFault('MON_RUN_FINISHED');
+        if(!in_array($action,['confirm','reprepare'],true))throw new MonFault('MON_RECOVERY_ACTION_INVALID');
+        self::mutate(static function($r)use($action){
+            $history=mon_get($r,'final_revisions',[]);$history[]=(object)['artifact_id'=>mon_get($r,'artifact_id'),'job_id'=>mon_get($r,'job_id'),
+                'recovery_action'=>$action,'at'=>MonBudget::iso(self::$active->now())];$r->final_revisions=array_slice($history,-20);
+            $r->finished_at=null;$r->terminal=false;$r->finish_reason='pending';$r->finish_fully_complete=false;$r->statistics_status='pending';
+            unset($r->job_id,$r->artifact_id,$r->completion_receipt);$r->save_status='not_requested';$r->reported_unfinished=[];
+            if($action==='reprepare'){$r->new_analysis_complete=false;$r->final_available=false;$r->analysis_origin='recovery_preparation_required';}
+        });
     }
     public static function countExcess($run): stdClass {
         $p=mon_get($run,'adaptive_policy');$c=mon_get($run,'counts',new stdClass());
@@ -3774,12 +3910,18 @@ final class MonExecution {
         foreach($unfinished as $row)if(!($row instanceof stdClass)||!preg_match('/^[A-Za-z0-9._: -]{1,96}$/',(string)mon_get($row,'task'))||
             !preg_match('/^[A-Z0-9_.-]{1,96}$/',(string)mon_get($row,'code'))||array_diff(array_keys((array)$row),['task','code']))throw new MonFault('MON_FINISH_INVALID');
         $b=self::$active;
-        self::mutate(static function($r)use($reason,$unfinished,$b,$censored){self::drain($r);
-            $fully=$r->new_analysis_complete&&$r->final_available&&in_array($r->save_status,['saved','no_change'],true);
+        self::mutate(static function($r)use($unfinished){$r->reported_unfinished=$unfinished;});
+        $completion=self::completion($b);
+        $required=array_map(static function($job){return (object)['task'=>$job->task,'code'=>$job->code];},$completion['pending_jobs']);
+        // Keep the complete recovery queue; the legacy statistics projection remains bounded.
+        $unfinished=array_slice($required,0,30);
+        self::mutate(static function($r)use($reason,$unfinished,$b,$censored,$completion){self::drain($r);
+            $fully=$completion['fully_complete']&&!in_array($reason,['interrupted','failed'],true);
+            $r->completion=$completion;$r->required_jobs=$completion['pending_jobs'];
             if(mon_get($r,'finished_at')!==null&&!$fully&&$reason==='finished'&&in_array(mon_get($r,'finish_reason'),['failed','interrupted'],true))$reason=$r->finish_reason;
             if(!$unfinished&&!$fully)$unfinished=mon_get($r,'unfinished',[]);
             $terminal=$fully||in_array($reason,['interrupted','failed'],true);
-            $state=MonRun::digest((object)['state'=>MonRun::pick($r,['final_available','new_analysis_complete','save_status','counts','operations']),'terminal'=>$terminal,
+            $state=MonRun::digest((object)['state'=>MonRun::pick($r,['final_available','new_analysis_complete','save_status','artifact_id','job_id','counts','operations']),'terminal'=>$terminal,
                 'elapsed_bucket'=>$terminal?null:(int)floor($b->elapsed()/10),'unfinished'=>$unfinished]);
             if(mon_get($r,'finished_at')!==null&&mon_get($r,'finish_state_sha256')===$state)return;
             if(mon_get($r,'checkpoint_at')!==null&&!$terminal&&mon_get($r,'finish_state_sha256')===$state)return;
@@ -3789,8 +3931,9 @@ final class MonExecution {
             $r->elapsed_seconds=round($b->elapsed(),6);$r->finish_reason=$terminal?$reason:'pending';
             $r->censored=$censored;$r->finish_fully_complete=$fully;
             $r->unfinished=$unfinished;$r->statistics_status='pending';
+            if($fully){$r->completion_receipt=$completion['completion_receipt'];self::$store->writePrivate('completion-receipt-'.$r->run_context_id.'.php',$r->completion_receipt);}
         });
-        $r=$b->run;$fully=$r->new_analysis_complete&&$r->final_available&&in_array($r->save_status,['saved','no_change'],true);
+        $r=$b->run;$fully=mon_get($r,'finish_fully_complete',false)===true;
         $observed=MonRun::seconds(mon_get($r,'checkpoint_at',$r->finished_at));$timeExcess=new stdClass();
         foreach(['collection','decision','publication','recovery']as $phase)$timeExcess->$phase=round(max(0,$observed-$b->end($phase)),6);
         $sample=(object)['run_context_id'=>$r->run_context_id,'revision'=>$r->finish_revision,'workload'=>mon_get($r,'workload','mon'),'received_at'=>$r->received_at,'finished_at'=>mon_get($r,'checkpoint_at',$r->finished_at),
@@ -3800,14 +3943,18 @@ final class MonExecution {
             'new_analysis_complete'=>$r->new_analysis_complete,'fully_complete'=>$fully&&!mon_get($r,'censored',false),
             'terminal'=>mon_get($r,'terminal',true),'limit_behavior'=>'observe_and_continue','time_excess_seconds'=>$timeExcess,'count_excess'=>self::countExcess($r),
             'outcome'=>mon_get($r,'terminal',true)===false?'incomplete':(mon_get($r,'censored',false)?'expired':($fully?'complete':($r->finish_reason==='interrupted'?'interrupted':($r->finish_reason==='failed'?'failed':'incomplete')))),
-            'operations'=>mon_get($r,'operations',new stdClass()),'counts'=>mon_get($r,'counts',new stdClass()),'unfinished'=>mon_get($r,'unfinished',[])];
+            'operations'=>mon_get($r,'operations',new stdClass()),'counts'=>mon_get($r,'counts',new stdClass()),'unfinished'=>mon_get($r,'unfinished',[]),
+            'completion_contract'=>MonCompletion::CONTRACT,'required_checks_pending'=>$completion['required_checks_pending'],
+            'publication_verified'=>$completion['publication_verified'],'completion_receipt_id'=>$fully?$r->completion_receipt->receipt_id:null];
         $incoming=MonRunStatistics::seal((object)['contract'=>MonRunStatistics::CONTRACT,'generation'=>0,'samples'=>[$sample]]);
         try{$stats=MonRunStatistics::save(self::$store,$incoming);self::mutate(static function($r){$r->statistics_status=mon_get($r,'terminal',true)?'recorded':'checkpoint_recorded';});
-            return ['run'=>self::view($b),'statistics'=>MonRunStatistics::summary($stats,$sample->workload,$b->now()),'next_policy'=>MonRunStatistics::recommend($stats,$sample->workload,$b->now()),'statistics_snapshot'=>$stats];
+            return ['finish_accepted'=>$fully||in_array($reason,['interrupted','failed'],true),'code'=>$fully?null:'MON_COMPLETION_PENDING',
+                'run'=>self::view($b),'statistics'=>MonRunStatistics::summary($stats,$sample->workload,$b->now()),'next_policy'=>MonRunStatistics::recommend($stats,$sample->workload,$b->now()),'statistics_snapshot'=>$stats];
         }catch(MonFault $e){self::mutate(static function($r)use($e){$r->statistics_status=$e->faultCode;});throw $e;}
     }
     public static function event(string $phase,array $fields=[]): void {
         if(!self::$active||!self::$store)return;$budget=self::$active;
+        if($phase==='final_display_reported'&&!self::completion($budget)['fully_complete'])throw new MonFault('MON_COMPLETION_PENDING');
         self::mutate(static function($run)use($phase,$fields,$budget){
             self::drain($run);$row=(object)['phase'=>$phase,'at'=>MonBudget::iso($budget->now()),'elapsed_seconds'=>round($budget->elapsed(),6)];
             foreach(['symbol_id','code','attempts','recovery','previous_data','result_impact','next_check','job_id','reported_at']as $k)if(isset($fields[$k]))$row->$k=$fields[$k];
@@ -3816,7 +3963,7 @@ final class MonExecution {
                 if(!is_array(mon_get($run,'reported_displays')))$run->reported_displays=[];
                 $key=$phase==='intermediate_display_reported'?$phase.'|'.(string)mon_get($fields,'reported_at','once'):$phase;
                 if(in_array($key,$run->reported_displays,true))return;
-                if(mon_get($run,'finished_at')!==null)throw new MonFault('MON_RUN_FINISHED');
+                if(mon_get($run,'finished_at')!==null&&$phase!=='final_display_reported')throw new MonFault('MON_RUN_FINISHED');
                 $run->reported_displays[]=$key;$run->counts->displays_reported=(int)mon_get($run->counts,'displays_reported',0)+1;
                 $row->measurement='operator_reported';
                 if(mon_get($fields,'reported_at')!==null){$at=MonRun::seconds(MonRun::utc($fields['reported_at']));
@@ -3834,12 +3981,17 @@ final class MonExecution {
     }
     public static function view(MonBudget $b): array {
         $complete=mon_get($b->run,'new_analysis_complete',false)===true;
+        $completion=self::completion($b);$next=$completion['next_action'];
+        $actions=['analysis'=>'continue_pending_work','verified_artifact'=>'continue_pending_work','verification_binding'=>'repair_verification_binding',
+            'analysis_reprepare'=>'continue_preparation','calendar'=>'verify_market_calendar','new_identity_quota'=>'continue_discovery','issuer_review'=>'continue_issuer_review',
+            'current_entry'=>'continue_current_entry','reported_work'=>'continue_pending_work','publication'=>'continue_publication','complete'=>'complete'];
+        if(mon_get($b->run,'finish_reason')==='interrupted')$next='interrupted';
         return ['contract'=>self::CONTRACT,'run_context_id'=>$b->run->run_context_id,'timing'=>$b->timing(),
             'final_available'=>$b->run->final_available,'save_status'=>$b->run->save_status,
             'new_analysis_complete'=>$complete,'analysis_origin'=>mon_get($b->run,'analysis_origin','unmeasured'),
-            'fully_complete'=>$complete&&$b->run->final_available&&in_array($b->run->save_status,['saved','no_change'],true),
+            'fully_complete'=>$completion['fully_complete'],'completion'=>$completion,
             'limit_behavior'=>'observe_and_continue','stop_on_threshold'=>false,'count_excess'=>self::countExcess($b->run),
-            'next_action'=>$complete?(in_array($b->run->save_status,['saved','no_change'],true)?'complete':'continue_publication'):'continue_pending_work',
+            'next_action'=>$next==='interrupted'?'interrupted':($actions[$next]??'continue_pending_work'),'next_required_job'=>$completion['pending_jobs'][0]??null,
             'remaining_seconds'=>['collection'=>round($b->remaining('collection'),3),'decision'=>round($b->remaining('decision'),3),'publication'=>round($b->remaining('publication'),3)],
             'remaining_counts'=>['http_calls'=>max(0,(int)mon_get(mon_get($b->run,'adaptive_policy'),'http_calls',30)-(int)mon_get(mon_get($b->run,'counts'),'http_calls',0)),
                 'search_batches'=>max(0,(int)mon_get(mon_get($b->run,'adaptive_policy'),'external_search_batches',2)-(int)mon_get(mon_get($b->run,'counts'),'search_batches',0))],
@@ -4460,12 +4612,13 @@ final class MonArtifact {
         $candidate=mon_decode($rows[0]->content);MonRun::validate($candidate);MonRun::verifyFacts($candidate,MonRun::payload($candidate));
         if(MonRun::json($base->collection)!==MonRun::json($candidate->collection))throw new MonFault('MON_OWNERSHIP_INVALID');
         $descriptors=array_map(static function($f){return MonRun::pick($f,['path','bytes','sha256','blob_sha']);},$rows);
-        $id=hash('sha256',MonRun::json((object)['contract'=>self::CONTRACT,'source_blob_sha'=>$sourceSha,'files'=>$descriptors]));
+        $id=hash('sha256',MonRun::json((object)['contract'=>self::CONTRACT,'source_blob_sha'=>$sourceSha,'files'=>$descriptors,'run_context_id'=>mon_get($metadata,'run_context_id')]));
         $artifact=(object)['contract'=>self::CONTRACT,'artifact_id'=>$id,'source_blob_sha'=>$sourceSha,'source_sha256'=>hash('sha256',$source),
             'source_json'=>$source,'files'=>$rows,'metadata'=>(object)$metadata];
         $artifact->sha256=hash('sha256',MonRun::json($artifact));
         $old=$store->readPrivate('artifact-'.$id.'.php');
         if($old===null)$store->writePrivate('artifact-'.$id.'.php',$artifact);
+        MonCompletion::bind($store,$candidate,$id,$rows,$metadata);
         return self::manifest(self::load($store,$id));
     }
     public static function load(MonStore $store,string $id): stdClass {
@@ -4515,12 +4668,13 @@ final class MonPublication {
         $this->store->writePrivate('publish-'.$job->job_id.'.php',$job);
         try{$this->store->writePrivate('publication-receipt.php',(object)$this->receipt($job));}catch(MonFault $e){$this->store->log('publication_receipt_unavailable',['code'=>$e->faultCode]);}
     }
-    public function load(string $id): stdClass {
-        MonExecution::id($id);$j=$this->store->readPrivate('publish-'.$id.'.php');$c=$j instanceof stdClass?clone $j:new stdClass();unset($c->journal_sha256);
+    public static function journal(MonStore $store,string $id): stdClass {
+        MonExecution::id($id);$j=$store->readPrivate('publish-'.$id.'.php');$c=$j instanceof stdClass?clone $j:new stdClass();unset($c->journal_sha256);
         if(!($j instanceof stdClass)||mon_get($j,'contract')!==self::CONTRACT||mon_get($j,'job_id')!==$id||
             !hash_equals((string)mon_get($j,'journal_sha256'),hash('sha256',MonRun::json($c))))throw new MonFault('MON_PUBLICATION_JOURNAL_INVALID');
         return $j;
     }
+    public function load(string $id): stdClass {return self::journal($this->store,$id);}
     public function enqueue(string $artifactId,string $baseHead,MonBudget $budget,string $operator): array {
         if(!preg_match('/^[a-f0-9]{40}$/',$baseHead))throw new MonFault('MON_EXPECTED_HEAD_INVALID');
         $a=MonArtifact::load($this->store,$artifactId);$decision=mon_get($a->metadata,'decision_sha256');
@@ -4542,8 +4696,11 @@ final class MonPublication {
         }finally{flock($lock,LOCK_UN);fclose($lock);}
     }
     public function receipt($job): array {
+        $run=$this->store->readPrivate('run-'.$job->run_context_id.'.php');
+        $completion=$run instanceof stdClass?MonCompletion::assess($this->store,$run,MonBudget::iso($this->now()),$job->job_id):null;
         return ['contract'=>self::CONTRACT,'job_id'=>$job->job_id,'run_context_id'=>$job->run_context_id,'artifact_id'=>$job->artifact_id,
-            'save_status'=>$job->status,'stage'=>$job->stage,'final_available'=>true,'fully_complete'=>$job->status==='saved',
+            'save_status'=>$job->status,'stage'=>$job->stage,'final_available'=>true,'publication_complete'=>$job->status==='saved',
+            'fully_complete'=>$completion!==null&&$completion['fully_complete'],'completion'=>$completion,
             'expected_head'=>$job->expected_head,'candidate_commit_sha'=>$job->candidate_commit_sha,'published_commit_sha'=>$job->published_commit_sha,
             'completed_at'=>$job->completed_at,'expires_at'=>$job->expires_at,'elapsed_seconds'=>round(max(0,$this->now()-MonRun::seconds($job->received_at)),6),
             'limit_behavior'=>'observe_and_continue','time_excess_seconds'=>round(max(0,$this->now()-MonRun::seconds($job->expires_at)),6),
@@ -4552,10 +4709,11 @@ final class MonPublication {
     }
     private function api(string $method,string $path,$body,float $deadline,bool $raw=false) {
         if($this->cfg->get('MON_REPOSITORY','wskimgit/stock')!=='wskimgit/stock'||$this->cfg->get('MON_BRANCH','main')!=='main')throw new MonFault('MON_PUBLICATION_SCOPE_INVALID');
-        $token=$this->cfg->get('GITHUB_TOKEN');if($token==='')throw new MonFault('GITHUB_TOKEN_MISSING');
+        $token=$this->cfg->get('GITHUB_TOKEN');if($token===''&&$method!=='GET')throw new MonFault('GITHUB_TOKEN_MISSING');
         if($this->http->remaining($deadline)<.05)throw new MonFault('BUDGET_EXHAUSTED');
-        $headers=['Authorization: Bearer '.$token,'Accept: '.($raw?'application/vnd.github.raw+json':'application/vnd.github+json'),
+        $headers=['Accept: '.($raw?'application/vnd.github.raw+json':'application/vnd.github+json'),
             'Content-Type: application/json','X-GitHub-Api-Version: 2022-11-28'];
+        if($token!=='')$headers[]='Authorization: Bearer '.$token;
         $r=$this->http->request($method,'https://api.github.com/repos/wskimgit/stock'.$path,$headers,$body===null?null:mon_json($body,false),$deadline,3);
         if($raw){if($r['status']<200||$r['status']>=300)MonHttp::decode($r);return $r['body'];}
         return MonHttp::decode($r);
@@ -4574,10 +4732,23 @@ final class MonPublication {
     }
     private function source($job,float $deadline): void {
         $a=MonArtifact::load($this->store,$job->artifact_id);$head=$this->head($deadline);$root=$this->root($head,$deadline);
+        $same=true;foreach($a->files as $f)if(($root['files'][$f->path]??null)!==$f->blob_sha)$same=false;
+        if($same){$job->status='saved';$job->published_commit_sha=$head;$job->completed_at=MonBudget::iso($this->now());$job->stage='complete';$job->last_error=null;$job->retry_after=null;$this->save($job);return;}
         if($head!==$job->expected_head||($root['files']['mon_data.json']??null)!==$a->source_blob_sha){
             $raw=$this->api('GET','/contents/mon_data.json?ref='.$head,null,$deadline,true);
             $latest=mon_run_source((object)['source_json'=>$raw],'source_json',(string)($root['files']['mon_data.json']??''));
-            $base=mon_decode($a->source_json);$candidate=mon_decode($a->files[0]->content);$merged=MonRun::rebase($base,$candidate,$latest);
+            $base=mon_decode($a->source_json);$candidate=mon_decode($a->files[0]->content);
+            if(($root['files']['mon_result.md']??null)===$a->files[1]->blob_sha){
+                try{
+                    // A connector may already have saved the decision; later NAS quotes are retained.
+                    $observed=MonRun::rebase($candidate,$candidate,$latest);
+                    $manifest=MonArtifact::create($this->store,$raw,[['path'=>'mon_data.json','content'=>$raw,'blob_sha'=>MonRun::gitSha($raw)],
+                        ['path'=>'mon_result.md','content'=>$a->files[1]->content,'blob_sha'=>$a->files[1]->blob_sha]],(array)$a->metadata);
+                    $job->artifact_id=$manifest['artifact_id'];$job->pending_analysis=mon_get($observed->analysis,'pending_analysis',false);$job->pending_analysis_countries=mon_get($observed->analysis,'pending_analysis_countries',[]);
+                    $job->status='saved';$job->stage='complete';$job->published_commit_sha=$head;$job->completed_at=MonBudget::iso($this->now());$job->last_error=null;$job->retry_after=null;$this->save($job);return;
+                }catch(MonFault $e){if($e->faultCode!=='MON_ANALYSIS_SOURCE_CONFLICT')throw $e;}
+            }
+            $merged=MonRun::rebase($base,$candidate,$latest);
             $text=MonRun::json($merged);$summary=MonRun::render($merged,$merged->analysis->as_of,['동시 수집 병합; 판단시각 보존']);
             $manifest=MonArtifact::create($this->store,$raw,[['path'=>'mon_data.json','content'=>$text,'blob_sha'=>MonRun::gitSha($text)],['path'=>'mon_result.md','content'=>$summary,'blob_sha'=>MonRun::gitSha($summary)]],(array)$a->metadata);
             $job->artifact_id=$manifest['artifact_id'];$job->rebase_count++;$a=MonArtifact::load($this->store,$job->artifact_id);
@@ -4587,6 +4758,16 @@ final class MonPublication {
         if($same){$job->status='saved';$job->published_commit_sha=$head;$job->completed_at=MonBudget::iso($this->now());$job->stage='complete';$job->last_error=null;$job->retry_after=null;}
         else{$job->parent_head=$head;$job->base_tree=$root['tree'];$job->stage='blobs';$job->blob_shas=new stdClass();$job->tree_sha=null;$job->candidate_commit_sha=null;$job->ref_attempted=false;$job->ref_acknowledged=false;}
         $this->save($job);
+    }
+    public function resume(string $id): array {
+        MonExecution::id($id);$lock=@fopen($this->store->path('publish-'.$id.'.lock'),'c+');
+        if(!$lock||!flock($lock,LOCK_EX|LOCK_NB)){if($lock)fclose($lock);throw new MonFault('MON_PUBLICATION_BUSY');}
+        try{$job=$this->load($id);$run=$this->store->readPrivate('run-'.$job->run_context_id.'.php');
+            if(mon_get($run,'finish_reason')==='interrupted')throw new MonFault('MON_RUN_INTERRUPTED');
+            if(in_array($job->status,['failed','conflict','expired','unknown'],true)){
+                $job->status=$job->ref_attempted?'publishing':'queued';$job->retry_after=null;$this->save($job);
+            }return $this->receipt($job);
+        }finally{flock($lock,LOCK_UN);fclose($lock);}
     }
     private function confirm($job,float $deadline): void {
         if($this->http->remaining($deadline)<.05)throw new MonFault('BUDGET_EXHAUSTED');
@@ -4696,12 +4877,45 @@ final class MonPublication {
     }
 }
 
+/* Recover only a remotely confirmed predecessor. Preserve receipt, selection and clock history. */
+function mon_recover_completion(MonStore $store,$request,MonBudget $budget): array {
+    $action=mon_get($request,'action','confirm');if(!in_array($action,['confirm','reprepare'],true))throw new MonFault('MON_RECOVERY_ACTION_INVALID');
+    if(mon_get($budget->run,'finish_reason')==='interrupted')throw new MonFault('MON_RUN_INTERRUPTED');
+    $gate=MonExecution::completion($budget);if($gate['fully_complete'])throw new MonFault('MON_RUN_FINISHED');
+    $jobId=mon_get($budget->run,'job_id');if(!is_string($jobId))throw new MonFault('MON_RECOVERY_PUBLICATION_REQUIRED');
+    $job=MonPublication::journal($store,$jobId);
+    if($job->status!=='saved'||$job->stage!=='complete'||!preg_match('/^[a-f0-9]{40}$/',(string)$job->published_commit_sha)||$job->run_context_id!==$budget->run->run_context_id)throw new MonFault('MON_RECOVERY_PUBLICATION_REQUIRED');
+    $previous=MonArtifact::load($store,$job->artifact_id);$context=MonRun::context(mon_get($request,'context'));
+    if(mon_get($context,'run_context_id')!==$budget->run->run_context_id||MonRun::seconds($context->rendered_at)>$budget->now()+5)throw new MonFault('MON_RECOVERY_CONTEXT_INVALID');
+    $data=mon_run_source($request,'source_json',$context->source_blob_sha);$old=mon_decode($previous->files[0]->content);
+    // Rebase checks exact non-collection ownership; a different MON decision cannot be replaced.
+    MonRun::rebase($old,$old,$data);
+    if($action==='reprepare'){
+        MonExecution::recoverFinal('reprepare');MonExecution::event('completion_reprepare_requested');
+        return ['status'=>'recovery_preparation_required','write_required'=>false,'files'=>[],'next_action'=>'mon_detail_prepare_then_finalize',
+            'run_context_id'=>$budget->run->run_context_id,'previous_artifact_id'=>$previous->artifact_id,'received_at'=>$budget->run->received_at];
+    }
+    $patch=mon_get($request,'decision_patch');
+    if(!($patch instanceof stdClass)||MonRun::json(MonRun::context(mon_get($patch,'view_context')))!==MonRun::json($context)||
+        mon_get($patch,'run_mode')!=='evaluate'||!is_array(mon_get($patch,'changes'))||!$patch->changes||!is_array(mon_get($patch,'new_evidence'))||!$patch->new_evidence||
+        MonRun::seconds(mon_get($patch,'fixed_as_of'))>$budget->now()+5)throw new MonFault('MON_RECOVERY_EVIDENCE_REQUIRED');
+    foreach(MonRun::periods($data,$patch->fixed_as_of)as $period)if(!$period->current_period&&in_array($period->country,$context->countries,true))throw new MonFault('MON_PERIOD_CHANGED_PREPARATION_REQUIRED');
+    $result=mon_apply_mon_patch($data,$patch);
+    if(!$result['write_required'])throw new MonFault('MON_RECOVERY_EVIDENCE_REQUIRED');
+    $metadata=(array)$previous->metadata;$metadata['recovery_action']='confirm';$metadata['previous_artifact_id']=$previous->artifact_id;
+    $metadata['run_context_id']=$budget->run->run_context_id;$metadata['received_at']=$budget->run->received_at;
+    $result['manifest']=MonArtifact::create($store,$request->source_json,$result['files'],$metadata);
+    MonExecution::recoverFinal('confirm');
+    MonExecution::event('completion_confirmation_updated',['artifact_id'=>$result['manifest']['artifact_id'],'new_analysis_complete'=>true,
+        'final_available'=>true,'analysis_origin'=>'confirmed_existing_selection','save_status'=>'not_requested']);
+    $result['status']='recovery_confirmation_prepared';$result['next_action']='mon_publish_queue';return $result;
+}
 function mon_run_web(string $api): int {
     header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store');$start=microtime(true);$mono=mon_monotonic();
     $data=null;$request=null;$store=null;$publication=null;$publicationJobId=null;$publicationReceipt=null;$publicationAttempted=false;
     MonExecution::$active=null;MonExecution::$store=null;MonPreparation::$store=null;
     try {
-        $controls=['mon_run_start','mon_run_status','mon_run_observe','mon_run_report','mon_run_finish','mon_run_statistics','mon_artifact_read','mon_card_read','mon_publish_queue','mon_publish_process'];
+        $controls=['mon_run_start','mon_run_status','mon_run_observe','mon_run_report','mon_run_finish','mon_run_recover','mon_run_statistics','mon_artifact_read','mon_card_read','mon_publish_queue','mon_publish_process'];
         $legacy=['mon_bootstrap','mon_view','mon_patch','mon_swing_prepare','mon_swing_migrate','mon_swing_select','mon_detail_request','mon_detail_requests','mon_detail_view','mon_detail_prepare','mon_detail_select'];
         if(!in_array($api,array_merge($controls,$legacy,['mon_detail_finalize','mon_discovery_plan','mon_discovery_acquire','mon_gap_plan']),true))throw new MonFault('MON_API_UNKNOWN');
         if(($_SERVER['REQUEST_METHOD']??'GET')!=='POST')throw new MonFault('MON_METHOD_INVALID');
@@ -4711,7 +4925,7 @@ function mon_run_web(string $api): int {
         if(!is_string($raw)||strlen($raw)>MonRun::MAX_BODY)throw new MonFault('MON_BODY_TOO_LARGE');
         try{$request=mon_decode($raw);}catch(Throwable $e){throw new MonFault('MON_REQUEST_JSON_INVALID');}
         if(!($request instanceof stdClass))throw new MonFault('MON_REQUEST_INVALID');
-        if(!in_array(mon_get($request,'response_mode',$api==='mon_detail_finalize'?'manifest':'inline'),['inline','manifest'],true))throw new MonFault('MON_RESPONSE_MODE_INVALID');
+        if(!in_array(mon_get($request,'response_mode',in_array($api,['mon_detail_finalize','mon_run_recover'],true)?'manifest':'inline'),['inline','manifest'],true))throw new MonFault('MON_RESPONSE_MODE_INVALID');
         $store=new MonStore(getenv('MON_STATE_DIR')?:__DIR__);$cfg=new MonConfig(getenv('MON_ENV_FILE')?:'',$store->dir);$operator=null;
         if(in_array($api,$controls,true)){
             $operator=MonOperator::check($cfg);
@@ -4738,6 +4952,20 @@ function mon_run_web(string $api): int {
                     $remaining=mon_get($request,'unfinished',[]);if(!is_array($remaining))throw new MonFault('MON_FINISH_INVALID');
                     $result=MonExecution::finish((string)mon_get($request,'reason','finished'),$remaining);
                     if(mon_get($request,'export',false)!==true)unset($result['statistics_snapshot']);
+                }elseif($api==='mon_run_recover'){
+                    $mode=mon_get($request,'publish_mode','manual');if(!in_array($mode,['manual','queue','inline'],true))throw new MonFault('MON_PUBLICATION_MODE_INVALID');
+                    if($mode!=='manual'&&!preg_match('/^[a-f0-9]{40}$/',(string)mon_get($request,'expected_head','')))throw new MonFault('MON_EXPECTED_HEAD_INVALID');
+                    $result=mon_recover_completion($store,$request,$budget);
+                    if(isset($result['manifest'])){
+                        if($mode!=='manual'){
+                            $receipt=$publication->enqueue($result['manifest']['artifact_id'],(string)mon_get($request,'expected_head',''),$budget,$operator);
+                            $publicationJobId=$receipt['job_id'];MonExecution::event('publication_queued',['save_status'=>$receipt['save_status'],'job_id'=>$receipt['job_id']]);
+                            if($mode==='inline'){$publicationAttempted=true;$receipt=$publication->process($receipt['job_id'],microtime(true)+8);}
+                            $publicationReceipt=$receipt;$result['publication']=$receipt;$result['save_status']=$receipt['save_status'];
+                        }
+                        if(mon_get($request,'response_mode','manifest')!=='inline'){$result['files']=[];$result['large_body_in_model']=false;}
+                    }
+                    $result['run']=MonExecution::view($budget);
                 }elseif($api==='mon_run_report'){
                     MonExecution::report(mon_get($request,'report'));$result=MonExecution::view($budget);
                 }elseif($api==='mon_run_observe'){
@@ -4754,7 +4982,8 @@ function mon_run_web(string $api): int {
                     MonExecution::event('publication_queued',['final_available'=>true,'save_status'=>$result['save_status'],'job_id'=>$result['job_id'],'artifact_id'=>$result['artifact_id']]);
                 }else{
                     $id=(string)mon_get($request,'job_id','');$job=$publication->load($id);
-                    if($job->run_context_id!==$budget->run->run_context_id)throw new MonFault('MON_PUBLICATION_RUN_MISMATCH');
+                    if($job->run_context_id!==$budget->run->run_context_id||mon_get($budget->run,'job_id')!==$id)throw new MonFault('MON_PUBLICATION_RUN_MISMATCH');
+                    if(mon_get($request,'resume',false)===true)$publication->resume($id);
                     $publicationJobId=$id;$publicationAttempted=true;
                     $result=$publication->process($id,min(microtime(true)+10,$budget->deadline('recovery')));
                     $publicationReceipt=$result;
@@ -4815,15 +5044,21 @@ function mon_run_web(string $api): int {
                     foreach(mon_get($part,'artifact_cards',new stdClass())as $sha=>$card)$result['artifact_cards']->$sha=$card;
                     $result['additional_views'][]=['model_input_bytes'=>$part['model_input_bytes'],'view'=>$part['view']];$cursor=$part['view']['page']['next_cursor'];}
             }
-            if($api==='mon_detail_finalize'&&mon_get($request,'response_mode','manifest')!=='inline'&&$result['write_required']){
+            if($api==='mon_detail_finalize'&&MonExecution::$active&&($result['write_required']||$result['status']==='no_change')){
                 $operator=$operator??MonOperator::check($cfg);
-                if(!MonExecution::$active)throw new MonFault('MON_RUN_CONTEXT_REQUIRED');
                 $source=property_exists($request,'latest_source_json')?$request->latest_source_json:$request->source_json;
+                $unchanged=!$result['write_required'];
+                if($unchanged){
+                    // Even a revalidated no-change requires an actual file-pair remote check.
+                    $summary=$result['summary'];$result['files']=[['path'=>'mon_data.json','content'=>$source,'blob_sha'=>MonRun::gitSha($source)],
+                        ['path'=>'mon_result.md','content'=>$summary,'blob_sha'=>MonRun::gitSha($summary)]];
+                    $result['write_required']=true;$result['status']='verification_pending';$result['analysis_changed']=false;
+                }
                 $result['manifest']=MonArtifact::create($store,$source,$result['files'],['decision_sha256'=>$decisionSha,'run_context_id'=>$c->run_context_id,
-                    'received_at'=>MonExecution::$active->run->received_at,'prepared_fingerprint'=>mon_get($request->decision,'prepared_fingerprint')]);
+                    'received_at'=>MonExecution::$active->run->received_at,'countries'=>$c->countries,'prepared_fingerprint'=>mon_get($request->decision,'prepared_fingerprint')]);
                 $mode=mon_get($request,'publish_mode','manual');if(!in_array($mode,['manual','queue','inline'],true))throw new MonFault('MON_PUBLICATION_MODE_INVALID');
                 $result['save_status']='not_requested';
-                MonExecution::event('final_prepared',['final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'secured_data_decision','save_status'=>'not_requested','artifact_id'=>$result['manifest']['artifact_id']]);
+                MonExecution::event('final_prepared',['final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>$unchanged?'revalidated_unchanged_decision':'secured_data_decision','save_status'=>'not_requested','artifact_id'=>$result['manifest']['artifact_id']]);
                 if($mode!=='manual'){
                     $publication=new MonPublication($store,new MonHttp(),$cfg);$receipt=$publication->enqueue($result['manifest']['artifact_id'],(string)mon_get($request,'expected_head',''),MonExecution::$active,$operator);
                     $publicationJobId=$receipt['job_id'];$publicationReceipt=$receipt;
@@ -4833,10 +5068,9 @@ function mon_run_web(string $api): int {
                     $result['manifest']=MonArtifact::manifest(MonArtifact::load($store,$receipt['artifact_id']));
                     MonExecution::event('publication_observed',['save_status'=>$receipt['save_status'],'job_id'=>$receipt['job_id']]);
                 }
-                $result['files']=[];$result['large_body_in_model']=false;
-            }elseif($api==='mon_detail_finalize'&&MonExecution::$active){
-                if(!$result['write_required']&&$result['status']==='no_change')MonExecution::event('final_reused',['final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'revalidated_unchanged_decision','save_status'=>'no_change']);
-                elseif($result['write_required'])MonExecution::event('final_inline_prepared',['final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'secured_data_decision','save_status'=>'not_requested']);
+                if(mon_get($request,'response_mode','manifest')!=='inline'){$result['files']=[];$result['large_body_in_model']=false;}
+            }elseif($api==='mon_detail_finalize'&&!MonExecution::$active&&mon_get($request,'response_mode','manifest')!=='inline'){
+                throw new MonFault('MON_RUN_CONTEXT_REQUIRED');
             }
             if(mon_get($request,'response_mode','inline')==='manifest'){
                 MonArtifact::detachCards($store,$result,static function()use($cfg,&$operator){$operator=$operator??MonOperator::check($cfg);});
@@ -4863,7 +5097,7 @@ function mon_run_web(string $api): int {
         elseif($code==='MON_OPERATOR_AUTH_REQUIRED')http_response_code(403);
         elseif(in_array($code,['MON_OPERATOR_AUTH_UNCONFIGURED','MON_XZ_UNAVAILABLE','MON_CODEC_UNAVAILABLE','MON_CODEC_TIMEOUT','MON_CODEC_TEMP_FAILED'],true))http_response_code(503);
         elseif(in_array($code,['MON_BODY_TOO_LARGE','MON_STORAGE_LIMIT','MON_PAYLOAD_TOO_LARGE'],true))http_response_code(413);
-        elseif(in_array($code,['MON_ANALYSIS_SOURCE_CONFLICT','MON_STATE_TOKEN_INVALID','MON_SOURCE_SHA_MISMATCH','MON_FINAL_DECISION_IMMUTABLE'],true))http_response_code(409);
+        elseif(in_array($code,['MON_ANALYSIS_SOURCE_CONFLICT','MON_STATE_TOKEN_INVALID','MON_SOURCE_SHA_MISMATCH','MON_FINAL_DECISION_IMMUTABLE','MON_COMPLETION_PENDING','MON_RECOVERY_PUBLICATION_REQUIRED'],true))http_response_code(409);
         else http_response_code(400);
         if($publication&&is_string($publicationJobId))try{$publicationReceipt=$publication->receipt($publication->load($publicationJobId));}catch(Throwable $ignore){if($publicationAttempted)$publicationReceipt=['save_status'=>'unknown','job_id'=>$publicationJobId,'fully_complete'=>false];}
         try{MonExecution::measure('handler/control',mon_monotonic()-$mono,$code);MonExecution::event('failure',['code'=>$code,'result_impact'=>'publication_receipt_authoritative_no_substitute_selection']);}catch(Throwable $ignore){}
