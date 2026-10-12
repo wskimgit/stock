@@ -1,0 +1,82 @@
+{
+    "finish_accepted": true,
+    "fully_complete": true,
+    "required_checks_pending": 0,
+    "finished_at": "2026-10-12T09:20:22.258706Z",
+    "run_context_id": "7291fb14e4fcc770a1c4895a25039cc33cae496a5f740b2c7fb6d5284157fb38",
+    "received_at": "2026-10-12T08:23:54.000000Z",
+    "analysis_commit_sha": "afb8132f44b5efabed9ad124b122fb45c05c539b",
+    "completion_receipt": {
+        "contract": "MON-COMPLETION-1.0",
+        "run_context_id": "7291fb14e4fcc770a1c4895a25039cc33cae496a5f740b2c7fb6d5284157fb38",
+        "artifact_id": "e07b0761b48e129774cee7d93a6ee5462f7402561c0bb0ae4ac55113b9a15ae8",
+        "published_commit_sha": "add4f499a92618685980e30f53e77bd3b5887a43",
+        "checked_at": "2026-10-12T09:20:22.255040Z",
+        "snapshot_sha256": "4570fdfcfbda2228ad00b79eea13de9408762b0795017d537d238fc5f063f68a",
+        "files": [
+            {
+                "path": "mon_data.json",
+                "blob_sha": "10afad012bd3da6b0bfbbe1bbadd374afd7326aa"
+            },
+            {
+                "path": "mon_result.md",
+                "blob_sha": "ad2f6926b0d2a02537bdf3b436f0fbbea2909df1"
+            }
+        ],
+        "outcomes": [
+            {
+                "symbol_id": "KR|KOSPI|006400",
+                "state": "WAIT_SESSION",
+                "next_trading_date": "2026-10-13",
+                "current_entry_confirmed": false
+            },
+            {
+                "symbol_id": "US|NYSE|NOW",
+                "state": "WAIT_SESSION",
+                "next_trading_date": "2026-10-13",
+                "current_entry_confirmed": false
+            },
+            {
+                "symbol_id": "US|NYSE|LLY",
+                "state": "WAIT_SESSION",
+                "next_trading_date": "2026-10-13",
+                "current_entry_confirmed": false
+            },
+            {
+                "symbol_id": "US|NASDAQ|WMT",
+                "state": "WAIT_SESSION",
+                "next_trading_date": "2026-10-13",
+                "current_entry_confirmed": false
+            },
+            {
+                "symbol_id": "JP|TSE|6098",
+                "state": "WAIT_SESSION",
+                "next_trading_date": "2026-10-13",
+                "current_entry_confirmed": false
+            },
+            {
+                "symbol_id": "JP|TSE|6758",
+                "state": "WAIT_SESSION",
+                "next_trading_date": "2026-10-13",
+                "current_entry_confirmed": false
+            }
+        ],
+        "required_checks_pending": 0,
+        "receipt_id": "42f4cb421cb4fc6b66b47b803b421e6d6d77332da3a796a85ab6050ee9a28ca6"
+    },
+    "publication_receipt": {
+        "contract": "MON-PUBLISH-1.0",
+        "job_id": "43301a5e17ddad45bee2f2fc0d15bf24c9f4fb8990a53a6467eb19bf07bc769b",
+        "artifact_id": "e07b0761b48e129774cee7d93a6ee5462f7402561c0bb0ae4ac55113b9a15ae8",
+        "published_commit_sha": "add4f499a92618685980e30f53e77bd3b5887a43",
+        "save_status": "saved",
+        "completed_at": "2026-10-12T09:20:22.240839Z"
+    },
+    "verification_transport": "fresh_actual_Git_connector_GET_and_hash_verified_raw_file; local protected native completion state",
+    "nas_collection_status": "separate observed DETAIL_PAYLOAD_TOO_LARGE; not represented as healthy or repaired",
+    "current_entry_confirmed": false,
+    "orders": 0,
+    "statistics_observation_note": "Actual earlier captures imported as a validated statistics revision after automatic native completion. Protected completion receipt and finish timestamp unchanged; unmeasured browser/search timing stays unmeasured.",
+    "statistics_sample_revision": 3,
+    "statistics_git_sha": "cfce19f4d0f1f71938a562a6bce9bdb05d2a83e9"
+}
