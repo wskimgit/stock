@@ -1,6 +1,6 @@
 {
     "contract": "MON-STATS-1.0",
-    "generation": 14,
+    "generation": 15,
     "samples": [
         {
             "censored": true,
@@ -699,11 +699,11 @@
         },
         {
             "run_context_id": "12f94e011f79cd22ca482fd34d29347a5cf2daab430a222f6e3a0dd12bc65019",
-            "revision": 1,
+            "revision": 2,
             "workload": "mon",
             "received_at": "2026-10-12T12:56:53.000000Z",
-            "finished_at": "2026-10-12T14:48:12.404856Z",
-            "elapsed_seconds": 6679.404862,
+            "finished_at": "2026-10-12T14:55:04.133939Z",
+            "elapsed_seconds": 7091.133944,
             "first_control_seconds": 94.068188,
             "first_display_seconds": null,
             "total_limit_seconds": 4040,
@@ -716,10 +716,10 @@
             "terminal": false,
             "limit_behavior": "observe_and_continue",
             "time_excess_seconds": {
-                "collection": 2659.404856,
-                "decision": 2649.404856,
-                "publication": 2639.404856,
-                "recovery": 2639.404856
+                "collection": 3071.133939,
+                "decision": 3061.133939,
+                "publication": 3051.133939,
+                "recovery": 3051.133939
             },
             "count_excess": {
                 "http_calls": 0,
@@ -731,20 +731,21 @@
             "operations": {
                 "external/nas": {
                     "measurement": "server",
-                    "count": 6,
-                    "successes": 3,
+                    "count": 7,
+                    "successes": 4,
                     "timeouts": 3,
                     "failures": 3,
-                    "retries": 4,
-                    "retry_successes": 2,
-                    "units": 6,
+                    "retries": 5,
+                    "retry_successes": 3,
+                    "units": 7,
                     "seconds": [
                         10.122742,
                         10.01516,
                         9.615632,
                         10.009574,
                         12.034767,
-                        10.019963
+                        10.019963,
+                        20.833013
                     ]
                 },
                 "handler/preparation": {
@@ -831,13 +832,13 @@
                 },
                 "external/source": {
                     "measurement": "operator_reported",
-                    "count": 8,
-                    "successes": 3,
+                    "count": 9,
+                    "successes": 4,
                     "timeouts": 0,
                     "failures": 5,
                     "retries": 0,
                     "retry_successes": 0,
-                    "units": 8,
+                    "units": 9,
                     "seconds": [
                         5.011146,
                         1.009265,
@@ -846,18 +847,19 @@
                         5.014151,
                         7.617952,
                         6.926652,
-                        9.110651
+                        9.110651,
+                        6.626361
                     ]
                 },
                 "http/api.github.com": {
                     "measurement": "server",
-                    "count": 16,
-                    "successes": 15,
+                    "count": 19,
+                    "successes": 18,
                     "timeouts": 1,
                     "failures": 1,
                     "retries": 0,
                     "retry_successes": 0,
-                    "units": 16,
+                    "units": 19,
                     "seconds": [
                         3.011991,
                         0.000711,
@@ -874,52 +876,52 @@
                         0.000527,
                         0.000869,
                         0.000407,
-                        0.000368
+                        0.000368,
+                        0.001107,
+                        0.000451,
+                        0.000547
                     ]
                 },
                 "handler/mon_publish_process": {
                     "measurement": "server",
-                    "count": 6,
-                    "successes": 5,
+                    "count": 7,
+                    "successes": 6,
                     "timeouts": 1,
                     "failures": 1,
                     "retries": 0,
                     "retry_successes": 0,
-                    "units": 6,
+                    "units": 7,
                     "seconds": [
                         3.123086,
                         0.28567,
                         0.27482,
                         0.28729,
                         0.314733,
-                        0.314701
+                        0.314701,
+                        0.302941
                     ]
                 }
             },
             "counts": {
-                "http_calls": 21,
+                "http_calls": 24,
                 "data_http_calls": 5,
-                "reported_external_units": 96,
-                "source_http_calls": 20,
-                "reported_external_calls": 14,
+                "reported_external_units": 97,
+                "source_http_calls": 21,
+                "reported_external_calls": 15,
                 "search_batches": 14,
                 "search_limit_hits": 12
             },
             "unfinished": [
-                {
-                    "task": "current_entry:US:NASDAQ:WMT",
-                    "code": "MON_CURRENT_ENTRY_CHECKS_PENDING"
-                },
                 {
                     "task": "operation:nas_collection",
                     "code": "MON_NAS_COLLECTION_PENDING"
                 }
             ],
             "completion_contract": "MON-COMPLETION-1.0",
-            "required_checks_pending": 2,
+            "required_checks_pending": 1,
             "publication_verified": true,
             "completion_receipt_id": null
         }
     ],
-    "sha256": "6453f59c5c83b441e2b1b1a4420d779c1c3c301fbbe224850427676d45654172"
+    "sha256": "d17a810e7597e6becd7a818c7e3407c3b15d76b3012e41ac89bfb10b876d2d44"
 }
