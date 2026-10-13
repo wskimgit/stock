@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.6 -- measured throttling / KRX source recovery / independent trading refresh.
+ * mon.php 1.8.7 -- completed revalidation time / unchanged recommendation publication.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.6';
+const MON_VERSION = '1.8.7';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -2069,7 +2069,7 @@ final class MonRun {
         $safe = static function ($s) { return str_replace(['|', "\r", "\n", '<', '>'], ['／', ' ', ' ', '＜', '＞'], (string)$s); };
         $num = static function ($n) { if (mon_number($n) === null) return '미확인'; return rtrim(rtrim(MonRun::decimal6($n), '0'), '.'); };
         $same = self::utc($a->as_of) === self::utc($at);
-        $text = (in_array($a->criteria_version,['MON-P3.0','MON-P3.1'],true) ? 'MON 스윙 · ' . $a->criteria_version . ' · MACD(12,26,' . MonSwing::rules($a->criteria_version)->macd_signal . ') · ' : '') . '기준 ' . $a->as_of . ' · ' . $a->status . ($same ? '' : ' · 재사용 표시 ' . $at) . "\n\n| 국가 | 종목 | 판단 | 자료 기준 | 가격 조건 | 핵심 이유 |\n|---|---|---|---|---|---|\n";
+        $text = (in_array($a->criteria_version,['MON-P3.0','MON-P3.1'],true) ? 'MON 스윙 · ' . $a->criteria_version . ' · MACD(12,26,' . MonSwing::rules($a->criteria_version)->macd_signal . ') · ' : '') . MonRevalidation::heading($a) . ' · ' . $a->status . ($same ? '' : ' · 재사용 표시 ' . $at) . "\n\n| 국가 | 종목 | 판단 | 자료 기준 | 가격 조건 | 핵심 이유 |\n|---|---|---|---|---|---|\n";
         foreach ($rows as $r) {
             $conditions = [];
             if (in_array($a->criteria_version,['MON-P3.0','MON-P3.1'],true)) {
@@ -2489,7 +2489,10 @@ final class MonSwing {
     }
     public static function select($d,$decision): array {
         $bundle=self::selectData($d,$decision);
-        return self::finalize($d,$bundle['data'],$bundle['payload'],$bundle['context'],['ChatGPT 자율 스윙 선정; 현재 진입 확인은 별도']);
+        MonRevalidation::stamp($d,$bundle['data'],$bundle['context']);
+        $result=self::finalize($d,$bundle['data'],$bundle['payload'],$bundle['context'],['ChatGPT 자율 스윙 선정; 현재 진입 확인은 별도']);
+        $result['validation']['selection_changed']=$bundle['data']->analysis->display->selection_changed;
+        return $result;
     }
     public static function closeTime($d,string $country,string $date): ?string {
         $closes=[];foreach(mon_get($d->watchlist->calendar,'markets',[])as $m)if(mon_get($m,'country')===$country)foreach(mon_get($m,'sessions',[])as $s)if(mon_get($s,'market_date')===$date)$closes[]=mon_get($s,'close_at');
@@ -3104,16 +3107,20 @@ final class MonDetails {
             $out->analysis->source_recovery->state='verified_inputs_used_in_autonomous_selection';$out->analysis->source_recovery->used_at=$out->analysis->as_of;
         }
         if(MonExecution::$active)MonExecution::$active->guard('decision');
-        if(MonMeaning::same($d,$out,$p)){
-            return ['status'=>'no_change','write_required'=>false,'files'=>[],'summary'=>MonRun::render($d,$bundle['context']->rendered_at),
-                'final_available'=>true,'new_analysis_complete'=>true,'analysis_origin'=>'revalidated_unchanged_decision','save_status'=>'no_change','validation'=>['analysis_as_of_preserved'=>true,'collection_preserved'=>true,'meaningful_change'=>false,'prepare_reused'=>$bundle['prepared']['prepare_reused']]];
-        }
+        $unchanged=MonMeaning::same($d,$out,$p);
+        // A completed autonomous revalidation is a new observation even when its recommendation is unchanged.
+        // Reuse/GET/maintenance paths never call this stamp and never manufacture a completed analysis time.
+        MonRevalidation::stamp($d,$out,$bundle['context']);
         $out->analysis->input_snapshot->mon_input_state->final_available=true;
         $out->analysis->input_snapshot->mon_input_state->save_status='pending';
         if(MonExecution::$active)$out->analysis->input_snapshot->mon_input_state->timing=(object)MonExecution::$active->timing();
         $result=MonSwing::finalize($d,$out,$p,$bundle['context'],['종목별 자율 판단·근거를 한 번 확정; 현재·과거 신호와 저장 상태 구분']);
         if(MonExecution::$active)MonExecution::$active->guard('decision');
-        $result['final_available']=true;$result['new_analysis_complete']=true;$result['analysis_origin']='secured_data_decision';$result['save_status']='pending';
+        $result['final_available']=true;$result['new_analysis_complete']=true;$result['analysis_origin']=$unchanged?'revalidated_unchanged_decision':'secured_data_decision';$result['save_status']='pending';
+        $result['validation']['meaningful_change']=!$unchanged;
+        $result['validation']['selection_changed']=$out->analysis->display->selection_changed;
+        $result['validation']['analysis_as_of_preserved']=false;
+        $result['validation']['revalidated_at']=$out->analysis->display->revalidated_at;
         $result['validation']['prepare_reused']=$bundle['prepared']['prepare_reused'];$result['validation']['cache_key']=$bundle['prepared']['cache_key'];
         return $result;
     }
@@ -4466,6 +4473,66 @@ final class MonTradingReview {
         $r->evidence_ids=array_values(array_unique(array_merge(mon_get($r,'evidence_ids',[]),$v->evidence_ids)));
     }
 }
+final class MonRevalidation {
+    const CONTRACT='MON-REVALIDATION-1.0';
+    private static function recommendations($d,array $countries): array {
+        $rows=[];
+        foreach(mon_get($d->analysis,'results',[])as $r)if(in_array(mon_get($r,'country'),$countries,true))
+            $rows[]=MonRun::pick($r,['symbol_id','country','action','rank','entry_plans']);
+        usort($rows,static function($a,$b){return strcmp((string)mon_get($a,'symbol_id'),(string)mon_get($b,'symbol_id'));});
+        return $rows;
+    }
+    public static function selectionChanged($base,$candidate,array $countries): bool {
+        return MonRun::json(self::recommendations($base,$countries))!==MonRun::json(self::recommendations($candidate,$countries));
+    }
+    private static function pending($a,array $countries): bool {
+        if(mon_get($a,'pending_analysis',false)!==true)return false;
+        $pending=mon_get($a,'pending_analysis_countries',[]);
+        return !is_array($pending)||!$pending||(bool)array_intersect($countries,$pending);
+    }
+    public static function stamp($base,$candidate,$context): void {
+        $c=MonRun::context($context);$a=$candidate->analysis;$at=MonRun::utc($a->as_of);
+        $dates=new stdClass();foreach($c->countries as $country)$dates->$country=null;
+        foreach(mon_get($a,'market_summary',[])as $row){$country=mon_get($row,'country');$date=mon_get($row,'completed_bar_date');
+            if(in_array($country,$c->countries,true)&&is_string($date)&&preg_match('/^\d{4}-\d{2}-\d{2}$/',$date))$dates->$country=$date;}
+        $display=mon_get($a,'display');if(!($display instanceof stdClass))$display=new stdClass();
+        $complete=!self::pending($a,$c->countries);
+        $display->revalidation_contract=self::CONTRACT;$display->analysis_as_of=$at;$display->rendered_at=$at;
+        $display->analysis_recomputed=true;$display->selection_recomputed=true;$display->analysis_complete=$complete;
+        $display->revalidated_at=$complete?$at:null;$display->scope_countries=$c->countries;$display->completed_bar_dates=$dates;
+        $display->selection_changed=self::selectionChanged($base,$candidate,$c->countries);
+        $markets=mon_get($display,'market_revalidations');if(!($markets instanceof stdClass))$markets=new stdClass();
+        $completed=[];$pending=[];
+        foreach($c->countries as $country){
+            if(self::pending($a,[$country])){$pending[]=$country;continue;}
+            $completed[]=$country;$markets->$country=(object)['completed_at'=>$at,'completed_bar_date'=>$dates->$country,
+                'selection_changed'=>self::selectionChanged($base,$candidate,[$country])];
+        }
+        $display->completed_countries=$completed;$display->pending_countries=$pending;
+        $display->market_revalidations=$markets;$a->display=$display;
+    }
+    public static function heading($a): string {
+        $display=mon_get($a,'display');$countries=mon_get($display,'scope_countries',[]);$at=mon_get($display,'revalidated_at');
+        if(mon_get($display,'revalidation_contract')!==self::CONTRACT||mon_get($display,'selection_recomputed')!==true||
+            !is_array($countries)||!$countries||mon_get($display,'analysis_as_of')!==mon_get($a,'as_of'))
+            return '기준 '.$a->as_of.(mon_get($a,'pending_analysis',false)?' · 추가 자료 검토 대기':'');
+        $names=['KR'=>'한국','US'=>'미국','JP'=>'일본'];$scope=[];$basis=[];$pending=[];$changed=false;
+        foreach($countries as $country){
+            $name=$names[$country]??$country;
+            if(self::pending($a,[$country])){$pending[]=$name;continue;}
+            $market=mon_get(mon_get($display,'market_revalidations'),$country);
+            $full=mon_get($display,'analysis_complete')===true&&is_string($at)&&$at===mon_get($a,'as_of');
+            if(!$full&&mon_get($market,'completed_at')!==mon_get($a,'as_of')){$pending[]=$name;continue;}
+            $scope[]=$name;$changed=$changed||($full?mon_get($display,'selection_changed')!==false:mon_get($market,'selection_changed')!==false);
+            $date=mon_get(mon_get($display,'completed_bar_dates'),$country);
+            if(is_string($date)&&preg_match('/^\d{4}-(\d{2})-(\d{2})$/',$date,$m))$basis[]=$name.' 일봉 '.(int)$m[1].'월 '.(int)$m[2].'일 기준';
+            else $basis[]=$name.' 일봉 기준 미확인';}
+        if(!$scope)return '기준 '.$a->as_of.' · 추가 자료 검토 대기';
+        $kst=(new DateTimeImmutable(MonRun::utc($a->as_of)))->setTimezone(new DateTimeZone('Asia/Seoul'))->format('Y년 n월 j일 H:i');
+        return $kst.' '.implode('·',$scope).' 재검증 완료 · '.($changed?'추천 변경 있음':'추천 변경 없음').' · '.implode(' / ',$basis).
+            ($pending?' · '.implode('·',$pending).' 추가 자료 검토 대기':'');
+    }
+}
 final class MonMeaning {
     const VOLATILE=['as_of','applies_as_of','decided_at','analyzed_at','rendered_at','updated_at','run_id','collection_id','age_seconds','readiness','verification_status','action_price_valid','session_at_analysis','readiness_blockers','quote_valid_until'];
     private static function feed($hash,$v): void {
@@ -5535,7 +5602,7 @@ function mon_run_web(string $api): int {
                 if($result['write_required']){
                     $candidate=mon_decode($result['files'][0]['content']);$merged=MonRun::rebase($data,$candidate,$latest);$text=MonRun::json($merged);
                     $result['files'][0]=['path'=>'mon_data.json','content'=>$text,'blob_sha'=>MonRun::gitSha($text)];
-                    if(count($result['files'])===2){$summary=MonRun::render($merged,$merged->analysis->as_of);$result['files'][1]=['path'=>'mon_result.md','content'=>$summary,'blob_sha'=>MonRun::gitSha($summary)];$result['summary']=$summary;}
+                    if(isset($result['files'][1])&&$result['files'][1]['path']==='mon_result.md'){$summary=MonRun::render($merged,$merged->analysis->as_of);$result['files'][1]=['path'=>'mon_result.md','content'=>$summary,'blob_sha'=>MonRun::gitSha($summary)];$result['summary']=$summary;}
                     $result['validation']['rebase_source_blob_sha']=$request->latest_source_blob_sha;
                     // Artifact base must be the exact collection merged above.
                     if($api==='mon_detail_finalize'){$data=$latest;$c->source_blob_sha=$request->latest_source_blob_sha;}
@@ -5550,8 +5617,9 @@ function mon_run_web(string $api): int {
             if($api==='mon_detail_finalize'&&MonExecution::$active&&($result['write_required']||$result['status']==='no_change')){
                 $operator=$operator??MonOperator::check($cfg);
                 $source=property_exists($request,'latest_source_json')?$request->latest_source_json:$request->source_json;
-                $unchanged=!$result['write_required'];
-                if($unchanged){
+                $legacyUnchanged=!$result['write_required'];
+                $unchanged=$legacyUnchanged||mon_get($result,'analysis_origin')==='revalidated_unchanged_decision';
+                if($legacyUnchanged){
                     // Even a revalidated no-change requires an actual file-pair remote check.
                     $summary=$result['summary'];$result['files']=[['path'=>'mon_data.json','content'=>$source,'blob_sha'=>MonRun::gitSha($source)],
                         ['path'=>'mon_result.md','content'=>$summary,'blob_sha'=>MonRun::gitSha($summary)]];
