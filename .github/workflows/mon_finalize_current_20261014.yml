@@ -1,0 +1,35 @@
+name: MON native finalized financial report
+on:
+  push:
+    branches:
+      - diag/mon-prepare-20261014
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: curl,zlib,json
+          coverage: none
+      - name: Atomic MON native PHP final selection and save, no orders
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cp tests/mon_finalize_latest_handoff.php "$RUNNER_TEMP/mon_finalize_latest_handoff.php"
+          git fetch --depth=1 origin main
+          git checkout --detach FETCH_HEAD
+          export MON_SOURCE_ROOT="$PWD"
+          php -l "$RUNNER_TEMP/mon_finalize_latest_handoff.php"
+          php -d memory_limit=160M "$RUNNER_TEMP/mon_finalize_latest_handoff.php" | tee final_report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mon-finalized-20261014
+          path: final_report.json
+          retention-days: 7
