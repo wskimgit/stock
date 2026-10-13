@@ -1,0 +1,38 @@
+name: MON 21 candidate intake diagnostic (read only)
+on:
+  push:
+    branches:
+      - diag/mon-handoff-21-20261014
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: json,zlib,curl
+          coverage: none
+      - name: Actual 21 incoming vs 24 existing with 96MiB memory
+        shell: bash
+        run: |
+          set +e
+          php -d memory_limit=96M tests/mon_handoff_real21_diagnostic.php > handoff_96.json 2>&1
+          code=$?
+          cat handoff_96.json
+          printf '\nPHP_96_EXIT=%s\n' "$code"
+          if [ "$code" -ne 0 ]; then
+            php -d memory_limit=160M tests/mon_handoff_real21_diagnostic.php > handoff_160.json 2>&1
+            code2=$?
+            cat handoff_160.json
+            printf '\nPHP_160_EXIT=%s\n' "$code2"
+          fi
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mon-handoff-21-diagnostic
+          path: handoff_*.json
+          retention-days: 7
