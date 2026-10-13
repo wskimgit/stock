@@ -60,6 +60,8 @@ final class MonChatGPTBridge {
         }
         if ($q->stage === 'decision') {
             if (!preg_match('/^[a-f0-9]{40}$/', (string)mon_get($q,'source_blob_sha','')) ||
+                !preg_match('/^[a-f0-9]{40}$/', (string)mon_get($q,'candidate_request_sha','')) ||
+                !preg_match('/^[a-f0-9]{40}$/', (string)mon_get($q,'details_receipt_sha','')) ||
                 !is_array(mon_get($q,'selected')) || count($q->selected)>9 ||
                 !is_array(mon_get($q,'references',[]))) throw new MonFault('MON_BRIDGE_DECISION_INVALID');
             $perCountry=[]; $all=[];
@@ -73,22 +75,23 @@ final class MonChatGPTBridge {
             }
         }
     }
-    private static function report(MonStore $store, MonHttp $http, MonConfig $cfg, $report, float $deadline): void {
+    private static function report(MonStore $store, MonHttp $http, MonConfig $cfg, $report, float $deadline): string {
         $report=(object)$report;
         // Do not turn each poll timestamp into a new Git commit.
         $raw=mon_json($report,false);$id=hash('sha256',$raw);
         $prior=$store->readPrivate(self::STATE);
-        if (mon_get($prior,'outbox_digest')===$id) return;
+        if (mon_get($prior,'outbox_digest')===$id) return MonRun::gitSha($raw);
         $current=self::get($http,$cfg,self::OUTBOX,$deadline);
         if ($current && $current['raw']===$raw) {
             $prior=$prior instanceof stdClass?$prior:new stdClass();$prior->outbox_digest=$id;
-            $store->writePrivate(self::STATE,$prior);return;
+            $store->writePrivate(self::STATE,$prior);return MonRun::gitSha($raw);
         }
         self::put($http,$cfg,self::OUTBOX,$raw,$current?$current['sha']:null,$deadline);
         $readback=self::get($http,$cfg,self::OUTBOX,$deadline);
         if(!$readback||!hash_equals(MonRun::gitSha($raw),$readback['sha'])) throw new MonFault('MON_BRIDGE_OUTBOX_UNCONFIRMED');
         $prior=$prior instanceof stdClass?$prior:new stdClass();$prior->outbox_digest=$id;
         $store->writePrivate(self::STATE,$prior);
+        return MonRun::gitSha($raw);
     }
     private static function candidates(MonStore $store, MonHttp $http, MonConfig $cfg, MonGitHub $gh, array $latest, $q, string $inboxSha, float $deadline): array {
         $data=$latest['data'];$sourceSha=$latest['sha'];
@@ -122,6 +125,18 @@ final class MonChatGPTBridge {
             if (!hash_equals(MonRun::gitSha($raw),$next['sha'])) throw new MonFault('MON_BRIDGE_READBACK_PENDING');
             $latest=$next;$sourceSha=$next['sha'];
         }
+        // Link the actual first-stage request and accepted candidate identities to
+        // the eventual ChatGPT decision; source updates alone cannot forge them.
+        $state=$store->readPrivate(self::STATE);
+        $state=$state instanceof stdClass?$state:new stdClass();
+        if(mon_get($state,'candidate_request_sha')!==$inboxSha){
+            $state->last_detail_receipt_sha=null;
+            $state->last_detail_source_sha=null;
+        }
+        $state->candidate_request_sha=$inboxSha;
+        $state->candidate_request_id=$q->request_id;
+        $state->candidate_ids_sha256=hash('sha256',mon_json($q->candidate_ids,false));
+        $store->writePrivate(self::STATE,$state);
         if ($output['write_required'] || $errors || $unknown) self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'candidates',
             'request_id'=>$q->request_id,'request_sha'=>$inboxSha,
             'status'=>($errors||$unknown)?'registered_partial':'registered',
@@ -142,6 +157,14 @@ final class MonChatGPTBridge {
                 'artifact_id'=>$receipt['artifact_id']??null],$deadline);
             return;
         }
+        // This is a two-way handoff, not a PHP self-selection: require proof that
+        // this exact candidate request produced a readable, hash-bound detail report.
+        if(mon_get($old,'candidate_request_id')!==$q->request_id ||
+            mon_get($old,'candidate_request_sha')!==$q->candidate_request_sha ||
+            !hash_equals((string)mon_get($old,'candidate_ids_sha256',''),hash('sha256',mon_json($q->candidate_ids,false))) ||
+            mon_get($old,'last_detail_receipt_sha')!==$q->details_receipt_sha ||
+            mon_get($old,'last_detail_source_sha')!==$q->source_blob_sha)
+            throw new MonFault('MON_BRIDGE_HANDOFF_PROOF_REQUIRED');
         if (!hash_equals($q->source_blob_sha,$latest['sha'])) throw new MonFault('MON_BRIDGE_STALE_SOURCE');
         $data=$latest['data'];$req=MonDetails::requests($data);$responses=mon_get($data->collection,'detail_responses',new stdClass());
         foreach ($q->selected as $r) {
@@ -250,9 +273,18 @@ final class MonChatGPTBridge {
             if (!$row['usable'] || $state!=='done') $complete=false;
             $rows[]=$row;
         }
-        self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'details',
+        $receipt=self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'details',
             'request_id'=>$q->request_id,'request_sha'=>$inbox['sha'],
             'status'=>$complete?'collected':'collection_pending',
             'source_blob_sha'=>$sourceSha,'rows'=>$rows],$deadline);
+        // Store receipt only after remote write/readback succeeded.
+        $state=$store->readPrivate(self::STATE);
+        $state=$state instanceof stdClass?$state:new stdClass();
+        $state->candidate_request_id=$q->request_id;
+        $state->candidate_request_sha=$inbox['sha'];
+        $state->candidate_ids_sha256=hash('sha256',mon_json($q->candidate_ids,false));
+        $state->last_detail_receipt_sha=$receipt;
+        $state->last_detail_source_sha=$sourceSha;
+        $store->writePrivate(self::STATE,$state);
     }
 }
