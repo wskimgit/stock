@@ -63,7 +63,7 @@ final class MonChatGPTBridge {
                 !is_array(mon_get($q,'selected')) || count($q->selected)>9 ||
                 !is_array(mon_get($q,'references',[]))) throw new MonFault('MON_BRIDGE_DECISION_INVALID');
             $perCountry=[]; $all=[];
-            foreach (array_merge($q->selected, $q->references) as $row) {
+            foreach (array_merge($q->selected, mon_get($q,'references',[])) as $row) {
                 $sid=mon_get($row,'symbol_id');
                 if (!is_string($sid) || !isset($seen[$sid]) || isset($all[$sid]) ||
                     !is_string(mon_get($row,'reason')) || trim($row->reason)==='' || strlen($row->reason)>1000)
@@ -85,6 +85,8 @@ final class MonChatGPTBridge {
             $store->writePrivate(self::STATE,$prior);return;
         }
         self::put($http,$cfg,self::OUTBOX,$raw,$current?$current['sha']:null,$deadline);
+        $readback=self::get($http,$cfg,self::OUTBOX,$deadline);
+        if(!$readback||!hash_equals(MonRun::gitSha($raw),$readback['sha'])) throw new MonFault('MON_BRIDGE_OUTBOX_UNCONFIRMED');
         $prior=$prior instanceof stdClass?$prior:new stdClass();$prior->outbox_digest=$id;
         $store->writePrivate(self::STATE,$prior);
     }
@@ -99,8 +101,8 @@ final class MonChatGPTBridge {
             $id='cb.'.substr(hash('sha256',$q->request_id.'|'.$sid),0,48);
             $items[]=(object)['symbol'=>$symbol,'request_id'=>$id,'wait_seconds'=>120,'force_refresh'=>true];
         }
-        // No silent loss: a missing symbol needs an existing official-identity registration first.
-        if ($unknown) {
+        // Missing identities cannot cause healthy peers to be abandoned.
+        if(!$items){
             self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'candidates',
                 'request_id'=>$q->request_id,'request_sha'=>$inboxSha,'status'=>'identity_registration_required',
                 'unknown_ids'=>$unknown,'source_blob_sha'=>$sourceSha],$deadline);
@@ -110,13 +112,6 @@ final class MonChatGPTBridge {
             'countries'=>['KR','US','JP'],'important_ids'=>$q->candidate_ids];
         $output=MonDetails::registerMany($data,$context,$items);
         $errors=array_values(array_filter($output['requests'],static function($r){return $r['error']!==null;}));
-        if ($errors) {
-            self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'candidates',
-                'request_id'=>$q->request_id,'request_sha'=>$inboxSha,'status'=>'registration_pending',
-                'request_errors'=>array_map(static function($r){return ['symbol_id'=>$r['symbol_id'],'error'=>$r['error']];},$errors),
-                'source_blob_sha'=>$sourceSha],$deadline);
-            return $latest;
-        }
         if ($output['write_required']) {
             // A compaction dependency must never be discarded by the bridge.
             if (count($output['files'])!==1 || $output['files'][0]['path']!=='mon_data.json')
@@ -127,9 +122,12 @@ final class MonChatGPTBridge {
             if (!hash_equals(MonRun::gitSha($raw),$next['sha'])) throw new MonFault('MON_BRIDGE_READBACK_PENDING');
             $latest=$next;$sourceSha=$next['sha'];
         }
-        if ($output['write_required']) self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'candidates',
-            'request_id'=>$q->request_id,'request_sha'=>$inboxSha,'status'=>'registered',
-            'registered_count'=>count($items),'source_blob_sha'=>$sourceSha],$deadline);
+        if ($output['write_required'] || $errors || $unknown) self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'candidates',
+            'request_id'=>$q->request_id,'request_sha'=>$inboxSha,
+            'status'=>($errors||$unknown)?'registered_partial':'registered',
+            'registered_count'=>count($items)-count($errors),'unknown_ids'=>$unknown,
+            'request_errors'=>array_map(static function($r){return ['symbol_id'=>$r['symbol_id'],'error'=>$r['error']];},$errors),
+            'source_blob_sha'=>$sourceSha],$deadline);
         return $latest;
     }
     private static function decision(MonStore $store, MonHttp $http, MonConfig $cfg, array $latest, $q, string $inboxSha, float $deadline): void {
@@ -181,10 +179,10 @@ final class MonChatGPTBridge {
             $head=mon_get(mon_get($headResponse,'object'),'sha');
             if (!preg_match('/^[a-f0-9]{40}$/',(string)$head)) throw new MonFault('MON_BRIDGE_HEAD_INVALID');
             $publisher=new MonPublication($store,$http,$cfg);
-            $receipt=$publisher->enqueue($manifest['artifact_id'],$head,$budget,'chatgpt_github_handoff');
             MonExecution::event('final_prepared',['final_available'=>true,'new_analysis_complete'=>true,
                 'analysis_origin'=>'secured_data_decision','save_status'=>'not_requested',
                 'artifact_id'=>$manifest['artifact_id']]);
+            $receipt=$publisher->enqueue($manifest['artifact_id'],$head,$budget,'chatgpt_github_handoff');
             MonExecution::event('publication_queued',['save_status'=>$receipt['save_status'],
                 'job_id'=>$receipt['job_id']]);
             $saved=$old instanceof stdClass?$old:new stdClass();
@@ -202,6 +200,7 @@ final class MonChatGPTBridge {
         $now=time();
         if (is_int(mon_get($prior,'next_poll_at')) && $prior->next_poll_at>$now) return $latest;
         // A status/transport failure is scoped to the bridge: ordinary market collection continues.
+        $inbox=null;
         try {
             $inbox=self::get($http,$cfg,self::INBOX,$deadline);
             if (!$inbox) return $latest;
@@ -210,6 +209,15 @@ final class MonChatGPTBridge {
             self::decision($store,$http,$cfg,$latest,$q,$inbox['sha'],$deadline);
         } catch (MonFault $e) {
             $store->log('chatgpt_bridge_pending',['code'=>$e->faultCode]);
+            // The caller needs an observable next action, not just a private NAS log.
+            if($inbox && mon_get($inbox['value'],'request_id')!==null)try {
+                self::report($store,$http,$cfg,['contract'=>self::CONTRACT,
+                    'stage'=>mon_get($inbox['value'],'stage','unknown'),
+                    'request_id'=>$inbox['value']->request_id,'request_sha'=>$inbox['sha'],
+                    'status'=>in_array($e->faultCode,['MON_BRIDGE_STALE_SOURCE','MON_BRIDGE_SOURCE_CHANGED'],true)?'refresh_source':
+                        ($e->faultCode==='MON_BRIDGE_DETAIL_PENDING'?'collection_pending':'recovery_pending'),
+                    'error_code'=>$e->faultCode,'source_blob_sha'=>$latest['sha']],$deadline);
+            }catch(MonFault $reportFailure){$store->log('chatgpt_bridge_pending',['code'=>$reportFailure->faultCode]);}
         } finally {
             $s=$store->readPrivate(self::STATE);
             $s=$s instanceof stdClass?$s:new stdClass();$s->next_poll_at=$now+60;
