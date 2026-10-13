@@ -1,5 +1,7 @@
 # mon 지시문 — 한·미·일 스윙 종목 선정·매입·매도 판단
 
+> 개발 변경 시에만: [PHP-CHANGE-GATE-1.0](CHANGE_GATE.md)과 [AGENTS.md](AGENTS.md)를 따른다. 아래 MON 실행 블록·선정 기준·일상 결과 저장 절차는 이 개발 검수 기준으로 변경하지 않는다.
+
 - 지시문 **v4.14**, 완료 규격 **MON-COMPLETION-1.0**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
 - 개정일: **2026-10-13 KST**. MACD는 사용자 정정에 따라 **12·26·9**를 적용한다.
 - 저장소 **wskimgit/stock**, 브랜치 **main**. GitHub 관리 문서는 저장소 루트에 둔다. 별도 Wiki 저장소나 `wiki/` 폴더를 만들지 않는다.
