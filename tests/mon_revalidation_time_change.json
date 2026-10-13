@@ -102,8 +102,52 @@
   },
   "package": "NOT_REQUESTED; repository source files only",
   "publication": {
-    "status": "NOT_RUN",
-    "note": "This checkpoint precedes branch publication; exact remote source commit/readback will be appended after saving."
+    "status": "VERIFIED_BRANCH_SOURCE",
+    "branch": "codex/mon-revalidation-time-20261013",
+    "source_commit": "871060128549455d8abc87a564ee9263298159ce",
+    "verified_at": "2026-10-13T03:27:21.688Z",
+    "readback": {
+      "branch_head_matched": true,
+      "tree_file_blobs": [
+        {
+          "path": "mon.php",
+          "expected": "4f91abd11b0263a5760bd5bbf7506661706bfa22",
+          "actual": "4f91abd11b0263a5760bd5bbf7506661706bfa22"
+        },
+        {
+          "path": "monitor.md",
+          "expected": "f982fefe85812ec0e043f0d40a9d9f9ab9244101",
+          "actual": "f982fefe85812ec0e043f0d40a9d9f9ab9244101"
+        },
+        {
+          "path": "mon_wiki.md",
+          "expected": "997a0e5d9d73a4cf38cfe1d0b5a1fff1cf8fba5b",
+          "actual": "997a0e5d9d73a4cf38cfe1d0b5a1fff1cf8fba5b"
+        },
+        {
+          "path": "tests/mon_revalidation_time_test.php",
+          "expected": "930693d355fafb5533e2581175a0311e3ea9b8b6",
+          "actual": "930693d355fafb5533e2581175a0311e3ea9b8b6"
+        },
+        {
+          "path": "tests/mon_revalidation_time_tests.json",
+          "expected": "51c6d398654a04b3e48f8130f98b60a47d6e8a49",
+          "actual": "51c6d398654a04b3e48f8130f98b60a47d6e8a49"
+        },
+        {
+          "path": "tests/mon_reinforcement_test.php",
+          "expected": "33858301401041e9fac0e320b262e24fe5c883ac",
+          "actual": "33858301401041e9fac0e320b262e24fe5c883ac"
+        },
+        {
+          "path": "tests/mon_revalidation_time_change.json",
+          "expected": "e0dc0e9a5ad9bae9d06e4bed42ad44ea72b879e7",
+          "actual": "e0dc0e9a5ad9bae9d06e4bed42ad44ea72b879e7"
+        }
+      ],
+      "mon_php_utf8_bytes_equal": true
+    },
+    "note": "This supplemental record retains the exact tested source/test hashes; no production bytes changed after tests."
   },
   "rollback": {
     "source_commit": "b4f49703d4bfe4797217c27167aa1ed2390d1d01",
