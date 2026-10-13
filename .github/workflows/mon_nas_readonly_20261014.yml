@@ -1,4 +1,4 @@
-name: MON NAS read-only diagnostics
+name: MON NAS read-only extended diagnostic
 on:
   push:
     branches:
@@ -10,33 +10,44 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Check existing NAS public MON health without credentials
+      - name: Inspect real status, worker progress and errors without credentials
         run: |
           python3 - <<'PY'
-          import json, time, urllib.request, urllib.error
+          import json,time,urllib.request
           root="https://k-bizpost.myds.me/mon.php"
-          for path in ("?view=bootstrap", "?view=progress"):
+          paths=["?view=status","?view=progress&stage=1","?view=progress&cursor=0"]
+          for path in paths:
               started=time.monotonic()
-              request=urllib.request.Request(root+path, headers={"Accept":"application/json","User-Agent":"MON-ReadOnly-Health-Diagnostic/1.0"})
               try:
-                  with urllib.request.urlopen(request,timeout=12) as response:
-                      raw=response.read(256000)
-                      obj=json.loads(raw)
-                  state=obj.get("nas_state",{})
-                  progress=obj.get("progress",{})
-                  counts=progress.get("counts",{}) if isinstance(progress,dict) else {}
-                  detail=state.get("detail_progress",{})
-                  observation={"endpoint":path,"http_ok":True,"response_ok":obj.get("ok"),
-                    "processor_version":obj.get("processor_version"),
-                    "chatgpt_bridge_capability":obj.get("capabilities",{}).get("chatgpt_bridge"),
-                    "running":state.get("running"),"heartbeat_fresh":state.get("heartbeat_fresh"),
-                    "boot_verified":state.get("boot_verified"),
-                    "restart_required":state.get("restart_required"),
-                    "readiness":state.get("readiness"),"heartbeat_at":state.get("heartbeat_at"),
-                    "detail_counts":detail.get("counts",{}) if isinstance(detail,dict) else {},
-                    "progress_counts":counts,"elapsed_seconds":round(time.monotonic()-started,3)}
+                  req=urllib.request.Request(root+path,headers={"Accept":"application/json","User-Agent":"MON-ReadOnly-Extended/1.0"})
+                  with urllib.request.urlopen(req,timeout=12) as response:
+                      d=json.loads(response.read(262144))
+                  obs={"endpoint":path,"success":d.get("ok")}
+                  if path=="?view=status":
+                      x=d.get("data",{}) or {}; st=x.get("status",{}) or {}
+                      obs.update({k:x.get(k) for k in ("version","running","stopping","label","message","readiness","heartbeat_fresh","boot_verified","start_policy","monitoring_active","restart_required")})
+                      obs["error_code"]=x.get("error_code") or st.get("error_code")
+                      obs["daemon_state"]=st.get("state")
+                      obs["daemon_activity"]=st.get("activity_state")
+                      obs["daemon_last_error"]=st.get("error_code")
+                      obs["daemon_heartbeat"]=st.get("heartbeat_at")
+                      obs["runtime_resources"]=st.get("resources",{})
+                      obs["connection"]={k:v for k,v in (x.get("connection",{}) or {}).items() if isinstance(v,bool)}
+                      obs["detail_counts"]=(x.get("detail_progress",{}) or {}).get("counts",{})
+                      obs["request_error"]=d.get("error_code")
+                  elif path.startswith("?view=progress&stage"):
+                      st=d.get("step",{}) or {}
+                      cur=st.get("current",{}) or {}
+                      obs["work_pending"]=st.get("work_pending")
+                      obs["current"]={k:cur.get(k) for k in ("symbol_id","name","stage","label","at","provider","error")}
+                      obs["recent"]=[{k:item.get(k) for k in ("symbol_id","stage","label","error","provider","at")} for item in (st.get("recent",[]) or [])[-5:]]
+                  else:
+                      p=d.get("progress",{}) or {}
+                      obs["counts"]=p.get("counts",{})
+                      obs["cards"]=[{k:item.get(k) for k in ("symbol_id","state","error","bars_as_of","data_status","publication")} for item in (p.get("cards",[]) or [])[:25]]
+                      obs["page"]=p.get("page",{})
+                  obs["seconds"]=round(time.monotonic()-started,3)
+                  print(json.dumps(obs,ensure_ascii=False))
               except Exception as e:
-                  observation={"endpoint":path,"http_ok":False,"error_kind":type(e).__name__,
-                    "error":str(e)[:250],"elapsed_seconds":round(time.monotonic()-started,3)}
-              print(json.dumps(observation,ensure_ascii=False))
+                  print(json.dumps({"endpoint":path,"success":False,"error":type(e).__name__+":"+str(e)[:220],"seconds":round(time.monotonic()-started,3)},ensure_ascii=False))
           PY
