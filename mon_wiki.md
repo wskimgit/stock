@@ -1,23 +1,10 @@
 # MON 실행·복구·통계 안내
 
-2026-10-13 KST · mon.php **1.8.7** · 지시문 **v4.15** · MON-P3.1 · MACD(12,26,9)
+2026-10-13 KST · mon.php **1.8.6** · 지시문 **v4.14** · MON-P3.1 · MACD(12,26,9)
 
 ChatGPT가 자율 선정하고 PHP가 검증·수치·진행·저장을 보조한다. 실제 절차는 [monitor.md](monitor.md)의 MON:INSTRUCTION 블록 하나를 따른다.
 
-## 이번 변경 — 1.8.7 / 재검증 시각 표시
-
-실제 자율 분석·선정을 확정하면 추천이 같아도 이번 판단시각을 갱신하고 결과 파일 쌍을 저장한다. 예: **10월 13일 09:48 한국 재검증 완료 · 추천 변경 없음 · 한국 일봉 10월 12일 기준**. 예시 시각은 사용하지 않고 실제 확정 시각을 표시한다.
-
-| 표시 | 기준 |
-|---|---|
-| 재검증 시각 | 실제 자율 선정 확정의 기준시각(KST). 단순 조회·재표시·자료 복구는 갱신하지 않음 |
-| 추천 변경 없음 | 분석 범위의 종목·판단·순위·진입 계획 동일. 새 판단시각은 저장 |
-| 일봉 기준 | 시장별 실제 완료봉 날짜. 현재가 확인시각·기업 검토시각은 각 근거대로 별도 유지 |
-| 일부 시장/추가 검토 대기 | 완료 시장의 시각·추천 변화·완료봉과 “미국 추가 자료 검토 대기”처럼 대기 시장을 함께 표시. 전체가 대기이면 “기준 ISO시각 · 추가 자료 검토 대기”; 운영 미완료는 유지 |
-
-분석 확정은 원격 저장·현재 진입 확인·전체 운영 완료와 별도다. 실행과 필드 규격은 [monitor.md](monitor.md)에서 관리한다. 기존 선정 기준·유효기간·NAS 수동 시작·주문 금지를 유지하며 과거 운영 결과에 오늘 시각을 소급해서 넣지 않는다.
-
-## 이전 변경 — 1.8.6 / 복구·감속 D2.1
+## 이번 변경 — 1.8.6 / 복구·감속 D2.1
 
 NAS 실제 상태와 고정 코드에서 M01~M04를 확인한 뒤 [설계](mon_recovery_upgrade_design.md)와 [설계 검토](tests/mon_recovery_design_review.json)를 완료하고 구현했다. 높은 load만으로 전체 회차를 멈추던 동작을 감속 처리로 바꿨다. 실제 CPU 포화와 메모리 부족은 보호 대기하며 회복 첫 안전 표본 뒤5초로 다시 확인한다. CPU 미계측을0%로 표시하지 않고 메모리 부족 뒤 계측 누락을 회복으로 인정하지 않는다.
 
@@ -119,7 +106,7 @@ DNS/연결/TLS/408/425/429/5xx·일시 timeout은 계속 복구한다. 401/403·
 - mon_run_status: 실제 진행/초과량/계획/완료 여부 조회.
 - mon_run_report: 외부 실제 작업 후 operation_id·seconds·units·success·code 보고.
 - mon_run_observe: 실제 표시 후 보고. 클라이언트가 saved/새 분석 완료를 위조할 수 없다.
-- mon_run_finish: 새 자율 판단과 실제 파일 쌍 저장·완료 검증이 확인되면 완료, 작업이 남으면 checkpoint. 추천 변경 없음은 새 판단시각의 게시 생략 사유가 아니다. 사용자 명시 interrupted와 실제 failed는 별도 종료다.
+- mon_run_finish: 새 분석과 saved/no_change가 확인되면 완료, 작업이 남으면 checkpoint. 사용자 명시 interrupted와 실제 failed는 별도 종료다.
 - mon_run_statistics: 운영자 인증으로 조회·검증 병합 가져오기·내보내기.
 - mon_detail_request/requests: 독립 종목 등록. 활성30개는 전송/보관 범위이고 완료 후 다음 후보 묶음을 이어 처리한다.
 - mon_detail_prepare/finalize: 같은 source/token/준비 수치로 자율 결정을 검증. 기준 초과 후에도 호출 가능하다.
@@ -132,7 +119,7 @@ GET ?view=progress&stage=1은 MON-STEP-1.0의 보호 detail_stage.php와 작은 
 
 ## 결과와 저장의 실제 완료
 
-mon_data.json/mon_result.md를 같은 Git 커밋으로 저장하고 ref/두 SHA를 확인한다. artifact 생성·접수·저널·이전 표 재표시만으로 saved/fully_complete가 되지 않는다. 추천이 같아도 새 자율 판단을 확정했다면 새 판단시각을 저장하며, 모든 필수 검증과 실제 저장이 확인돼야 시간 초과 여부와 무관하게 완료다. 같은 확정 요청 재전송/reuse는 원래 시각을 유지한다. 아직 남은 작업은 terminal=false·checkpoint_at에 보존하며 같은 ID/revision으로 통계를 갱신한다.
+mon_data.json/mon_result.md를 같은 Git 커밋으로 저장하고 ref/두 SHA를 확인한다. artifact 생성·접수·저널·이전 표 재표시만으로 saved/fully_complete가 되지 않는다. 새 자율 판단 검증과 saved/no_change가 모두 확인되면 시간 초과 여부와 무관하게 완료다. 아직 남은 작업은 terminal=false·checkpoint_at에 보존하며 같은 ID/revision으로 통계를 갱신한다.
 
 일시 장애는 계속 복구한다. 권한/매핑/가격 조정/날짜/원문 충돌은 동일 입력을 무익하게 반복하지 않고 확인 경로·입력 정정·기존 검증자료로 전환한다. 자료 부족은 조건부/참고/매입 없음과 정확한 이유로 표시한다. 현재가·거래·기업 위험의 유효기간은 유지하므로 작업을 오래 했다고 오래된 가격이 현재 진입 가능해지지 않는다.
 
@@ -154,5 +141,4 @@ mon_data.json/mon_result.md를 같은 Git 커밋으로 저장하고 ref/두 SHA�
 [실제 NAS 관측](tests/mon_nas_connection_observed.json): 연결10/응답20초에서6.42초 후 HTTP200, JSON 조회6.09초, 당시 v1.8.1 PHP 클라이언트7.71초 후 HTTP200을 받았다. 당시 v1.8.2 클라이언트도 [별도 관측](tests/mon_gap_connection_observed.json)에서7.73초/HTTP200/v1.5.0을 확인했다. NAS 응답은 **v1.5.0**이며 JSON에는 실행 중·정상 heartbeat·장외 대기가 표시됐다. 접속 재시도는 실제 성공했지만 NAS에 새 코드를 배포하거나 데몬을 재시작한 것은 아니다. 실물 부하·재부팅·외부 시장 자료 수집 성공도 이번 검증 범위 밖이다. 접속 유지보수 관측/모의 시험을 시장 운영 통계에 넣지 않았다.
 
 [mon.php](mon.php)를 기존 NAS /web/mon.php에 교체한 뒤 웹에서 중지→수동 시작으로1.8.3을 적용한다. 대체 입력/이력 파일을 같은 폴더에 두거나 고정 Git blob 조회가 가능해야 하며 큰 이력 조회는 필요한 때만 수행한다. 교체/가동이 확인되기 전에는 NAS가 새 버전이라고 표시하지 않는다. 처리 계약/processor_version이1.8.0 미만이면 이번 MON은 최신 Git 코드의 고정 함수 경로에서 진행한다. 이후 재부팅 때에도 수동 시작한다. [접속 설계·검증](mon_nas_connection_design.md), [기존 설계 변경](mon_reinforcement_design.md), [기존 구현/검증](mon_reinforcement_implementation.md)을 참조한다.
-
 

@@ -2,13 +2,13 @@
 
 > 개발 변경 시에만: [PHP-CHANGE-GATE-1.0](CHANGE_GATE.md)과 [AGENTS.md](AGENTS.md)를 따른다. 아래 MON 실행 블록·선정 기준·일상 결과 저장 절차는 이 개발 검수 기준으로 변경하지 않는다.
 
-- 지시문 **v4.15**, 완료 규격 **MON-COMPLETION-1.0**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
+- 지시문 **v4.14**, 완료 규격 **MON-COMPLETION-1.0**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
 - 개정일: **2026-10-13 KST**. MACD는 사용자 정정에 따라 **12·26·9**를 적용한다.
 - 저장소 **wskimgit/stock**, 브랜치 **main**. GitHub 관리 문서는 저장소 루트에 둔다. 별도 Wiki 저장소나 `wiki/` 폴더를 만들지 않는다.
 - 파일명 유지: **mon.php**=PHP, **monitor.md**=지시문·설계, **mon_data.json**=공유 데이터, **mon_result.md**=사용자 결과.
 - 최상위 원칙: **ChatGPT가 자율 판단하고 자율적으로 종목을 선정한다. 투자형태는 swing이다. PHP 수치와 참고 순위는 보조자료다.**
 - 추천 자격: **시장보다 강함 AND (MA5 재돌파 OR MACD 골든 OR MACD 골든 전후)**. 기존 추천·신규 후보는 같은 자격으로 경쟁한다.
-- 구현: **mon.php 1.8.7**. 실제 자율 분석·선정을 확정하면 추천이 같아도 이번 판단 기준시각을 갱신하고 두 결과 파일을 저장한다. 완료봉 날짜·현재가 확인시각·기업 검토시각은 각각 실제 근거대로 보존한다. 필수 미완료 작업은 서버가 검증 파일 쌍에서 생성하며 완료 요청·상태·저장 응답·통계에 같은 완료 검증을 적용한다. 시간·조회·재시도·검색·게시 횟수로 전체 처리를 중단하지 않는다. 기준값은 통계/다음 계획에만 사용하며 초과 후에도 복구·판단·실제 저장까지 진행한다. 보호 통계에 초과량과 미완료를 기록한다. 실제 CPU·메모리의 감속/보호 정책과 국내 KRX 독립 증명, 기업·거래 시각 분리를 적용한다. NAS 수동 시작·선정 기준·주문 금지는 유지한다.
+- 구현: **mon.php 1.8.6**. 필수 미완료 작업은 서버가 검증 파일 쌍에서 생성하며 완료 요청·상태·저장 응답·통계에 같은 완료 검증을 적용한다. 시간·조회·재시도·검색·게시 횟수로 전체 처리를 중단하지 않는다. 기준값은 통계/다음 계획에만 사용하며 초과 후에도 복구·판단·실제 저장까지 진행한다. 보호 통계에 초과량과 미완료를 기록한다. 실제 CPU·메모리의 감속/보호 정책과 국내 KRX 독립 증명, 기업·거래 시각 분리를 적용한다. NAS 수동 시작·선정 기준·주문 금지는 유지한다.
 - 배포 구분: GitHub 코드와 지시문을 바꾸는 것과 NAS `/web/mon.php` 교체·실가동은 별개다. NAS 교체 확인 없이 새 데몬이 가동 중이라고 쓰지 않는다.
 - [복구·감속 설계 D2.1](mon_recovery_upgrade_design.md)을 검증하고 [구현·시뮬레이션 보고](mon_recovery_upgrade_implementation.md)에 보강 결과를 기록했다. 앞선 ERR-C D2.0/1.8.5는 이력으로 보존한다. 운영 전체 완료는 MON-OPERATION-COMPLETION-1.0으로 분석·저장·요청된 NAS 수집·계측을 구분하며 기존 영수증을 소급 변경하지 않는다.
 
@@ -18,13 +18,13 @@
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v4.15 — 실제 재검증 시각 갱신·추천 변화와 자료 날짜 분리
+# mon 지시문 v4.14 — 감속 지속 처리·KRX 독립 증명·기업/거래 시각 분리
 기준 MON-P3.1 / MACD(12,26,9) / MON-SWING-1.1 / MON-RUN-1.1 / MON-DETAIL-1.0 / MON-PROGRESS-1.0 / schema_version 3.
 stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한다. 처리/표시 wiki는 mon_wiki.md다. 검증 대체 입력은 SHA로 고정한 mon_recovery_inputs.json이며 일반 실행의 새 계산 프로그램/코드 개선 없이 고정 함수가 읽는다.
 최상위: ChatGPT가 후보 발굴·최종 판단·종목 선정을 자율 수행한다. 투자형태 swing. PHP는 자료와 수치 보조만 담당한다.
 사용자 최신 원칙: 시간·조회·재시도·게시·검색 횟수의 초과만으로 전체 처리를 중단하지 않는다. 초과해도 복구·판단·실제 저장 확인까지 계속한다. 기준값은 다음 실행의 계획과 진단에 쓰며 현재 실행의 강제 종료 조건이 아니다. 자료·권한·충돌 미해결을 정상 성공으로 꾸미지 않는다.
 
-완료 계약: mon.php1.8.7의 MON-COMPLETION-1.0(시장 분석·저장)과 MON-OPERATION-COMPLETION-1.0(운영 전체)을 함께 사용한다. API 경로는 응답 result 내부 기준이다. 새 실행은 operation_policy={scope:"analysis_and_nas_normalization",finish_owner:"execution",require_statistics_publication:true}를 start 때 보호 저장한다. run.fully_complete만으로 NAS 정상화·후처리 완료를 보고하지 않는다. NAS의 수집/접속 건강과 완료 계약 지원은 별도다. NAS가 구버전이거나 운영자 API를 사용할 수 없으면 최신 Git PHP의 고정 MonArtifact/MonPublication/MonExecution 함수를 로컬 보호 상태에서 사용한다. 구버전 fully_complete=true와 커넥터 저장 성공은 새 완료 영수증이 아니다. 기존 인증을 노출하거나 NAS 자동 시작/재시작을 하지 않는다. 기존 운영 계약의 reader_min_version=1.8.5는 호환 기준이며 이번 재검증 표시·저장 기능의 배포 확인에는1.8.7을 요구한다.
+완료 계약: mon.php1.8.6의 MON-COMPLETION-1.0(시장 분석·저장)과 MON-OPERATION-COMPLETION-1.0(운영 전체)을 함께 사용한다. API 경로는 응답 result 내부 기준이다. 새 실행은 operation_policy={scope:"analysis_and_nas_normalization",finish_owner:"execution",require_statistics_publication:true}를 start 때 보호 저장한다. run.fully_complete만으로 NAS 정상화·후처리 완료를 보고하지 않는다. NAS의 수집/접속 건강과 완료 계약 지원은 별도다. NAS가 구버전이거나 운영자 API를 사용할 수 없으면 최신 Git PHP의 고정 MonArtifact/MonPublication/MonExecution 함수를 로컬 보호 상태에서 사용한다. 구버전 fully_complete=true와 커넥터 저장 성공은 새 완료 영수증이 아니다. 기존 인증을 노출하거나 NAS 자동 시작/재시작을 하지 않는다. 기존 운영 계약의 reader_min_version=1.8.5는 호환 기준이며 이번 감속·KRX·trading_review 기능의 배포 확인에는1.8.6을 요구한다.
 
 1. 실행 문맥과 초기 표시
 - 큰 데이터 읽기 전에 실행 문맥을 먼저 등록한다. source SHA와 접수시각은 유지하고 이미 등록한 문맥을 새 시각으로 다시 시작하지 않는다. 새 코드가 없는 NAS에는 새 operation_policy를 보내지 않고 최신 Git 고정 PHP로 분석을 이어간다. NAS 필수 scope는 미완료로 유지한다.
@@ -67,10 +67,10 @@ stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한
 - 요청/확정의 공간 부족은 고정 MonGaps::compact 또는 mon_storage_compact로 해소한다. 이력·참조 파일과 파일 쌍을 같은 원자 ref로 저장하고 정확한 의존 SHA를 확인한다. 예약을 반복 축소하거나 원문을 버리지 않는다. 큰 반환 파일은 모델 밖에서 다루고 manifest/청크로 검증한다.
 - 통계 기준 도달은 중간 진행 보고 시점이다. 이를 이유로 새 분석을 포기하거나 이전 표 재표시만으로 작업을 끝내지 않는다. 복구 가능한 작업을 이어 처리해 자율 판단·검증된 결론·실제 저장 확인까지 진행한다. 영구 자료 부족은 조건부/참고/매입 없음 등 사실에 맞는 결론과 미해결 항목으로 표시한다.
 - mon_detail_finalize에 작은 decision(selected, references, 이유, confirmations의 독립 근거·가격·위험 변경)을 전달한다. 같은 준비·source SHA/token·prepared fingerprint를 검증해 두 파일을 확정한다. 늦었다는 이유로 함수 호출을 거절하지 않는다. 확정한 판단을 같은 ID에서 바꾸거나 토큰을 우회하지 않는다.
-- mon_data.json과 mon_result.md는 같은 원자 커밋으로 저장한다. 큰 파일은 검증 manifest/청크를 모델 밖에서 연결한다. 원격 ref/두 파일 SHA 확인 전 saved라고 쓰지 않는다. 실제 자율 분석·선정을 확정했다면 추천이 같아도 fixed_as_of로 analysis.as_of/analyzed_at를 갱신하고 write_required=true로 저장한다. analysis.display.revalidated_at은 해당 분석 범위가 모두 완료된 경우만 기록하며 부분 완료는 시장별 완료시각을 표시한다. 추천 변화 없음(selection_changed=false)은 게시 생략용 no_change가 아니다. 같은 확정 artifact의 중복 전송/실제 reuse는 원래 시각을 유지하며, 기존 자료 재표시·상태 조회·수집만의 완료는 새 분석 완료가 아니다.
+- mon_data.json과 mon_result.md는 같은 원자 커밋으로 저장한다. 큰 파일은 검증 manifest/청크를 모델 밖에서 연결한다. 원격 ref/두 파일 SHA 확인 전 saved라고 쓰지 않는다. 변경이 실제 없으면 자율 재검증된 no_change다. 기존 자료 재표시는 새 분석 완료가 아니다.
 - 유지보수에서 대체 입력을 확보하면 기존 판단시각/결정/collection을 보존해 verified_inputs_pending_autonomous_selection으로 저장한다. mon_data.json·mon_result.md·mon_recovery_inputs.json·필요한 mon_recovery_archive.json과 SHA 매니페스트는 같은 커밋이다. 다음 mon_detail_prepare가 검증된 입력을 작업 복사본에 반영하고 실제 자율 finalize가 끝나야 사용 완료로 전환한다. 입력 복구를 새 추천/현재 매입 가능/새 MON 전체 실행 완료로 표시하지 않는다. 일반 최종 판단의 저장은 기존 두 파일 계약을 유지한다.
 - 게시의 expires_at는 비교 기준일 뿐이다. transient 실패가 반복돼도 queued/publishing을 유지하고 대기 후 같은 journal을 재개한다. 응답 유실은 원격 확인을 계속하며 확인 전 무조건 ref 재갱신하지 않는다. 최신 head/파일 쌍의 읽기로 미저장이 확인되면 최신 source에서 재개한다. collection만의 동시 변경은 횟수와 무관하게 검증 병합한다. 다른 판단/설정 변경은 실제 conflict로 보호한다.
-- 최종 표는 이번 자율 판단 기준시각·분석 범위·추천 변화·완료봉 기준, 국가/종목/판단/자료 기준/가격 조건/이유, 주요사항으로 간결하게 표시한다. 예: “10월 13일 09:48 한국 재검증 완료 · 추천 변경 없음 · 한국 일봉 10월 12일 기준”. 시각은 실제 확정한 fixed_as_of를 KST로 표시하며 예시 시각을 복사하지 않는다. 한국만 완료하고 미국에 pending_analysis가 남으면 한국의 완료시각·추천 변화·완료봉 기준과 “미국 추가 자료 검토 대기”를 함께 표시한다. 모든 범위 시장이 대기이면 “기준 ISO시각 · 추가 자료 검토 대기”로 표시하고 재검증 완료로 쓰지 않는다. 일부 시장만 검토했으면 그 시장만 명시하고 전체 완료로 쓰지 않는다. 원래 가격시각·지연·정규장·진입 구간·거래 확인300초·기업 검증일·미확인 위험·악재는 표시시각에 재검사한다. 자료 유효기간은 작업시간 통계 기준과 다르며 오래된 가격을 ready로 표시하지 않는다.
+- 최종 표는 기준시각·상태, 국가/종목/판단/자료 기준/가격 조건/이유, 주요사항으로 간결하게 표시한다. 원래 가격시각·지연·정규장·진입 구간·거래 확인300초·기업 검증일·미확인 위험·악재는 표시시각에 재검사한다. 자료 유효기간은 작업시간 통계 기준과 다르며 오래된 가격을 ready로 표시하지 않는다.
 - fully_complete는 새 판단·검증된 artifact·선정 범위의 최신 완료봉 비교·당일 신규 신원 목표·기업 확인·정규장 현재가/거래 확인·실제 원격 파일 쌍 확인을 모두 통과하고 필수 작업0건일 때만 true다. 서버는 검증 당시 scope/근거/원문 해시를 작은 보호 snapshot에 묶고 run_id·received_at·artifact·게시 commit과 연결한다. 호출자의 success/미완료 빈 목록/구버전 통계로 이를 대체하지 않는다.
 - mon_run_status는 completion.pending_jobs/next_required_job을, mon_run_finish는 run.completion.pending_jobs/run.next_required_job을 읽는다. finish 완료 확인은 finish_accepted=true, run.fully_complete=true, run.completion.required_checks_pending=0과 올바른 영수증을 함께 확인한다. task_id는 복구 작업 ID이며 게시 API에는 publication_job_id/run의 job_id를 사용한다. finish_accepted=false 또는 MON_COMPLETION_PENDING이면 finished_at=null/terminal=false checkpoint이며 다음 복구 작업을 즉시 이어 수행한다. issuer_review는 공식 IR/거래소/규제기관 원문, current_entry는 독립 현재가·시세시각·지연·거래 상태, new_identity_quota는 공식 고유 신원 확보, analysis_reprepare는 실제 최신 입력 준비로 해소한다. 서버 필수 작업은 unfinished=[]로 삭제할 수 없다. 상태 확인만 반복하며 처리한 것처럼 보고하지 않는다.
 - 처음 finalize에 confirmations를 충분히 넣는다. 중간 조건부 결과를 이미 저장했다면 같은 run_context_id의 mon_run_recover(action=confirm)에 최신 정확한 source_json/context와 기존 mon_patch의 evaluate decision_patch를 넣어 가격·위험 근거만 보충한다. 원래 selected/지표/접수시각은 유지하고 새 artifact를 실제 게시·검증한다. 완료봉/계획/중대한 사건/신규 확보 등 재선정이 필요하면 action=reprepare로 이전 artifact 이력을 보존한 뒤 같은 실행에서 고정 prepare/finalize를 다시 호출한다. 확정한 과거 decision을 덮어쓰거나 토큰을 우회하지 않는다.
@@ -90,10 +90,6 @@ stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한
 ```
 <!-- MON:INSTRUCTION:END -->
 
-
-## 2026-10-13 재검증 시각 표시 — v4.15 / 1.8.7
-
-이번 자율 분석·선정이 확정되면 추천이 같아도 판단 기준시각과 결과 파일 쌍을 갱신한다. 추천의 동일성은 선정 종목·행동·순위·진입 계획으로 비교하며 가격/기업 검토시각만 바뀐 경우 추천 변경으로 세지 않는다. 단순 조회·재표시·입력 복구·전환·같은 확정 요청의 재전송은 새 판단 시각을 만들지 않는다. 선정 기준·수치·자료 유효기간·완료 영수증·운영 미완료 판정은 유지한다.
 
 ## 2026-10-13 복구·감속 구현 — v4.14 / 1.8.6
 
@@ -308,13 +304,12 @@ MON 분석 슬롯은 오전09:40 KST, 오후14:00 KST, 미국 개장30분 후10:
 | payload.strategy_archive | 이전 P2/P3.0 분석·추천·선정 사실·스윙 신호·프로필·해시. 과거 기준시각 유지 |
 | payload.history_metadata | 전체 원천 구간 여부·최초/최종 완료일·봉 개수·입력 해시·가격 조정 방식·원문 출처·원래 확인시각 |
 | analysis.swing_preparation | 수치 계산 완료 범위와 최종 자율 선정 대기/완료 상태 |
-| analysis.display | 범위 전체 완료시각 revalidated_at, 추천 변화 selection_changed, 분석 범위 scope_countries, 실제 시장별 완료봉 completed_bar_dates, 자율 재선정 실행 selection_recomputed, analysis_complete·completed_countries·pending_countries 및 시장별 market_revalidations |
 
 스윙 신호 값에는 `formula_version, bars_as_of, qualifying_signals, eligible, market_strong, ma5_below_days_before_last, ma5_reclaim_close, ma5_reclaim_live, macd_kind, macd_cross_date, macd_cross_age_days, histogram, macd_gap_atr, bar_input_sha256`를 보존한다. `source_kind=independent`의 검증된 실시간 관측만 장중 재돌파의 독립 입력으로 사용한다. PHP 시세를 독립 조사 사실로 재표기하지 않는다.
 
 현재 거래·기업 위험에 직접 확인하지 않은 사실은 verified로 저장하지 않는다. 종목별 응답의 latest/reused_current는 완료 일봉·지수 자료 상태이며 현재가·현재 기업 위험의 확인 완료를 뜻하지 않는다. 지연·실패·미검증·자료 준비 대기는 별도 상태다. `preparation_running=false`는 백그라운드 작업이 실행되고 있지 않음을 뜻한다.
 
-숫자는 소수6자리 ROUND_HALF_UP, 해시용 숫자는 소수6자리 문자열, 객체 키·식별자는 정렬, 시간은 UTC 마이크로초로 정규화한다. `selection_fingerprint`에는 자격 사실·기준·ChatGPT의 최종 선정 결정을 포함한다. `input_fingerprint`에는 고정 as_of·실제 사용 시세·자료 상태를 더한다. `result_fingerprint`에는 행동·가격 계획·스윙 신호·자율 결정 기록을 포함한다. 같은 고정 사실과 **같은 선정 결정**은 같은 업무 결과다. 다만 새 자율 분석·선정을 실제 확정한 시각은 별도 저장 대상이며 업무 결과가 같아도 파일 바이트와 게시 상태는 바뀐다. `selection_changed`는 해당 분석 범위의 선정 종목·행동·순위·진입 계획을 비교하고 가격/기업 검토시각만의 변경은 제외한다. 자유로운 AI 서술이 매번 같은 판단을 내린다고 보장하지 않는다.
+숫자는 소수6자리 ROUND_HALF_UP, 해시용 숫자는 소수6자리 문자열, 객체 키·식별자는 정렬, 시간은 UTC 마이크로초로 정규화한다. `selection_fingerprint`에는 자격 사실·기준·ChatGPT의 최종 선정 결정을 포함한다. `input_fingerprint`에는 고정 as_of·실제 사용 시세·자료 상태를 더한다. `result_fingerprint`에는 행동·가격 계획·스윙 신호·자율 결정 기록을 포함한다. 같은 고정 사실과 **같은 선정 결정**은 같은 업무 결과다. 자유로운 AI 서술이 매번 같은 판단을 내린다고 보장하지 않는다.
 
 전체 JSON 상한은 **2,097,152바이트(2MiB)**다. 종목별 응답 최대30개·개별 압축20KiB를 위한 collection 예약공간을 **655,360바이트**로 설정한다. 웹 입력 상한은6MiB, 압축 해제 원문은 전체8MiB/개별256KiB다. 전체 일봉과 이전 신호·추천을 무손실 보존하기 위해 기존768KiB 상한을 조정했다. 크기 제한 때문에 특정 후보의 이력을 잘라 자격을 왜곡하지 않는다. 압축 원문은 SHA256/바이트 길이를 검증한다. P3 저장은 PHP 기본 gzip을 사용해 NAS 웹에서 xz 명령 실행에 의존하지 않는다. P2의 기존 XZ는 전환 때 가용 고정 처리기로 한 번 해제한다. 크기 부족 때만 근거 전문을 압축 인덱스로 무손실 이동한다. 이전 근거와 과거 추천을 지우지 않는다.
 
@@ -381,7 +376,7 @@ GitHub 파일 읽기는 크기에 관계없이 Contents API의 `Accept: applicat
 
 `files=[{path:mon_data.json,content,blob_sha},{path:mon_result.md,content,blob_sha}]`, validation에는 기준·세 해시·압축 검증·collection 보존·저장 크기를 넣는다. 두 파일을 같은 Git 커밋으로 반영한다. 원문 SHA·토큰·해시·자료 기간·소유권·크기 오류이면 쓰기하지 않는다.
 
-동시 수집 충돌은 최신 collection만 병합하고 watchlist/analysis가 바뀌면 다시 읽어 판단한다. 수집 데몬의 GitHub 충돌 재시도는 기존 최대2회를 유지한다. ChatGPT 최종 저장의 새 소스 재병합은 필요한 경우1회로 제한한다. 완료된 독립 확인·선정은 같은 고정 입력에 대해 무익하게 반복하지 않는다. 단순 재표시/reuse는 기존 as_of를 유지하고 저장하지 않는다. 새 실행에서 자율 분석·선정을 실제 확정했다면 같은 추천도 새 판단시각을 저장하고 두 파일 게시를 수행한다.
+동시 수집 충돌은 최신 collection만 병합하고 watchlist/analysis가 바뀌면 다시 읽어 판단한다. 수집 데몬의 GitHub 충돌 재시도는 기존 최대2회를 유지한다. ChatGPT 최종 저장의 새 소스 재병합은 필요한 경우1회로 제한한다. 완료된 독립 확인·선정은 같은 고정 입력에 대해 반복하지 않는다. 실제 변화 없는 재표시는 기존 as_of를 유지하고 저장하지 않는다.
 
 ## 6.4 종목별 요청·응답 계약 — MON-DETAIL-1.0
 
@@ -438,9 +433,7 @@ NAS 데몬은 상세 처리 최대8초·회차당1종목·전체25초로 제한�
 
 성공한 종목 원문은 기존 상태 폴더의 보호 PHP 체크포인트 한 개/종목에 저장한다. 원래 request_hash·신원·목표 완료일·source digest와 가격 조정 기준이 일치하면 기준시간 초과 후에도 재사용한다. 새 요청/실제 완료일 변경/해시 손상이면 필요한 입력만 다시 검증한다. 지수만 부족하면 partial_fields.recovery에 missing_fields/resume_stage와 원천 오류를 남기며 가격을 과거 RS/MACD에 합성하지 않는다. 같은21일의 검증 저장 지수는 원래 검증시각을 유지한다.
 
-new_analysis_complete는 서버가 실제 자율 선정/통합 확정을 처리한 경우만 true다. analysis_origin은 previous_saved_result/secured_data_decision/revalidated_unchanged_decision을 구분한다. 같은 추천을 새 자율 판단으로 확정한 경우 revalidated_unchanged_decision이며 파일 반환·게시의 status는 changed, write_required=true다. 단순 reuse·동일 확정 요청 재전송은 새 시각을 만들지 않는다. 표시 보고로 분석·게시 완료를 올릴 수 없다. 기존 결과 재표시·원격 파일 미수정만으로 fully_complete나 검증된 no_change를 선언하지 않는다.
-
-`analysis.display.selection_recomputed=true`는 실제 MonSwing::select/mon_detail_finalize의 자율 선정 확정 경로에서만 기록한다. analysis.as_of/analyzed_at는 그 결정의 fixed_as_of로 갱신한다. `scope_countries`로 실제 검토 범위를 표시하고 `completed_bar_dates`는 각 범위 시장의 실제 market_summary.completed_bar_date를 사용한다. 자료일이 없으면 미확인으로 표시하며 오늘 날짜나 예상 마지막 거래일로 채우지 않는다. `completed_countries`와 `pending_countries`를 분리하며 대기 시장이 남으면 analysis_complete=false, revalidated_at=null이다. 모든 범위 시장이 완료됐을 때만 revalidated_at=fixed_as_of를 기록한다. 시장별 `market_revalidations.{KR,US,JP}`에는 실제 완료된 판단의 completed_at/bar_date/selection_changed를 보존해 다른 시장이 대기라도 완료 시장의 시각·추천 변화를 표시한다. 원래 봉·시세·출처·기업/거래 확인시각은 보존한다. 입력 복구·migrate·mon_patch·상태/표시 조회에서는 새 자율 재검증 시각을 만들지 않는다. 분석 범위 완료시각은 fully_complete/operation.overall_complete나 실제 원격 저장 확인을 대체하지 않는다.
+new_analysis_complete는 서버가 실제 통합 확정/검증 무변경을 처리한 경우만 true다. analysis_origin은 previous_saved_result/secured_data_decision/revalidated_unchanged_decision을 구분한다. 표시 보고로 분석·게시 완료를 올릴 수 없다. 기존 결과 재표시·원격 파일 미수정만으로 fully_complete나 검증된 no_change를 선언하지 않는다.
 
 `mon_run_start` 입력은 `{run_id,received_at?,mode:"auto"|"normal"|"extended",workload?,extension_reason?}`다. 기본 auto/workload=mon이며 현재 통계 SHA/세대/한도도 원래 접수에 고정한다. 같은 run_id의 접수시각·모드·사유는 불변이다. received_at가 빠지면 first_control_at 기준으로 시작하되 partial_timing=true다. `mon_run_status/observe`는 run_context_id를 사용한다. observe는 실제 표시 보고, 접근 미확인, 마감 초과만 받으며 완료를 꾸며내지 않는다.
 
@@ -494,7 +487,7 @@ manifest에는 정확한 두 파일의 path·bytes·sha256·blob_sha와 source_b
 | 새 기준에 적격 후보 없음 | 추천 없음과 실제 부족/미충족 사유를 표에 표시 |
 | NAS 이전 버전 가동 | 코드 교체·웹 재시작 필요. 새 기능 실가동으로 오인 금지 |
 
-mon_result.md는 실제 자율 확정 시각·분석 범위·추천 변화·완료봉 기준 한 줄, **국가/종목/판단/자료 기준/가격 조건/핵심 이유** 표 하나, 주요사항 최대3개다. “10월 13일 09:48 한국 재검증 완료 · 추천 변경 없음 · 한국 일봉 10월 12일 기준”과 같이 표시하며 현재가 확인시각은 실제 가격 근거에 별도 표시한다. 해당 범위의 pending_analysis, 미검토 시장과 운영 미완료는 그대로 표시한다. `MACD_BEFORE`는 골든 확정으로 쓰지 않는다. 실시간 MA5는 잠정으로 쓴다. 추천 확정 대기와 추천 없음, 데이터 준비 필요를 구분한다.
+mon_result.md는 기준시각·상태 한 줄, **국가/종목/판단/자료 기준/가격 조건/핵심 이유** 표 하나, 주요사항 최대3개다. `MACD_BEFORE`는 골든 확정으로 쓰지 않는다. 실시간 MA5는 잠정으로 쓴다. 추천 확정 대기와 추천 없음, 데이터 준비 필요를 구분한다.
 
 ## 8. 검증·개정 이력
 
@@ -538,5 +531,4 @@ mon_result.md는 실제 자율 확정 시각·분석 범위·추천 변화·완�
 - **v4.11 / mon.php1.8.3 (2026-10-11)**: 공식 신규 국가별20개·총60개를 서버 최초 시각으로 등록하고 다음 검증 거래일 목표로 단회 이월한다. 반 표시단위 종가 대조로 CRWD 포함100개 수치를 복구했다. 묶음 검증/복제·진행 캐시·3초 작은 단계 조회를 단순화하고 최근6단계/실제 반영을 표시한다.141 PASS/0 FAIL 및 동일 출력 배치88.31% 단축을 확인했다. 과거 신규 미달·새60개 상세/현재 진입·기업 확인·NAS 실물 적용은 구분해 기록한다.
 
 - **v4.12 / mon.php1.8.4 (2026-10-12)**: MON-COMPLETION-1.0의 보호 scope·서버 필수 작업·원격 증명·같은 실행 확인 보충/재준비·완료 거부/영수증·새 통계 구분을 구현했다. 신규 후보의 signal map은 값 변경 없이 ID 순서를 맞춰 직렬화 후 검증 실패를 해소했다. 새 변경의 검증과 NAS 적용 범위는 [완료 보강 보고](mon_completion_enforcement.md)를 따른다. 정상 수집/지표/선정 기준과 과거 시장 결과·통계는 보존했다.
-
 
