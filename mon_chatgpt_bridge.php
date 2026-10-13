@@ -109,7 +109,7 @@ final class MonChatGPTBridge {
             throw new MonFault('MON_BRIDGE_SOURCE_CHANGED');
         $budget=MonExecution::start($store,(object)[
             'run_id'=>'chatbridge-intake-'.$q->request_id,
-            'mode'=>'auto','workload'=>'mon']);
+            'mode'=>'auto','workload'=>'mon_handoff']);
         try {
             $metadata=['decision_sha256'=>hash('sha256',mon_json((object)[
                     'contract'=>self::CONTRACT,'stage'=>'candidates',
