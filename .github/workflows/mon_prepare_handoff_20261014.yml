@@ -1,0 +1,31 @@
+name: MON latest handoff prepare (read only)
+on:
+  push:
+    branches:
+      - diag/mon-prepare-20261014
+permissions:
+  contents: read
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: zlib,curl,json
+          coverage: none
+      - name: Analyze same latest GitHub main source with fixed MON swing formulas
+        shell: bash
+        run: |
+          git fetch --depth=1 origin main
+          git show FETCH_HEAD:mon_data.json > /tmp/mon_handoff_live.json
+          php -d memory_limit=128M tests/mon_prepare_live_handoff.php /tmp/mon_handoff_live.json > mon_prepared_summary.json
+          cat mon_prepared_summary.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mon-prepared-latest-handoff
+          path: mon_prepared_summary.json
+          retention-days: 7
