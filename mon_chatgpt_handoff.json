@@ -1,0 +1,28 @@
+{
+  "contract": "MON-CHATGPT-BRIDGE-1.0",
+  "stage": "candidates",
+  "request_id": "mon-20261014-0816-kst-001",
+  "candidate_ids": [
+    "KR|KOSPI|032640",
+    "KR|KOSPI|004370",
+    "KR|KOSPI|323410",
+    "KR|KOSDAQ|058470",
+    "KR|KOSDAQ|357780",
+    "KR|KOSPI|006400",
+    "KR|KOSPI|003670",
+    "US|NYSE|SNOW",
+    "US|NYSE|LLY",
+    "US|NASDAQ|WMT",
+    "US|NASDAQ|AAPL",
+    "US|NASDAQ|AMZN",
+    "US|NASDAQ|AMD",
+    "US|NASDAQ|ADBE",
+    "JP|TSE|6098",
+    "JP|TSE|4502",
+    "JP|TSE|6758",
+    "JP|TSE|4307",
+    "JP|TSE|5802",
+    "JP|TSE|4062",
+    "JP|TSE|3436"
+  ]
+}
