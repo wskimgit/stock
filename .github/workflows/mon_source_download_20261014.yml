@@ -1,0 +1,27 @@
+name: MON source download archive
+on:
+  push:
+    branches:
+      - delivery/mon-download-20261014
+permissions:
+  contents: read
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify frozen MON source
+        run: |
+          set -eu
+          test "$(sha256sum mon.php | cut -d' ' -f1)" = "5928e61aaee056f9d199a9076ae8ed86596257d5c03341ac9f219199b165c4f3"
+          test "$(sha256sum mon_chatgpt_bridge.php | cut -d' ' -f1)" = "a1235e0a9f28d7262b494be80a0b4d6a415d2d20197699c565c51cd7ba130030"
+          test "$(sha256sum monitor.md | cut -d' ' -f1)" = "cec8588fb39d71e425bb6d798effba714f1591480713dc1f1f0ee2ee1ce59084"
+          sha256sum mon.php mon_chatgpt_bridge.php monitor.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MON-1.8.7-files
+          path: |
+            mon.php
+            mon_chatgpt_bridge.php
+            monitor.md
+          compression-level: 0
