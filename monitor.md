@@ -2,14 +2,15 @@
 
 > 개발 변경 시에만: [PHP-CHANGE-GATE-1.0](CHANGE_GATE.md)과 [AGENTS.md](AGENTS.md)를 따른다. 아래 MON 실행 블록·선정 기준·일상 결과 저장 절차는 이 개발 검수 기준으로 변경하지 않는다.
 
-- 지시문 **v4.15**, 완료 규격 **MON-COMPLETION-1.0**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
+- 지시문 **v4.16**, 완료 규격 **MON-COMPLETION-1.0**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
 - 개정일: **2026-10-13 KST**. MACD는 사용자 정정에 따라 **12·26·9**를 적용한다.
 - 저장소 **wskimgit/stock**, 브랜치 **main**. GitHub 관리 문서는 저장소 루트에 둔다. 별도 Wiki 저장소나 `wiki/` 폴더를 만들지 않는다.
 - 파일명 유지: **mon.php**=PHP, **monitor.md**=지시문·설계, **mon_data.json**=공유 데이터, **mon_result.md**=사용자 결과.
 - 최상위 원칙: **ChatGPT가 자율 판단하고 자율적으로 종목을 선정한다. 투자형태는 swing이다. PHP 수치와 참고 순위는 보조자료다.**
 - 추천 자격: **시장보다 강함 AND (MA5 재돌파 OR MACD 골든 OR MACD 골든 전후)**. 기존 추천·신규 후보는 같은 자격으로 경쟁한다.
-- 구현: **mon.php 1.8.7**. 필수 미완료 작업은 서버가 검증 파일 쌍에서 생성하며 완료 요청·상태·저장 응답·통계에 같은 완료 검증을 적용한다. 시간·조회·재시도·검색·게시 횟수로 전체 처리를 중단하지 않는다. 기준값은 통계/다음 계획에만 사용하며 초과 후에도 복구·판단·실제 저장까지 진행한다. 보호 통계에 초과량과 미완료를 기록한다. 실제 CPU·메모리의 감속/보호 정책과 국내 KRX 독립 증명, 기업·거래 시각 분리를 적용한다. NAS 수동 시작·선정 기준·주문 금지는 유지한다.
+- 구현: **mon.php 1.8.8**. 필수 미완료 작업은 서버가 검증 파일 쌍에서 생성하며 완료 요청·상태·저장 응답·통계에 같은 완료 검증을 적용한다. 시간·조회·재시도·검색·게시 횟수로 전체 처리를 중단하지 않는다. 기준값은 통계/다음 계획에만 사용하며 초과 후에도 복구·판단·실제 저장까지 진행한다. 보호 통계에 초과량과 미완료를 기록한다. 실제 CPU·메모리의 감속/보호 정책과 국내 KRX 독립 증명, 기업·거래 시각 분리를 적용한다. NAS 수동 시작·선정 기준·주문 금지는 유지한다.
 - [처리시간 설계 P2.2](mon_performance_design.md)와 [전후 시뮬레이션](mon_performance_implementation.md): 해외에서 검증 불가능한 KIS 원주가 조회를 생략하고 최대8개 파일 조각을 묶어 전달한다. 완료 확인을 줄이거나 전체시간 종료 제한을 새로 만들지 않는다.
+- [실패 격리·후속 판단 설계](mon_continuity_design.md)와 [구현·검증](mon_continuity_implementation.md): 연결/게시 장애가 성공한 종목의 수집을 막지 않으며 모든 회차의 처리 현황과 복구 작업을 로컬 및 mon_runtime_result.json에 보존한다. 처리 현황 저장과 최종 추천 완료는 별개다.
 - 배포 구분: GitHub 코드와 지시문을 바꾸는 것과 NAS `/web/mon.php` 교체·실가동은 별개다. NAS 교체 확인 없이 새 데몬이 가동 중이라고 쓰지 않는다.
 - [복구·감속 설계 D2.1](mon_recovery_upgrade_design.md)을 검증하고 [구현·시뮬레이션 보고](mon_recovery_upgrade_implementation.md)에 보강 결과를 기록했다. 앞선 ERR-C D2.0/1.8.5는 이력으로 보존한다. 운영 전체 완료는 MON-OPERATION-COMPLETION-1.0으로 분석·저장·요청된 NAS 수집·계측을 구분하며 기존 영수증을 소급 변경하지 않는다.
 
@@ -19,15 +20,18 @@
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v4.15 — 불필요 조회 제거·묶음 파일 전달·검증 완료 유지
+# mon 지시문 v4.16 — 실패 격리·후속 판단·결과 보존
 기준 MON-P3.1 / MACD(12,26,9) / MON-SWING-1.1 / MON-RUN-1.1 / MON-DETAIL-1.0 / MON-PROGRESS-1.0 / schema_version 3.
 stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한다. 처리/표시 wiki는 mon_wiki.md다. 검증 대체 입력은 SHA로 고정한 mon_recovery_inputs.json이며 일반 실행의 새 계산 프로그램/코드 개선 없이 고정 함수가 읽는다.
 최상위: ChatGPT가 후보 발굴·최종 판단·종목 선정을 자율 수행한다. 투자형태 swing. PHP는 자료와 수치 보조만 담당한다.
 사용자 최신 원칙: 시간·조회·재시도·게시·검색 횟수의 초과만으로 전체 처리를 중단하지 않는다. 초과해도 복구·판단·실제 저장 확인까지 계속한다. 기준값은 다음 실행의 계획과 진단에 쓰며 현재 실행의 강제 종료 조건이 아니다. 자료·권한·충돌 미해결을 정상 성공으로 꾸미지 않는다.
 
-완료 계약: mon.php1.8.7의 MON-COMPLETION-1.0(시장 분석·저장)과 MON-OPERATION-COMPLETION-1.0(운영 전체)을 함께 사용한다. API 경로는 응답 result 내부 기준이다. 새 실행은 operation_policy={scope:"analysis_and_nas_normalization",finish_owner:"execution",require_statistics_publication:true}를 start 때 보호 저장한다. run.fully_complete만으로 NAS 정상화·후처리 완료를 보고하지 않는다. NAS의 수집/접속 건강과 완료 계약 지원은 별도다. NAS가 구버전이거나 운영자 API를 사용할 수 없으면 최신 Git PHP의 고정 MonArtifact/MonPublication/MonExecution 함수를 로컬 보호 상태에서 사용한다. 구버전 fully_complete=true와 커넥터 저장 성공은 새 완료 영수증이 아니다. 기존 인증을 노출하거나 NAS 자동 시작/재시작을 하지 않는다. 기존 운영 계약의 reader_min_version=1.8.5는 호환 기준이며 이번 감속·KRX·trading_review 기능의 배포 확인에는1.8.6을 요구한다.
+완료 계약: mon.php1.8.8의 MON-COMPLETION-1.0(시장 분석·저장)과 MON-OPERATION-COMPLETION-1.0(운영 전체)을 함께 사용한다. API 경로는 응답 result 내부 기준이다. 새 실행은 operation_policy={scope:"analysis_and_nas_normalization",finish_owner:"execution",require_statistics_publication:true}를 start 때 보호 저장한다. run.fully_complete만으로 NAS 정상화·후처리 완료를 보고하지 않는다. NAS의 수집/접속 건강과 완료 계약 지원은 별도다. NAS가 구버전이거나 운영자 API를 사용할 수 없으면 최신 Git PHP의 고정 MonArtifact/MonPublication/MonExecution 함수를 로컬 보호 상태에서 사용한다. 구버전 fully_complete=true와 커넥터 저장 성공은 새 완료 영수증이 아니다. 기존 인증을 노출하거나 NAS 자동 시작/재시작을 하지 않는다. 기존 운영 계약의 reader_min_version=1.8.5는 호환 기준이며 이번 감속·KRX·trading_review 기능의 배포 확인에는1.8.6을 요구한다.
 
 1. 실행 문맥과 초기 표시
+- 시작 시 NAS GET ?view=continuity 또는 Git mon_runtime_result.json의 최신 revision과 checked_at·analysis_as_of를 먼저 확인한다. 페이지의 pending_jobs를 전부 읽고 같은 문맥에서 후속 작업을 수행한다. 현황의 report_complete는 추천/운영 전체 완료가 아니다. 오래된 mon_result.md의 진입 확인 문구를 최신 유효 신호처럼 재표시하지 않는다.
+- renew_period는 기존 종목을 새 완료일의 고유 request_id로 mon_detail_request에 등록하고, repair_source/verify_alternative_source/repair_serialization은 mon_gap_plan과 검증 대체 원천으로 복구한다. discovery_shortfall은 신원 검증 신규 탐색을 이어가며 이미 확보한 후보의 경쟁/결과 저장을 막지 않는다. 과거 결과/실패 요청을 자동 삭제하지 않는다.
+- prepare_select_save가 있으면 mon_detail_prepare의 모든 카드/참조 카드를 확인해 동등 경쟁하고 mon_detail_finalize→기존 원격 파일 쌍 확인→완료 영수증 순으로 끝까지 처리한다. 다른 종목 실패 대기 중에도 성공 자료를 먼저 준비한다. PHP 후속 job이 존재한다는 이유만으로 ChatGPT 최종 판단이 실행되었다고 쓰지 않는다. 현재가/기업 위험을 확인하지 못한 종목도 명시적인 이전 참고/조건부 결과로 남기고 새 진입 확인으로 승격하지 않는다.
 - 큰 데이터 읽기 전에 실행 문맥을 먼저 등록한다. source SHA와 접수시각은 유지하고 이미 등록한 문맥을 새 시각으로 다시 시작하지 않는다. 새 코드가 없는 NAS에는 새 operation_policy를 보내지 않고 최신 Git 고정 PHP로 분석을 이어간다. NAS 필수 scope는 미완료로 유지한다.
 - received_at·first_control_at·같은 run_id를 기록하고 mode=auto로 MonExecution::start/mon_run_start가 반환하는 통계 기준을 고정한다. limit_behavior=observe_and_continue, stop_on_threshold=false다. 접수시각과 비교 기준을 재개 때 바꾸지 않으며 실제 시간·횟수와 초과량을 계속 누적한다. 정확한 접수가 없으면 partial_timing=true다.
 - limits/remaining_seconds/deadline_at/expires_at는 이전 API와 호환하는 통계 기준 필드다. 0이 되거나 기준시각이 지나도 수집·준비·판단·확정·게시를 허용한다. MON 전체에 120/230/300초 또는 HTTP/검색/상세 시도 횟수의 종료 상한을 적용하지 않는다. normal/extended도 비교 기준만 정한다.
@@ -540,3 +544,7 @@ mon_result.md는 기준시각·상태 한 줄, **국가/종목/판단/자료 기
 
 - **v4.12 / mon.php1.8.4 (2026-10-12)**: MON-COMPLETION-1.0의 보호 scope·서버 필수 작업·원격 증명·같은 실행 확인 보충/재준비·완료 거부/영수증·새 통계 구분을 구현했다. 신규 후보의 signal map은 값 변경 없이 ID 순서를 맞춰 직렬화 후 검증 실패를 해소했다. 새 변경의 검증과 NAS 적용 범위는 [완료 보강 보고](mon_completion_enforcement.md)를 따른다. 정상 수집/지표/선정 기준과 과거 시장 결과·통계는 보존했다.
 
+
+## 2026-10-13 지속 복구 개정 — v4.16 / 1.8.8
+
+원격 일시 장애의 검증 캐시 재사용, 상세 게시 실패와 독립 시세 수집, 실패/미달/새 완료일의 보호 후속 작업, 처리 현황 원자 저장 및 GET 검증 원격 journal을 추가했다. 선정·수치·완료 계약은 유지한다. 새 처리 현황 파일 mon_runtime_result.json은 추천 파일 mon_result.md와 역할을 구분한다.

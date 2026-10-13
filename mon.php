@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.7 -- verified history routing / bounded lossless artifact batches.
+ * mon.php 1.8.8 -- resumable collection continuity and explicit analysis handoff.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.7';
+const MON_VERSION = '1.8.8';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -1077,6 +1077,135 @@ final class MonCollector {
     }
 }
 
+final class MonContinuity {
+    const CONTRACT='MON-CONTINUITY-1.0';
+    public static function cachedSource(MonStore $store,MonConfig $cfg,string $error,int $now): array {
+        if(!MonDaily::retryable($error)&&!in_array($error,['GITHUB_CONFLICT','HTTP_CIRCUIT_OPEN','BUDGET_EXHAUSTED'],true))throw new MonFault($error);
+        $d=$store->read('remote_cache.json');$m=mon_get($d,'_mon_cache');$at=mon_time(mon_get($m,'fetched_at'));
+        if(!($d instanceof stdClass)||$at===null||$at>$now+5||$now-$at>7*86400||
+            mon_get($m,'repository')!==$cfg->get('MON_REPOSITORY','wskimgit/stock')||mon_get($m,'branch')!==$cfg->get('MON_BRANCH','main'))throw new MonFault('MON_CONTINUITY_CACHE_UNAVAILABLE');
+        $copy=clone $d;unset($copy->_mon_cache);MonRun::validate($copy);
+        if(!hash_equals((string)mon_get($m,'data_sha256'),hash('sha256',MonRun::json($copy))))throw new MonFault('MON_CONTINUITY_CACHE_HASH_INVALID');
+        return ['sha'=>mon_get($m,'blob_sha'),'data'=>$copy,'cached'=>true,'source_error'=>$error,'source_fetched_at'=>$m->fetched_at];
+    }
+    private static function job(string $kind,string $sid,string $target,?string $error,string $api): stdClass {
+        return (object)['job_id'=>hash('sha256',$kind.'|'.$sid.'|'.$target),'kind'=>$kind,'symbol_id'=>$sid,'target_completed_date'=>$target,
+            'error'=>$error,'next_api'=>$api,'state'=>'pending','drop_on_threshold'=>false];
+    }
+    public static function build($d,$pending,int $now,?string $error=null): stdClass {
+        MonRun::validate($d);$copy=clone $d;$copy->collection=clone $d->collection;
+        $copy->collection->detail_responses=MonDetails::mergedResponses($d,mon_get($pending,'collection',new stdClass()));
+        $progress=MonProgress::build($copy,$now);$jobs=[];$rows=[];
+        foreach(MonDetails::requests($copy)as $sid=>$request){
+            $response=mon_get($copy->collection->detail_responses,$sid);$target=MonDetails::target($copy->watchlist,explode('|',$sid)[0],$now);
+            try{MonDetails::validRequest($request,$sid);$match=MonDetails::matching($request,$response);
+                $state=$match?(string)mon_get($response,'state','pending'):'pending';$usable=$match&&mon_get($response,'usable')===true;
+                $period=$target['verified']&&$request->target_completed_date!==$target['date'];
+                $current=$usable&&$state==='done'&&mon_get($response,'bars_as_of')===$target['date']&&$target['verified'];
+                if(!$current){$kind=$period?'renew_period':($state==='conflict'?'verify_alternative_source':($state==='blocked'?'repair_source':($state==='serialization_pending'?'repair_serialization':'continue_collection')));
+                    $api=$period?'mon_detail_request':(in_array($state,['blocked','conflict','serialization_pending'],true)?'mon_gap_plan':'mon_detail_view');
+                    $jobs[]=self::job($kind,$sid,$target['date'],mon_get($response,'error'),$api);}
+                $rows[]=(object)['symbol_id'=>$sid,'name'=>$request->symbol->name,'state'=>$state,'usable_reported'=>$usable,'current_period'=>$current,
+                    'bars_as_of'=>mon_get($response,'bars_as_of'),'target_completed_date'=>$target['date'],'error'=>mon_get($response,'error'),
+                    'next_retry_at'=>mon_get($response,'retry_after'),'previous_retained'=>!$current&&$usable];
+            }catch(MonFault $e){$jobs[]=self::job('repair_request',$sid,$target['date'],$e->faultCode,'mon_detail_request');
+                $rows[]=(object)['symbol_id'=>$sid,'state'=>'invalid','error'=>$e->faultCode,'current_period'=>false,'usable_reported'=>false];}
+        }
+        $bootstrap=MonBootstrap::build($d,mon_iso($now),mon_get(mon_get($d,'_mon_cache'),'blob_sha'));$cards=$bootstrap['cards'];
+        for($cursor=$bootstrap['page']['next_cursor'];$cursor!==null;){$page=MonBootstrap::build($d,mon_iso($now),mon_get(mon_get($d,'_mon_cache'),'blob_sha'),$cursor,$bootstrap['header']['snapshot_token']);$cards=array_merge($cards,$page['cards']);$cursor=$page['page']['next_cursor'];}
+        $analysisAt=mon_time($d->analysis->as_of)??0;$latestResponse=mon_time($progress['last_response_at'])??0;
+        $needAnalysis=$error!==null||mon_get(mon_get($d->analysis,'swing_preparation'),'selection_status')!=='autonomous_selection_completed'||$latestResponse>$analysisAt||$progress['counts']['current_missing']>0||$progress['publication']==='pending';
+        foreach($bootstrap['header']['periods']as $p)if(mon_get($p,'current_period')!==true)$needAnalysis=true;
+        foreach($cards as $card)if(count($card->blockers)>0){$jobs[]=self::job('confirm_current_conditions',$card->symbol_id,(string)$card->signal_as_of,null,'mon_run_recover');$needAnalysis=true;}
+        foreach(mon_get(mon_get($d->analysis,'discovery_state'),'countries',[])as $country)if(mon_get($country,'shortfall',0)>0)
+            {$jobs[]=self::job('discovery_shortfall',$country->country,(string)mon_get($country,'completed_bar_date'),null,'mon_discovery_plan');$needAnalysis=true;}
+        if($needAnalysis)$jobs[]=self::job('prepare_select_save','',mon_iso($analysisAt),null,'mon_detail_prepare');
+        if($pending!==null)$jobs[]=self::job('publish_collection','',mon_get(mon_get($d,'_mon_cache'),'blob_sha',''),null,'daemon_collection_mirror');
+        if($error!==null)$jobs[]=self::job('remote_recovery','',mon_get(mon_get($d,'_mon_cache'),'blob_sha',''),$error,'daemon_remote_retry');
+        $unique=[];foreach($jobs as $job)$unique[$job->job_id]=$job;$jobs=array_values($unique);
+        $semantic=(object)['source_blob_sha'=>mon_get(mon_get($d,'_mon_cache'),'blob_sha'),'analysis_as_of'=>$d->analysis->as_of,
+            'counts'=>$progress['counts'],'rows'=>$rows,'cards'=>$cards,'jobs'=>$jobs,'source_error'=>$error];
+        return (object)['contract'=>self::CONTRACT,'processor_version'=>MON_VERSION,'checked_at'=>mon_iso($now),'revision'=>MonRun::digest($semantic),
+            'report_complete'=>true,'analysis_complete'=>!$needAnalysis,'overall_complete'=>false,'final_selector'=>'ChatGPT','auto_selected'=>false,
+            'source_blob_sha'=>$semantic->source_blob_sha,'source_fetched_at'=>mon_get(mon_get($d,'_mon_cache'),'fetched_at'),'source_error'=>$error,
+            'analysis_as_of'=>$d->analysis->as_of,'counts'=>$progress['counts'],'rows'=>$rows,'previous_results'=>$cards,'pending_jobs'=>$jobs,
+            'next_analysis_api'=>$needAnalysis?'mon_detail_prepare':null,'selection_policy'=>'verified_current_candidates_and_explicit_previous_references_compete_equally',
+            'note'=>'처리 현황 저장 완료. 최신 분석·ChatGPT 최종 선정·검증 파일 쌍 저장은 별도이며 이전 판단시각을 갱신하지 않습니다.'];
+    }
+    public static function checkpoint(MonStore $store,int $now,?string $error=null,bool $deferred=false): ?stdClass {
+        try{$old=$store->readPrivate('continuity.php');}catch(MonFault $e){$old=null;$store->log('continuity_journal_rebuilt',['code'=>$e->faultCode]);}
+        if($deferred){if($old instanceof stdClass){$old->resource_deferred=true;$old->resource_observed_at=mon_iso($now);$store->writePrivate('continuity.php',$old);}return $old;}
+        $d=$store->read('remote_cache.json');
+        try{if(!($d instanceof stdClass))throw new MonFault('MON_CONTINUITY_SOURCE_UNAVAILABLE');$report=self::build($d,$store->read('detail_pending.json'),$now,$error);}
+        catch(MonFault $e){$report=(object)['contract'=>self::CONTRACT,'processor_version'=>MON_VERSION,'checked_at'=>mon_iso($now),
+            'revision'=>MonRun::digest(['needs_source',$e->faultCode,$error]),'report_complete'=>true,'analysis_complete'=>false,'overall_complete'=>false,
+            'analysis_as_of'=>mon_get($old,'analysis_as_of'),'source_error'=>$e->faultCode,'counts'=>[],
+            'pending_jobs'=>[self::job('restore_verified_source','','',$e->faultCode,'daemon_remote_retry')],
+            'rows'=>[],'previous_results'=>[],'next_analysis_api'=>null,'note'=>'최신 검증 원문이 없어 복구 작업을 저장했습니다. 정상 추천으로 표시하지 않습니다.'];}
+        $quotes=$store->read('pending.json');if(mon_get($quotes,'dirty')===true){$report->pending_jobs[]=self::job('publish_quotes','',mon_get($quotes,'signature',''),null,'daemon_collection_mirror');$report->revision=MonRun::digest([$report->revision,'quotes_pending',mon_get(mon_get($quotes,'collection'),'collection_id')]);}
+
+        // Stable revision makes repeated ticks and daemon restarts idempotent.
+        if($old instanceof stdClass&&mon_get($old,'revision')===$report->revision)$report->revision_created_at=mon_get($old,'revision_created_at',$old->checked_at);
+        else $report->revision_created_at=$report->checked_at;
+        $store->writePrivate('continuity.php',$report);return $report;
+    }
+    public static function view(MonStore $store,int $cursor=0,string $revision=''): array {
+        try{$r=$store->readPrivate('continuity.php');}catch(MonFault $e){return ['contract'=>self::CONTRACT,'state'=>'journal_repair_required','error'=>$e->faultCode,'report_complete'=>false,'pending_jobs'=>[]];}if(!($r instanceof stdClass))return ['contract'=>self::CONTRACT,'state'=>'awaiting_checkpoint','report_complete'=>false,'pending_jobs'=>[]];
+        if($cursor<0||$cursor>count($r->pending_jobs)||$cursor>0&&$revision!==$r->revision)throw new MonFault('MON_CONTINUITY_CURSOR_INVALID');
+        $out=(array)MonRun::pick($r,['contract','processor_version','checked_at','revision','revision_created_at','report_complete','analysis_complete','overall_complete','analysis_as_of','source_fetched_at','source_error','counts','next_analysis_api','note','resource_deferred']);
+        $out['pending_jobs']=array_slice($r->pending_jobs,$cursor,8);$out['page']=['cursor'=>$cursor,'next_cursor'=>$cursor+8<count($r->pending_jobs)?$cursor+8:null,'total_jobs'=>count($r->pending_jobs)];
+        try{$pub=$store->readPrivate('continuity-publication.php');}catch(MonFault $e){$pub=null;$out['remote_journal_error']=$e->faultCode;}$out['remote_save_status']=mon_get($pub,'verified_revision')===$r->revision?'saved':mon_get($pub,'state','pending');
+        return $out;
+    }
+}
+
+final class MonContinuityPublication {
+    private $store;private $http;private $cfg;
+    public function __construct(MonStore $s,MonHttp $h,MonConfig $c){$this->store=$s;$this->http=$h;$this->cfg=$c;}
+    public function step(float $deadline,int $now): array {
+        $r=$this->store->readPrivate('continuity.php');if(!($r instanceof stdClass))return ['state'=>'idle'];
+        $scope=hash('sha256',$this->cfg->get('MON_REPOSITORY','wskimgit/stock').'|'.$this->cfg->get('MON_BRANCH','main'));
+        try{$j=$this->store->readPrivate('continuity-publication.php');}catch(MonFault $e){$j=null;$this->store->log('continuity_publication_recovery',['code'=>$e->faultCode]);}
+        if($j instanceof stdClass&&property_exists($j,'raw')){
+            try{if(!is_string($j->raw)||!hash_equals((string)mon_get($j,'expected_blob'),MonRun::gitSha($j->raw))||mon_get(mon_decode($j->raw),'revision')!==mon_get($j,'revision'))$j=null;}
+            catch(Throwable $e){$j=null;}
+        }
+        if(!($j instanceof stdClass)||mon_get($j,'scope')!==$scope)$j=(object)['scope'=>$scope,'state'=>'read','verified_revision'=>null,'retry_at'=>0,'failures'=>0];
+        if(mon_get($j,'verified_revision')===$r->revision)return ['state'=>'saved','revision'=>$r->revision];
+        if(mon_get($j,'retry_at',0)>$now)return ['state'=>'retry_wait','retry_at'=>$j->retry_at];
+        if(!property_exists($j,'raw')){$j->raw=mon_json($r,false);if(strlen($j->raw)>65536)throw new MonFault('MON_CONTINUITY_REPORT_TOO_LARGE');$j->revision=$r->revision;$j->expected_blob=MonRun::gitSha($j->raw);$j->state='read';}
+        $repo=$this->cfg->get('MON_REPOSITORY','wskimgit/stock');$branch=$this->cfg->get('MON_BRANCH','main');
+        if(!preg_match('~^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$~',$repo))throw new MonFault('REPOSITORY_CONFIG_INVALID');
+        $url='https://api.github.com/repos/'.$repo.'/contents/mon_runtime_result.json';$token=$this->cfg->get('GITHUB_TOKEN');
+        try{
+            if($token==='')throw new MonFault('GITHUB_TOKEN_MISSING');
+            $headers=['Authorization: Bearer '.$token,'Accept: application/vnd.github.raw+json','Content-Type: application/json'];
+            if($j->state==='write'){
+                $body=['branch'=>$branch,'message'=>'mon: save resumable runtime result','content'=>base64_encode($j->raw)];if(mon_get($j,'base_blob')!==null)$body['sha']=$j->base_blob;
+                // Persist verification intent BEFORE sending: a lost PUT response must be read back.
+                $j->state='verify';$this->store->writePrivate('continuity-publication.php',$j);
+                $response=$this->http->request('PUT',$url,$headers,mon_json($body,false),$deadline,3);
+                if(in_array($response['status'],[409,422],true)){$j->state='read';throw new MonFault('GITHUB_CONFLICT');}MonHttp::decode($response);
+            }else{
+                $response=$this->http->request('GET',$url.'?'.http_build_query(['ref'=>$branch]),$headers,null,$deadline,3);
+                if($response['status']===404){$j->base_blob=null;$j->state='write';}
+                else{if($response['status']<200||$response['status']>=300)MonHttp::decode($response);
+                    $raw=$response['body'];if(!is_string($raw)||strlen($raw)>65536)throw new MonFault('MON_CONTINUITY_REMOTE_INVALID');$sha=MonRun::gitSha($raw);
+                    if(hash_equals($j->expected_blob,$sha)){$j->state='saved';$j->verified_revision=$j->revision;$j->verified_at=mon_iso($now);unset($j->raw);}
+                    else{$remote=mon_decode($raw);if(mon_get($remote,'contract')!==MonContinuity::CONTRACT)throw new MonFault('MON_CONTINUITY_REMOTE_INVALID');
+                        if((mon_time(mon_get($remote,'checked_at'))??0)>(mon_time(mon_decode($j->raw)->checked_at)??0)){unset($j->raw);$j->state='read';throw new MonFault('MON_CONTINUITY_NEWER_REMOTE');}
+                        $j->base_blob=$sha;$j->state='write';}
+                }
+            }$j->failures=0;$j->retry_at=0;$j->error=null;
+        }catch(MonStop $e){throw $e;}
+        catch(MonFault $e){$j->failures++;$j->error=$e->faultCode;$j->retry_at=$now+max(30,min(300,30*(2**min(4,$j->failures-1))),$e->retryAfter);}
+        catch(Throwable $e){$j->failures++;$j->error='MON_CONTINUITY_REMOTE_INVALID';$j->retry_at=$now+300;}
+        $this->store->writePrivate('continuity-publication.php',$j);
+        return ['state'=>$j->state,'error'=>mon_get($j,'error'),'retry_at'=>$j->retry_at,'verified_revision'=>$j->verified_revision];
+    }
+}
+
+
 final class MonDaemon {
     private $store;
     private $control;
@@ -1086,7 +1215,7 @@ final class MonDaemon {
     private $collector;
     private $credentialSignature='';
     private $ticks=0;
-    private $started;
+    private $started;private $sourceHash;
     private $lastPublished=0;
     private $lastQuoteTick=0.0;
     private $detailCounts=[];
@@ -1098,9 +1227,9 @@ final class MonDaemon {
     private $lastAttempted=0;
     private $lastSucceeded=0;
     private $launchTicket;private $bootId;private $load;private $resources=[];private $lastHeartbeat=0.0;
-    private $heartbeatState='';private $remoteLatest=null;private $remoteScope='';private $lastCacheSha=null;
+    private $heartbeatState='';private $remoteLatest=null;private $remoteScope='';private $lastCacheSha=null;private $sourceError=null;
     public function __construct(MonStore $store,string $envFile,string $instance,string $launchTicket='') {
-        $this->store=$store; $this->envFile=$envFile; $this->control=new MonControl($store,$instance); $this->started=mon_iso();
+        $this->store=$store; $this->envFile=$envFile; $this->control=new MonControl($store,$instance); $this->started=mon_iso();$this->sourceHash=hash_file('sha256',__FILE__);
         $this->http=new MonHttp($this->control);$this->launchTicket=$launchTicket;$this->load=new MonDaemonLoad();
     }
     private function heartbeat(string $state,?string $error=null): void {
@@ -1109,13 +1238,13 @@ final class MonDaemon {
         elseif (in_array($state,['paused','empty_watchlist','mirrored','collected','market_closed','detail_ready','detail_retry','detail_collecting','resource_paused','stopped'],true)) $this->lastError=null;
         $now=mon_monotonic();$signature=$state.'|'.$this->activity.'|'.$this->lastError;
         if($state==='waiting'&&$signature===$this->heartbeatState&&$now-$this->lastHeartbeat<MonDaemonLoad::HEARTBEAT_SECONDS)return;
-        $this->store->write('status.json',(object)['version'=>MON_VERSION,'boot_id'=>$this->bootId,'start_policy'=>'manual_web_only','instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'activity_state'=>$this->activity,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'last_attempted'=>$this->lastAttempted,'last_succeeded'=>$this->lastSucceeded,'detail_counts'=>$this->detailCounts,'stage_seconds'=>$this->stageSeconds,'resources'=>$this->resources,'error_code'=>$this->lastError]);
+        $this->store->write('status.json',(object)['version'=>MON_VERSION,'source_sha256'=>$this->sourceHash,'boot_id'=>$this->bootId,'start_policy'=>'manual_web_only','instance_id'=>$this->control->instance,'pid'=>getmypid(),'started_at'=>$this->started,'heartbeat_at'=>mon_iso(),'state'=>$state,'activity_state'=>$this->activity,'ticks'=>$this->ticks,'last_published_at'=>$this->lastPublished?mon_iso($this->lastPublished):null,'last_attempted'=>$this->lastAttempted,'last_succeeded'=>$this->lastSucceeded,'detail_counts'=>$this->detailCounts,'stage_seconds'=>$this->stageSeconds,'resources'=>$this->resources,'error_code'=>$this->lastError]);
         $this->lastHeartbeat=$now;$this->heartbeatState=$signature;
     }
     private function cacheRemote($data,MonConfig $cfg,?string $sha=null): void {
         if($sha!==null&&$this->lastCacheSha===$sha)return;
         $local=clone $data;
-        $local->_mon_cache=(object)['repository'=>$cfg->get('MON_REPOSITORY','wskimgit/stock'),'branch'=>$cfg->get('MON_BRANCH','main'),'fetched_at'=>mon_iso(),'blob_sha'=>$sha];
+        $local->_mon_cache=(object)['repository'=>$cfg->get('MON_REPOSITORY','wskimgit/stock'),'branch'=>$cfg->get('MON_BRANCH','main'),'fetched_at'=>mon_iso(),'blob_sha'=>$sha,'data_sha256'=>hash('sha256',MonRun::json($data))];
         $this->store->write('remote_cache.json',$local);
         $this->lastCacheSha=$sha;
     }
@@ -1131,7 +1260,8 @@ final class MonDaemon {
                 }
             }catch(MonFault $e){/* An invalid local cache is replaced only by a verified remote read. */}
         }
-        $latest=$gh->read($deadline,3,$this->remoteLatest);$latest['cached']=false;$this->remoteLatest=$latest;return $latest;
+        try{$latest=$gh->read($deadline,3,$this->remoteLatest);$latest['cached']=false;$this->remoteLatest=$latest;$this->sourceError=null;return $latest;}
+        catch(MonFault $e){$latest=MonContinuity::cachedSource($this->store,$cfg,$e->faultCode,time());$this->sourceError=$e->faultCode;return $latest;}
     }
     public static function forceMirror($w,int $now,array $settings): bool {
         $slots=mon_get($w->settings,'analysis_slots',[]); if (!is_array($slots)) return false;
@@ -1214,10 +1344,11 @@ final class MonDaemon {
         if($unflushed>0)$data=$flush($data);$w=$data->watchlist;
         $this->detailCounts=MonProgress::build($data,time())['counts'];
         if($this->detailCounts['pending']>0)$this->poll=min($this->poll,5);
-        if($publishError!==null){$this->heartbeat('detail_publish_pending',$publishError);return;}
+        // Publication failure does not discard checkpoints or block independent quotes.
+        if($publishError!==null)$this->heartbeat('detail_publish_pending',$publishError);
         // The faster job poll must not turn the 60-second quote cadence into 10 seconds.
         if(mon_monotonic()-$this->lastQuoteTick<$settings['poll_seconds']||$this->http->remaining($tickDeadline)<=$settings['publish_reserve_seconds']){
-            $this->heartbeat($detailState?:'market_closed');return;
+            $this->heartbeat($publishError!==null?'detail_publish_pending':($detailState?:'market_closed'),$publishError??$this->sourceError);return;
         }
         $this->lastQuoteTick=mon_monotonic();
         if(count($w->symbols)===0){$this->heartbeat($detailState?:'empty_watchlist');return;}
@@ -1229,8 +1360,9 @@ final class MonDaemon {
         $dirty=$this->collector->attempted>0||(mon_get($pending,'signature')===$signature&&mon_get($pending,'dirty',false));
         if($this->lastAttempted>0)$this->store->write('pending.json',(object)['signature'=>$signature,'collection'=>$batch,'dirty'=>$dirty]);
         $due=($dirty&&time()-$this->lastPublished>=$settings['mirror_seconds'])||self::forceMirror($w,time(),$settings);
-        if($due){try{$at=mon_monotonic();$saved=$gh->publish($batch,$signature,$tickDeadline,$settings,$knownLatest);if($saved['written'])$this->lastPublished=time();$this->cacheRemote($saved['data'],$cfg,$saved['sha']);$this->stageSeconds['quote_publish']=round(mon_monotonic()-$at,6);@unlink($this->store->path('pending.json'));}
+        if($due&&$publishError===null){try{$at=mon_monotonic();$saved=$gh->publish($batch,$signature,$tickDeadline,$settings,$knownLatest);if($saved['written'])$this->lastPublished=time();$this->cacheRemote($saved['data'],$cfg,$saved['sha']);$this->stageSeconds['quote_publish']=round(mon_monotonic()-$at,6);@unlink($this->store->path('pending.json'));}
             catch(MonFault $e){if($e->faultCode==='WATCHLIST_CHANGED'){@unlink($this->store->path('pending.json'));$this->heartbeat('watchlist_changed',$e->faultCode);return;}throw $e;}}
+        if($publishError!==null||$this->sourceError!==null){$this->heartbeat('detail_publish_pending',$publishError??$this->sourceError);return;}
         if($this->lastAttempted>0&&$this->lastSucceeded===0)$this->heartbeat('quote_failed','QUOTE_FETCH_FAILED');
         else $this->heartbeat($detailState?:($this->lastAttempted===0?'market_closed':($due?'mirrored':'collected')));
     }
@@ -1255,6 +1387,15 @@ final class MonDaemon {
                 } catch (Throwable $e) {
                     $this->failures++; $exit=1; $this->store->log('tick_error',['code'=>'INTERNAL_ERROR']); $this->heartbeat('retrying','INTERNAL_ERROR'); $this->poll=max($this->poll,30);
                 }
+                // Every iteration, including a failed one, persists an honest resumable result.
+                try{
+                    MonContinuity::checkpoint($this->store,time(),$this->lastError??$this->sourceError,mon_get($this->resources,'state')==='deferred');
+                    $remaining=max(0,25-(mon_monotonic()-$start));
+                    if(mon_get($this->resources,'state')!=='deferred'&&$remaining>=.2){
+                        $cfg=new MonConfig($this->envFile,$this->store->dir);
+                        (new MonContinuityPublication($this->store,$this->http,$cfg))->step(microtime(true)+min(3,$remaining),time());
+                    }
+                }catch(MonStop $e){throw $e;}catch(Throwable $e){$this->store->log('continuity_save_pending',['code'=>$e instanceof MonFault?$e->faultCode:'MON_CONTINUITY_SAVE_FAILED']);}
                 if ($maxTicks && $this->ticks>=$maxTicks) break;
                 if(function_exists('gc_collect_cycles'))gc_collect_cycles();$cpuEnd=MonDaemonLoad::cpuSeconds();
                 $remaining=MonDaemonLoad::waitSeconds($this->poll,mon_monotonic()-$start,$cpuStart!==null&&$cpuEnd!==null?$cpuEnd-$cpuStart:null);
@@ -1507,7 +1648,7 @@ function mon_web_state(MonStore $store, MonConfig $cfg): array {
         'connection'=>['github'=>$configured,'kis'=>$cfg->get('KIS_APP_KEY')!==''&&$cfg->get('KIS_APP_SECRET')!==''],
         'github_token_source'=>$cfg->githubTokenSource(),
         'kis_credentials_source'=>$cfg->kisCredentialsSource(),'kis_config_error'=>$cfg->kisConfigError(),
-        'final_publication'=>MonCompletion::publicationView($store),
+        'continuity'=>MonContinuity::view($store),'final_publication'=>MonCompletion::publicationView($store),
         'publication_operator_configured'=>MonOperator::configured($cfg)
     ];
 }
@@ -1554,6 +1695,7 @@ summary{cursor:pointer;font-weight:650}label{display:block;margin:16px 0 5px;fon
 <button id="connection-retry" type="button" hidden>연결 다시 확인</button>
 <ul id="detail-cards" class="sub" aria-label="종목별 자료 진행"></ul>
 <button id="detail-more" type="button" hidden>다음 종목 보기</button>
+<p id="continuity" class="sub" role="status" aria-live="polite"></p>
 <p id="final-publication" class="sub" role="status" aria-live="polite">최종 결과 저장 요청 없음</p>
 </section>
 <section class="panel settings">
@@ -1584,6 +1726,7 @@ try{var saved=JSON.parse(sessionStorage.getItem(recoveryKey));
 function text(id,value){document.getElementById(id).textContent=value;}
 function draw(s){
  current=s;text('state',s.label);text('message',s.message);text('count',s.watchlist_loaded?s.watched:'—');text('collected',s.fresh_quotes||0);
+ var cc=s.continuity;text('continuity',cc?'처리 현황 '+(cc.report_complete?'저장됨':'저장 대기')+' · 최신 분석 '+(cc.analysis_complete?'확인됨':'후속 판단 필요')+' · 후속 작업 '+(cc.page?cc.page.total_jobs:0)+'건 · 원격 '+(cc.remote_save_status||'대기'):'처리 현황 대기');
  var pub=s.final_publication;
  text('final-publication',pub?'결과 저장 '+({queued:'대기',publishing:'처리 중',saved:'완료',conflict:'동시 변경으로 보류',failed:'실패',expired:'이전 버전 만료 · 재개 확인',unknown:'확인 재개 대기'}[pub.save_status]||'확인 필요')+(pub.fully_complete?' · 필수 확인 완료':' · 필수 확인/복구 진행 중')+(pub.completion&&pub.completion.required_checks_pending?' · 남은 작업 '+pub.completion.required_checks_pending+'건':'')+(pub.time_excess_seconds>0?' · 기준시간 초과, 계속 처리':'')+(pub.pending_analysis?' · 새 자료는 후속 판단 필요':''):'최종 결과 저장 요청 없음');
  document.getElementById('dot').className='dot'+(['partial','throttled'].includes(s.readiness)&&s.monitoring_active?' warn':s.monitoring_active?' on':s.running&&s.heartbeat_fresh?' warn':'');
@@ -5645,6 +5788,13 @@ function mon_failure_summary($data,string $code): string {
 function mon_web(): int {
     if (isset($_GET['api'])) return mon_run_web((string)$_GET['api']);
     header('Cache-Control: no-store');
+    if(($_GET['view']??'')==='continuity'){
+        header('Content-Type: application/json; charset=utf-8');
+        try{if(($_SERVER['REQUEST_METHOD']??'GET')!=='GET')throw new MonFault('MON_METHOD_INVALID');
+            $cursor=(string)($_GET['cursor']??'0');if(!preg_match('/^\d{1,4}$/',$cursor))throw new MonFault('MON_CONTINUITY_CURSOR_INVALID');
+            echo mon_json(['ok'=>true,'result'=>MonContinuity::view(new MonStore(getenv('MON_STATE_DIR')?:__DIR__),(int)$cursor,(string)($_GET['since']??''))],false);return 0;
+        }catch(MonFault $e){http_response_code($e->faultCode==='MON_METHOD_INVALID'?405:400);echo mon_json(['ok'=>false,'error_code'=>$e->faultCode],false);return 1;}
+    }
     if(($_GET['view']??'')==='bootstrap'){
         header('Content-Type: application/json; charset=utf-8');
         try{
@@ -5655,8 +5805,8 @@ function mon_web(): int {
             $cfg=new MonConfig(getenv('MON_ENV_FILE')?:'',$store->dir);
             $state=mon_web_state($store,$cfg);$health=array_intersect_key($state,array_flip(['version','running','heartbeat_fresh','readiness','monitoring_active','restart_required','boot_verified','watchlist_loaded','watched']));
             $progress=$state['detail_progress'];unset($progress['cards']);$health['detail_progress']=$progress;$health['heartbeat_at']=mon_get($state['status'],'heartbeat_at');$health['repair_job']=MonProgress::nextRepair($store->read('remote_cache.json'),$store->read('detail_pending.json'),time());
-            echo mon_json(['ok'=>true,'processor_version'=>MON_VERSION,'capabilities'=>['detail_codec'=>MonDetails::CODEC,'operation_completion'=>'MON-OPERATION-COMPLETION-1.0','archive'=>'MON-GAP-ARCHIVE-2.0','artifact_chunk_batch'=>'MON-CHUNKS-1.0'],
-                'nas_state'=>$health,'result'=>$result],false);return 0;
+            echo mon_json(['ok'=>true,'processor_version'=>MON_VERSION,'installed_source_sha256'=>hash_file('sha256',__FILE__),'capabilities'=>['detail_codec'=>MonDetails::CODEC,'operation_completion'=>'MON-OPERATION-COMPLETION-1.0','archive'=>'MON-GAP-ARCHIVE-2.0','artifact_chunk_batch'=>'MON-CHUNKS-1.0','continuity'=>MonContinuity::CONTRACT],
+                'nas_state'=>$health,'continuity'=>$state['continuity'],'result'=>$result],false);return 0;
         }catch(MonFault $e){http_response_code($e->faultCode==='MON_METHOD_INVALID'?405:400);if($e->faultCode==='MON_METHOD_INVALID')header('Allow: GET');echo mon_json(['ok'=>false,'error_code'=>$e->faultCode],false);return 1;}
         catch(Throwable $e){http_response_code(500);echo mon_json(['ok'=>false,'error_code'=>'MON_BOOTSTRAP_INTERNAL_ERROR'],false);return 1;}
     }

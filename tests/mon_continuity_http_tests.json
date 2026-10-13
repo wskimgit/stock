@@ -1,0 +1,50 @@
+{
+  "code": "1.8.8",
+  "php": "7.4.33",
+  "memory_limit": "96M",
+  "source_sha256": "0c99babd5ff6d44d252ab35c80d6d223ab7c3e044aa9e4eae9f0e3ce51852aa2",
+  "tests": 9,
+  "passed": 9,
+  "failed": 0,
+  "seconds": 0.4072196619963506,
+  "cases": [
+    {
+      "case": "read-only continuity endpoint returns saved result",
+      "result": "PASS"
+    },
+    {
+      "case": "saved status never pretends final recommendation is complete",
+      "result": "PASS"
+    },
+    {
+      "case": "every repair task survives real HTTP pagination",
+      "result": "PASS"
+    },
+    {
+      "case": "changed revision refuses stale pagination",
+      "result": "PASS"
+    },
+    {
+      "case": "invalid cursor is rejected",
+      "result": "PASS"
+    },
+    {
+      "case": "status endpoint cannot mutate or start daemon",
+      "result": "PASS"
+    },
+    {
+      "case": "bootstrap includes continuity capability and summary",
+      "result": "PASS"
+    },
+    {
+      "case": "web status includes same durable analysis handoff",
+      "result": "PASS"
+    },
+    {
+      "case": "read-only GETs preserve journal bytes and revision",
+      "result": "PASS"
+    }
+  ],
+  "external_requests": 0,
+  "orders": 0
+}

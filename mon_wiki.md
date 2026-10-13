@@ -1,10 +1,14 @@
 # MON 실행·복구·통계 안내
 
-2026-10-13 KST · mon.php **1.8.7** · 지시문 **v4.15** · MON-P3.1 · MACD(12,26,9)
+2026-10-13 KST · mon.php **1.8.8** · 지시문 **v4.16** · MON-P3.1 · MACD(12,26,9)
 
 ChatGPT가 자율 선정하고 PHP가 검증·수치·진행·저장을 보조한다. 실제 절차는 [monitor.md](monitor.md)의 MON:INSTRUCTION 블록 하나를 따른다.
 
-## 이번 변경 — 1.8.7 / 처리시간 P2.2
+## 이번 변경 — 1.8.8 / 지속 복구
+
+[설계](mon_continuity_design.md)·[구현](mon_continuity_implementation.md)를 따른다. 원격 조회·게시 실패를 종목별 수집과 분리하고 보호 checkpoint 및 mon_runtime_result.json에 현재 현황·이전 판단시각·복구/날짜 갱신/후속 판단 작업을 저장한다. GET ?view=continuity의 전체 페이지를 읽으며 실행 순서는 monitor.md 한 곳에서 관리한다. 현황 저장 완료를 추천 완료로 대체하지 않는다. 새 NAS 파일 교체와 웹 수동 재시작이 필요하다.
+
+## 이전 변경 — 1.8.7 / 처리시간 P2.2
 
 [설계](mon_performance_design.md)·[전후 시뮬레이션과 구현 보고](mon_performance_implementation.md)를 따른다. 검증 불가능한 해외 KIS 원주가 호출을 생략하고, 최대8개 파일 조각을 한 번에 읽는 MON-CHUNKS-1.0을 추가했다. 국내 KIS/현재가/가격 기준·완료/원격 저장 보호는 유지했다. 실행 순서는 monitor.md에서 관리한다.
 
