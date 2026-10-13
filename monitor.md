@@ -2,14 +2,15 @@
 
 > 개발 변경 시에만: [PHP-CHANGE-GATE-1.0](CHANGE_GATE.md)과 [AGENTS.md](AGENTS.md)를 따른다. 아래 MON 실행 블록·선정 기준·일상 결과 저장 절차는 이 개발 검수 기준으로 변경하지 않는다.
 
-- 지시문 **v4.14**, 완료 규격 **MON-COMPLETION-1.0**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
-- 개정일: **2026-10-13 KST**. MACD는 사용자 정정에 따라 **12·26·9**를 적용한다.
+- 지시문 **v4.15**, 완료 규격 **MON-COMPLETION-1.0**, 실행 규격 **MON-RUN-1.1**, 초기 표시 **MON-BOOTSTRAP-1.0**, 선정 기준 **MON-P3.1**, 수치 규격 **MON-SWING-1.1**, 진행 규격 **MON-PROGRESS-1.0**, 저장 규격 **schema_version 3**.
+- 개정일: **2026-10-14 KST**. MACD는 사용자 정정에 따라 **12·26·9**를 적용한다.
 - 저장소 **wskimgit/stock**, 브랜치 **main**. GitHub 관리 문서는 저장소 루트에 둔다. 별도 Wiki 저장소나 `wiki/` 폴더를 만들지 않는다.
 - 파일명 유지: **mon.php**=PHP, **monitor.md**=지시문·설계, **mon_data.json**=공유 데이터, **mon_result.md**=사용자 결과.
 - 최상위 원칙: **ChatGPT가 자율 판단하고 자율적으로 종목을 선정한다. 투자형태는 swing이다. PHP 수치와 참고 순위는 보조자료다.**
 - 추천 자격: **시장보다 강함 AND (MA5 재돌파 OR MACD 골든 OR MACD 골든 전후)**. 기존 추천·신규 후보는 같은 자격으로 경쟁한다.
-- 구현: **mon.php 1.8.6**. 필수 미완료 작업은 서버가 검증 파일 쌍에서 생성하며 완료 요청·상태·저장 응답·통계에 같은 완료 검증을 적용한다. 시간·조회·재시도·검색·게시 횟수로 전체 처리를 중단하지 않는다. 기준값은 통계/다음 계획에만 사용하며 초과 후에도 복구·판단·실제 저장까지 진행한다. 보호 통계에 초과량과 미완료를 기록한다. 실제 CPU·메모리의 감속/보호 정책과 국내 KRX 독립 증명, 기업·거래 시각 분리를 적용한다. NAS 수동 시작·선정 기준·주문 금지는 유지한다.
+- 구현: **mon.php 1.8.7**. 필수 미완료 작업은 서버가 검증 파일 쌍에서 생성하며 완료 요청·상태·저장 응답·통계에 같은 완료 검증을 적용한다. 시간·조회·재시도·검색·게시 횟수로 전체 처리를 중단하지 않는다. 기준값은 통계/다음 계획에만 사용하며 초과 후에도 복구·판단·실제 저장까지 진행한다. 보호 통계에 초과량과 미완료를 기록한다. 실제 CPU·메모리의 감속/보호 정책과 국내 KRX 독립 증명, 기업·거래 시각 분리를 적용한다. NAS 수동 시작·선정 기준·주문 금지는 유지한다.
 - 배포 구분: GitHub 코드와 지시문을 바꾸는 것과 NAS `/web/mon.php` 교체·실가동은 별개다. NAS 교체 확인 없이 새 데몬이 가동 중이라고 쓰지 않는다.
+- [ChatGPT-PHP 핸드오프 운영규격](mon_chatgpt_handoff.md)은 새로운 접수/응답/최종 결정의 정확한 GitHub 파일과 SHA 검증을 정의하며 기존 선정 지표나 주문 금지를 변경하지 않는다.
 - [복구·감속 설계 D2.1](mon_recovery_upgrade_design.md)을 검증하고 [구현·시뮬레이션 보고](mon_recovery_upgrade_implementation.md)에 보강 결과를 기록했다. 앞선 ERR-C D2.0/1.8.5는 이력으로 보존한다. 운영 전체 완료는 MON-OPERATION-COMPLETION-1.0으로 분석·저장·요청된 NAS 수집·계측을 구분하며 기존 영수증을 소급 변경하지 않는다.
 
 ## mon 실행 지시문
@@ -18,13 +19,22 @@
 
 <!-- MON:INSTRUCTION:BEGIN -->
 ```text
-# mon 지시문 v4.14 — 감속 지속 처리·KRX 독립 증명·기업/거래 시각 분리
+# mon 지시문 v4.15 — ChatGPT 실전 후보·상세·결정 핸드오프 + 감속·KRX 검증
 기준 MON-P3.1 / MACD(12,26,9) / MON-SWING-1.1 / MON-RUN-1.1 / MON-DETAIL-1.0 / MON-PROGRESS-1.0 / schema_version 3.
 stock/main 루트 monitor.md·mon.php·mon_data.json·mon_result.md를 사용한다. 처리/표시 wiki는 mon_wiki.md다. 검증 대체 입력은 SHA로 고정한 mon_recovery_inputs.json이며 일반 실행의 새 계산 프로그램/코드 개선 없이 고정 함수가 읽는다.
 최상위: ChatGPT가 후보 발굴·최종 판단·종목 선정을 자율 수행한다. 투자형태 swing. PHP는 자료와 수치 보조만 담당한다.
 사용자 최신 원칙: 시간·조회·재시도·게시·검색 횟수의 초과만으로 전체 처리를 중단하지 않는다. 초과해도 복구·판단·실제 저장 확인까지 계속한다. 기준값은 다음 실행의 계획과 진단에 쓰며 현재 실행의 강제 종료 조건이 아니다. 자료·권한·충돌 미해결을 정상 성공으로 꾸미지 않는다.
 
-완료 계약: mon.php1.8.6의 MON-COMPLETION-1.0(시장 분석·저장)과 MON-OPERATION-COMPLETION-1.0(운영 전체)을 함께 사용한다. API 경로는 응답 result 내부 기준이다. 새 실행은 operation_policy={scope:"analysis_and_nas_normalization",finish_owner:"execution",require_statistics_publication:true}를 start 때 보호 저장한다. run.fully_complete만으로 NAS 정상화·후처리 완료를 보고하지 않는다. NAS의 수집/접속 건강과 완료 계약 지원은 별도다. NAS가 구버전이거나 운영자 API를 사용할 수 없으면 최신 Git PHP의 고정 MonArtifact/MonPublication/MonExecution 함수를 로컬 보호 상태에서 사용한다. 구버전 fully_complete=true와 커넥터 저장 성공은 새 완료 영수증이 아니다. 기존 인증을 노출하거나 NAS 자동 시작/재시작을 하지 않는다. 기존 운영 계약의 reader_min_version=1.8.5는 호환 기준이며 이번 감속·KRX·trading_review 기능의 배포 확인에는1.8.6을 요구한다.
+완료 계약: mon.php1.8.7의 MON-COMPLETION-1.0(시장 분석·저장)과 MON-OPERATION-COMPLETION-1.0(운영 전체)을 함께 사용한다. API 경로는 응답 result 내부 기준이다. 새 실행은 operation_policy={scope:"analysis_and_nas_normalization",finish_owner:"execution",require_statistics_publication:true}를 start 때 보호 저장한다. run.fully_complete만으로 NAS 정상화·후처리 완료를 보고하지 않는다. NAS의 수집/접속 건강과 완료 계약 지원은 별도다. NAS가 구버전이거나 운영자 API를 사용할 수 없으면 최신 Git PHP의 고정 MonArtifact/MonPublication/MonExecution 함수를 로컬 보호 상태에서 사용한다. 구버전 fully_complete=true와 커넥터 저장 성공은 새 완료 영수증이 아니다. 기존 인증을 노출하거나 NAS 자동 시작/재시작을 하지 않는다. 기존 운영 계약의 reader_min_version=1.8.5는 호환 기준이며 이번 감속·KRX·trading_review 기능의 배포 확인에는1.8.6을 요구한다.
+
+
+0. ChatGPT ↔ mon.php ↔ GitHub 핸드오프 (MON-CHATGPT-BRIDGE-1.0)
+- 최우선 실제 실행 순서: ChatGPT가 기존·최근·신규 후보를 동등하게 자율 선별 → GitHub main의 mon_chatgpt_handoff.json에 stage=candidates, 고정 request_id 및 1~30개의 검증된 symbol_id 등록 → 실제 NAS에 배포된 mon.php가 기존 수동 시작 데몬에서 후보 요청을 접수해 종목별 상세 수집·보관 → mon_chatgpt_response.json의 stage=details와 신원·완료봉·RS20·MA5·MACD·ATR·출처/미완료를 ChatGPT가 실제 읽어 비교 → ChatGPT가 stage=decision을 제출 → PHP가 원문의 자격·시각·시세/기업 위험을 재검증하고 금융 결과 파일 쌍을 원자 게시·원격 SHA 재조회한다. 사용자가 'mon'을 요청하지 않았는데 PHP가 새로운 ChatGPT 대화를 자동 실행한다고 주장하지 않는다.
+- 후보 목록은 ChatGPT가 먼저 결정한다. 숫자/순위는 PHP의 참고자료일 뿐, PHP가 ChatGPT의 최종 판단을 생성하거나 선택 종목을 임의 변경하지 않는다. 동일 요청은 동일 request_id, 다른 회차는 새 ID다. 접수 슬롯30개는 한 묶음 한도이고 미완료 종목은 다음 회차에 독립 재시도한다. 신규 신원 미등록은 identity_registration_required로 분리하고 공식 상장 근거 확보/mon_discovery_acquire를 거쳐 재등록한다. 임의 코드·가짜 봉으로 채우지 않는다.
+- ChatGPT는 공개 GitHub 브리지 JSON 파일에 계좌, 주문량, API 키, 접속 토큰 등 비밀정보를 기록하지 않는다. NAS는 mon.php와 mon_chatgpt_bridge.php 두 파일이 실제 설치되어 있고 웹 수동 시작된 경우에만 이를 처리할 수 있다. GitHub PR/merge만으로 NAS 연결·수집을 완료로 보고하지 않는다.
+- PHP 상세 응답을 확인하기 전 최종 선정 요청 금지. PHP의 stage=details 응답에서 보고된 정확한 source_blob_sha와 그 응답 파일의 Git blob SHA를 획득한다. 최종 stage=decision에는 기존 candidate_ids와 request_id, 후보 요청의 candidate_request_sha, 응답의 details_receipt_sha, source_blob_sha, selected/references별 이유를 포함한다. 미수집·가격 충돌 종목은 현행 자격으로 승격하지 않고 이전 검증 자료를 reference로만 사용한다. 최종 등록 전 이력을 변경하는 새 가격/봉이 발생하면 refresh_source를 확인해 준비·판단을 재실행한다.
+- PHP는 MonDetails::prepare/finalize 및 MonPublication의 기존 검증을 우회하지 않는다. 대형 입력에서 복구 아카이브가 생기면 원자 커밋 journal로 금융 파일 쌍과 의존 파일을 함께 저장하고 원격 readback으로 등록 완료를 인정한다. 응답이 collection_pending 또는 registration_publishing이면 실제 완료 전 saved·selected로 표시하지 않는다. status=saved는 금융 파일 원격 저장만이며, operation.overall_complete는 별도 NAS 건강·실행·통계 검증을 요구한다.
+- 실제 브리지 규격·JSON 예시·중복/충돌 복구·설치 조건은 mon_chatgpt_handoff.md 하나를 따른다. 연결이 막히면 해당 단계의 오류와 이전 데이터 원래 시각을 명시해 종료한다. 대기·재개를 수행 가능한 다음 명시 실행에 이어가되 ChatGPT가 세션 종료 후 무인으로 계속 작업한다고 약속하지 않는다.
 
 1. 실행 문맥과 초기 표시
 - 큰 데이터 읽기 전에 실행 문맥을 먼저 등록한다. source SHA와 접수시각은 유지하고 이미 등록한 문맥을 새 시각으로 다시 시작하지 않는다. 새 코드가 없는 NAS에는 새 operation_policy를 보내지 않고 최신 Git 고정 PHP로 분석을 이어간다. NAS 필수 scope는 미완료로 유지한다.
