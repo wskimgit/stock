@@ -204,10 +204,16 @@ final class MonChatGPTBridge {
         $errors=array_values(array_filter($output['requests'],static function($r){return $r['error']!==null;}));
         if ($output['write_required']) {
             if(count($output['files'])>1) {
+                // Keep only the publish files while MonArtifact revalidates
+                // the large payload; avoid retaining the unpacked numerical cache.
+                $files=$output['files'];
+                unset($output,$errors,$data,$pool,$symbols,$items,$context);
+                MonRun::releasePayloadCache();
+                if(function_exists('gc_collect_cycles'))gc_collect_cycles();
                 // registerMany may create two financial files and a lossless
                 // recovery archive; it is invalid to PUT one file alone.
                 $job=self::enqueueCompacted($store,$http,$cfg,
-                    $output['files'],$sourceSha,$q,$inboxSha,$deadline);
+                    $files,$sourceSha,$q,$inboxSha,$deadline);
                 self::report($store,$http,$cfg,[
                     'contract'=>self::CONTRACT,'stage'=>'candidates',
                     'request_id'=>$q->request_id,'request_sha'=>$inboxSha,
