@@ -42,5 +42,5 @@ jobs:
         run: php -d memory_limit=96M tests/mon_chatgpt_bridge_compaction_test.php
       - name: Existing manual-web lifecycle regression
         run: python3 tests/mon_web_test.py
-      - name: Existing local NAS bootstrap / recovery HTTP regression
-        run: python3 tests/mon_nas_http_test.py
+      - name: Live localhost bootstrap confirms optional bridge capability
+        run: python3 tests/mon_chatgpt_bootstrap_test.py
