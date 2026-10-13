@@ -1,0 +1,42 @@
+name: MON NAS read-only diagnostics
+on:
+  push:
+    branches:
+      - diag/mon-nas-readonly-20261014
+permissions:
+  contents: read
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check existing NAS public MON health without credentials
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, urllib.error
+          root="https://k-bizpost.myds.me/mon.php"
+          for path in ("?view=bootstrap", "?view=progress"):
+              started=time.monotonic()
+              request=urllib.request.Request(root+path, headers={"Accept":"application/json","User-Agent":"MON-ReadOnly-Health-Diagnostic/1.0"})
+              try:
+                  with urllib.request.urlopen(request,timeout=12) as response:
+                      raw=response.read(256000)
+                      obj=json.loads(raw)
+                  state=obj.get("nas_state",{})
+                  progress=obj.get("progress",{})
+                  counts=progress.get("counts",{}) if isinstance(progress,dict) else {}
+                  detail=state.get("detail_progress",{})
+                  observation={"endpoint":path,"http_ok":True,"response_ok":obj.get("ok"),
+                    "processor_version":obj.get("processor_version"),
+                    "chatgpt_bridge_capability":obj.get("capabilities",{}).get("chatgpt_bridge"),
+                    "running":state.get("running"),"heartbeat_fresh":state.get("heartbeat_fresh"),
+                    "boot_verified":state.get("boot_verified"),
+                    "restart_required":state.get("restart_required"),
+                    "readiness":state.get("readiness"),"heartbeat_at":state.get("heartbeat_at"),
+                    "detail_counts":detail.get("counts",{}) if isinstance(detail,dict) else {},
+                    "progress_counts":counts,"elapsed_seconds":round(time.monotonic()-started,3)}
+              except Exception as e:
+                  observation={"endpoint":path,"http_ok":False,"error_kind":type(e).__name__,
+                    "error":str(e)[:250],"elapsed_seconds":round(time.monotonic()-started,3)}
+              print(json.dumps(observation,ensure_ascii=False))
+          PY
