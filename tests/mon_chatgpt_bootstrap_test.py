@@ -20,7 +20,7 @@ with tempfile.TemporaryDirectory(prefix="mon-chatgpt-http-") as tmp:
     env=dict(os.environ,MON_STATE_DIR=tmp,MON_ENV_FILE="")
     for key in ("GITHUB_TOKEN","KIS_APP_KEY","KIS_APP_SECRET"):env.pop(key,None)
     log=open(path/"server.log","wb")
-    server=subprocess.Popen([PHP,"-n","-S",f"127.0.0.1:{port}","-t",tmp],env=env,stdout=log,stderr=log)
+    server=subprocess.Popen([PHP,"-S",f"127.0.0.1:{port}","-t",tmp],env=env,stdout=log,stderr=log)
     opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
         url=f"http://127.0.0.1:{port}/mon.php"
