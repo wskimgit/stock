@@ -93,7 +93,94 @@ final class MonChatGPTBridge {
         $store->writePrivate(self::STATE,$prior);
         return MonRun::gitSha($raw);
     }
+    // Multi-file compaction is delegated to the MON publication journal. Its
+    // git tree/ref transaction commits the financial pair + archived dependency
+    // together, with SHA readback and resumable failed acknowledgement.
+    private static function enqueueCompacted(
+        MonStore $store, MonHttp $http, MonConfig $cfg, array $files,
+        string $sourceSha, $q, string $inboxSha, float $deadline
+    ): string {
+        $r=$http->request('GET',self::base($cfg).'contents/mon_data.json?ref=main',
+            self::headers($cfg,true),null,$deadline,3);
+        if($r['status']<200||$r['status']>=300)MonHttp::decode($r);
+        $raw=$r['body'];
+        if(!is_string($raw)||strlen($raw)>MonRun::MAX_SOURCE||
+            !hash_equals(MonRun::gitSha($raw),$sourceSha))
+            throw new MonFault('MON_BRIDGE_SOURCE_CHANGED');
+        $budget=MonExecution::start($store,(object)[
+            'run_id'=>'chatbridge-intake-'.$q->request_id,
+            'mode'=>'auto','workload'=>'mon']);
+        try {
+            $metadata=['decision_sha256'=>hash('sha256',mon_json((object)[
+                    'contract'=>self::CONTRACT,'stage'=>'candidates',
+                    'candidate_request_sha'=>$inboxSha],false)),
+                'run_context_id'=>$budget->run->run_context_id,
+                'received_at'=>$budget->run->received_at,
+                'countries'=>['KR','US','JP']];
+            $manifest=MonArtifact::create($store,$raw,$files,$metadata);
+            $head=MonHttp::decode($http->request('GET',self::base($cfg).'git/ref/heads/main',
+                self::headers($cfg),null,$deadline,3));
+            $headSha=mon_get(mon_get($head,'object'),'sha');
+            if(!preg_match('/^[a-f0-9]{40}$/',(string)$headSha))
+                throw new MonFault('MON_BRIDGE_HEAD_INVALID');
+            $pub=new MonPublication($store,$http,$cfg);
+            $receipt=$pub->enqueue($manifest['artifact_id'],$headSha,$budget,'chatgpt_github_intake');
+            $st=$store->readPrivate(self::STATE);
+            $st=$st instanceof stdClass?$st:new stdClass();
+            $st->pending_candidate_request_sha=$inboxSha;
+            $st->pending_candidate_job_id=$receipt['job_id'];
+            $store->writePrivate(self::STATE,$st);
+            return $receipt['job_id'];
+        } finally {
+            MonExecution::$active=null;MonExecution::$store=null;MonPreparation::$store=null;
+        }
+    }
+    private static function resumeCompacted(
+        MonStore $store,MonHttp $http,MonConfig $cfg,MonGitHub $gh,
+        array $latest,$q,string $inboxSha,float $deadline
+    ): ?array {
+        $st=$store->readPrivate(self::STATE);
+        if(mon_get($st,'pending_candidate_request_sha')!==$inboxSha ||
+            !is_string(mon_get($st,'pending_candidate_job_id')))return null;
+        $pub=new MonPublication($store,$http,$cfg);
+        $receipt=$pub->receipt($pub->load($st->pending_candidate_job_id));
+        if($receipt['save_status']!=='saved'){
+            self::report($store,$http,$cfg,[
+                'contract'=>self::CONTRACT,'stage'=>'candidates',
+                'request_id'=>$q->request_id,'request_sha'=>$inboxSha,
+                'status'=>in_array($receipt['save_status'],['failed','conflict'],true)?
+                    'registration_blocked':'registration_publishing',
+                'registration_job_id'=>$st->pending_candidate_job_id,
+                'error_code'=>$receipt['last_error'],'save_status'=>$receipt['save_status'],
+                'source_blob_sha'=>$latest['sha']],$deadline);
+            return $latest;
+        }
+        $next=$gh->read($deadline,3);
+        $actual=MonDetails::requests($next['data']);$accepted=0;$unknown=[];
+        foreach($q->candidate_ids as $sid){
+            $row=mon_get($actual,$sid);
+            $expected='cb.'.substr(hash('sha256',$q->request_id.'|'.$sid),0,48);
+            if($row instanceof stdClass&&mon_get($row,'request_id')===$expected)$accepted++;
+            else $unknown[]=$sid;
+        }
+        $st->candidate_request_id=$q->request_id;
+        $st->candidate_request_sha=$inboxSha;
+        $st->candidate_ids_sha256=hash('sha256',mon_json($q->candidate_ids,false));
+        $st->last_detail_receipt_sha=null;$st->last_detail_source_sha=null;
+        unset($st->pending_candidate_request_sha,$st->pending_candidate_job_id);
+        $store->writePrivate(self::STATE,$st);
+        self::report($store,$http,$cfg,[
+            'contract'=>self::CONTRACT,'stage'=>'candidates',
+            'request_id'=>$q->request_id,'request_sha'=>$inboxSha,
+            'status'=>$accepted===count($q->candidate_ids)?'registered':'registered_partial',
+            'registered_count'=>$accepted,'unknown_ids'=>$unknown,
+            'source_blob_sha'=>$next['sha'],
+            'registration_commit_sha'=>$receipt['published_commit_sha']],$deadline);
+        return $next;
+    }
     private static function candidates(MonStore $store, MonHttp $http, MonConfig $cfg, MonGitHub $gh, array $latest, $q, string $inboxSha, float $deadline): array {
+        $resumed=self::resumeCompacted($store,$http,$cfg,$gh,$latest,$q,$inboxSha,$deadline);
+        if($resumed!==null)return $resumed;
         $data=$latest['data'];$sourceSha=$latest['sha'];
         $symbols=MonRun::rows($data->watchlist->symbols);
         $pool=MonDiscovery::pool($data);
@@ -116,9 +203,20 @@ final class MonChatGPTBridge {
         $output=MonDetails::registerMany($data,$context,$items);
         $errors=array_values(array_filter($output['requests'],static function($r){return $r['error']!==null;}));
         if ($output['write_required']) {
-            // A compaction dependency must never be discarded by the bridge.
-            if (count($output['files'])!==1 || $output['files'][0]['path']!=='mon_data.json')
-                throw new MonFault('MON_BRIDGE_COMPACTION_REQUIRED');
+            if(count($output['files'])>1) {
+                // registerMany may create two financial files and a lossless
+                // recovery archive; it is invalid to PUT one file alone.
+                $job=self::enqueueCompacted($store,$http,$cfg,
+                    $output['files'],$sourceSha,$q,$inboxSha,$deadline);
+                self::report($store,$http,$cfg,[
+                    'contract'=>self::CONTRACT,'stage'=>'candidates',
+                    'request_id'=>$q->request_id,'request_sha'=>$inboxSha,
+                    'status'=>'registration_publishing','registration_job_id'=>$job,
+                    'registered_count'=>0,'source_blob_sha'=>$sourceSha],$deadline);
+                return $latest;
+            }
+            if(count($output['files'])!==1 || $output['files'][0]['path']!=='mon_data.json')
+                throw new MonFault('MON_BRIDGE_ARTIFACT_INVALID');
             $raw=$output['files'][0]['content'];
             self::put($http,$cfg,'mon_data.json',$raw,$sourceSha,$deadline);
             $next=$gh->read($deadline,3);
@@ -253,6 +351,8 @@ final class MonChatGPTBridge {
         $inbox=self::get($http,$cfg,self::INBOX,$deadline);
         if (!$inbox || mon_get($inbox['value'],'stage')!=='candidates') return;
         self::validate($inbox['value']);$q=$inbox['value'];
+        $state=$store->readPrivate(self::STATE);
+        if(mon_get($state,'candidate_request_sha')!==$inbox['sha'])return;
         $req=MonDetails::requests($data);$responses=mon_get($data->collection,'detail_responses',new stdClass());
         $rows=[];$complete=true;
         foreach ($q->candidate_ids as $sid) {
