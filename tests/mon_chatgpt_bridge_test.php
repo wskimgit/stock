@@ -134,7 +134,12 @@ try {
        $st=$store->readPrivate(MonChatGPTBridge::STATE);$st->next_poll_at=0;$store->writePrivate(MonChatGPTBridge::STATE,$st);
        MonChatGPTBridge::poll($store,$http,$cfg,$gh,$gh->read(microtime(true)+30),microtime(true)+30);
        $out=mon_decode((string)$fake->raw(MonChatGPTBridge::OUTBOX));
-       bh_assert($out->status==='saved'&&$out->published_commit_sha===$fake->git->head,'no read-back receipt');
+       $commit=$out->published_commit_sha;
+       $proofTree=isset($fake->git->commits[$commit])?$fake->git->trees[$fake->git->commits[$commit]['tree']]:[];
+       bh_assert($out->status==='saved'&&isset($proofTree['mon_data.json'],$proofTree['mon_result.md'])&&
+           $proofTree['mon_data.json']===$fake->sha('mon_data.json')&&
+           $proofTree['mon_result.md']===$fake->sha('mon_result.md'),
+           'no financial-pair read-back receipt');
     });
 } finally {bh_clean($dir);}
 echo json_encode(['suite'=>'MON-CHATGPT-BRIDGE-1.0','cases'=>$cases,'passed'=>count($cases)-count($fail),'failed'=>count($fail),'failure_names'=>$fail],JSON_UNESCAPED_UNICODE|JSON_PRETTY_PRINT)."\n";
