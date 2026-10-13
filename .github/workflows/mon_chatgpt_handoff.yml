@@ -32,3 +32,5 @@ jobs:
         run: php -d memory_limit=96M tests/mon_chatgpt_bridge_test.php
       - name: Read-only actual MON payload capacity (no market requests)
         run: php -d memory_limit=96M tests/mon_chatgpt_bridge_observed.php
+      - name: Actual MON-size atomic archive intake against fake Git
+        run: php -d memory_limit=96M tests/mon_chatgpt_bridge_compaction_test.php
