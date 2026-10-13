@@ -1,17 +1,17 @@
-MON 스윙 · MON-P3.1 · MACD(12,26,9) · 기준 2026-10-13T10:42:18.000000Z · partial
+MON 스윙 · MON-P3.1 · MACD(12,26,9) · 기준 2026-10-13T23:44:22.000000Z · partial
 
 | 국가 | 종목 | 판단 | 자료 기준 | 가격 조건 | 핵심 이유 |
 |---|---|---|---|---|---|
-| JP | リクルートホールディングス (6098) | 이전 후보 참고 · 자료 필요 | 2026-10-13 independent_recovered_data | MACD 골든 후; 눌림 16890~17890 / 무효 16560; 돌파 17810~18310 / 무효 17305 JPY | 일본 후보 중 강한 상대강도와 최근 골든, 거래 유동성을 평가해 선정. 현재 종가에서 눌림 진입을 확정하지 않고 계획 구간과 고용 경기 위험을 관찰한다. |
-| JP | 武田薬品工業 (4502) | 이전 후보 참고 · 자료 필요 | 2026-10-13 independent_recovered_data | MACD 골든; 눌림 5711~5932 / 무효 5594; 돌파 6030~6140 / 무효 5919 JPY | 당일 MACD 골든과 상대강도, 비교적 좁은 돌파 무효화 폭을 평가해 선정. 최근 상승한 자동차 후보와 업종을 분산하되 실적·소송 위험을 반영한다. |
-| JP | 소니그룹 (6758) | 이전 후보 참고 · 자료 필요 | 2026-10-13 independent_recovered_data | MACD 골든 후; 눌림 3692~3846 / 무효 3623; 돌파 3834~3911 / 무효 3756 JPY | 최근 골든과 시장 대비 강도, 엔터테인먼트·센서 사업을 함께 평가. NRI보다 눌림 계획의 손절 폭이 작아 선정하되 지진과 반도체 사업 불확실성을 남긴다. |
-| KR | LG유플러스 (032640) | 이전 후보 참고 · 자료 필요 | 2026-10-13 independent_recovered_data | MACD 골든; 눌림 14330~14930 / 무효 14080; 돌파 15060~15360 / 무효 14750 KRW | 시장 대비 강도와 당일 MACD 골든, 통신 서비스 실적을 함께 평가해 선정. 국내 시장 하락 속 상대강도이므로 상승 추세 확정으로 해석하지 않는다. |
-| KR | 농심 (004370) | 이전 후보 참고 · 자료 필요 | 2026-10-13 independent_recovered_data | MACD 골든; 눌림 388500~409500 / 무효 385500; 돌파 421500~432000 / 무효 410500 KRW | 당일 MACD 골든과 시장 대비 강도, 방어적 소비 업종 분산을 평가해 조건부 선정. 최신 반기 원문 확인 전 기업 위험 검토를 완료로 처리하지 않는다. |
-| KR | 카카오뱅크 (323410) | 이전 후보 참고 · 자료 필요 | 2026-10-13 independent_recovered_data | MACD 골든; 눌림 19530~20400 / 무효 19240; 돌파 21950~22350 / 무효 21500 KRW | 당일 MACD 골든과 시장 대비 강도, 최신 실적의 순이익 성장·연체율 안정성을 함께 평가해 선정. 캐피탈 인수와 신용 위험을 관찰한다. |
-| US | Snowflake Inc. (SNOW) | 이전 후보 참고 · 자료 필요 | 2026-10-12 independent_recovered_data | MACD 골든 후; 눌림 334.83~361.76 / 무효 325.26; 돌파 369.04~382.5 / 무효 355.57 USD | 최근 골든 이후 상대강도와 데이터 플랫폼 성장 재료를 평가. MRNA의 더 넓은 손절 폭보다 우선하지만 이 종목도 변동성과 손절 폭이 커 추격을 제한한다. |
-| US | Eli Lilly and Company (LLY) | 이전 후보 참고 · 자료 필요 | 2026-10-12 independent_recovered_data | MACD 골든 후; 눌림 1140.85~1210.23 / 무효 1113.86; 돌파 1215~1249.69 / 무효 1180.3 USD | 최근 골든과 시장 대비 강도, 의약품 성장과 업종 분산을 평가해 선정. 골든 후 3거래일이므로 다음 정규장에 신호 유효성을 다시 확인한다. |
-| US | Walmart Inc. (WMT) | 이전 후보 참고 · 자료 필요 | 2026-10-12 independent_recovered_data | MACD 골든 후; 눌림 107.84~112.3 / 무효 103.38; 돌파 111.51~113.74 / 무효 109.27 USD | 최근 골든 이후 시장 대비 강도와 소비·전자상거래 사업을 평가. 돌파 계획의 위험 폭이 SNOW보다 작아 함께 선정하며 종가를 현재 체결가로 쓰지 않는다. |
+| JP | リクルートホールディングス (6098) | 매입 검토 · 조건부 | 2026-10-13 최신 완료봉 | MACD 골든 후; 눌림 16890~17890 / 무효 16560; 돌파 17810~18310 / 무효 17305 JPY | RS20 +16.16pp, confirmed 2026-10-13 MA5 and recent MACD post-GC, liquidity; monitor employment cycle |
+| JP | 武田薬品工業 (4502) | 매입 검토 · 조건부 | 2026-10-13 independent_recovered_data | MACD 골든; 눌림 5711~5932 / 무효 5594; 돌파 6030~6140 / 무효 5919 JPY | Confirmed 2026-10-13 MACD GC and lower pullback planned risk than NRI; diversify healthcare |
+| JP | 소니그룹 (6758) | 매입 검토 · 조건부 | 2026-10-13 independent_recovered_data | MACD 골든 후; 눌림 3692~3846 / 무효 3623; 돌파 3834~3911 / 무효 3756 JPY | Confirmed MACD post-GC with lower pullback risk than NRI and diversified Sony business risk |
+| KR | LG유플러스 (032640) | 매입 검토 · 조건부 | 2026-10-13 independent_recovered_data | MACD 골든; 눌림 14330~14930 / 무효 14080; 돌파 15060~15360 / 무효 14750 KRW | Strong RS20 +13.54pp, completed 2026-10-13 MACD GC, liquid defensive telecom; avoid market-selloff chasing |
+| KR | 농심 (004370) | 매입 검토 · 조건부 | 2026-10-13 최신 완료봉 | MACD 골든; 눌림 388500~409500 / 무효 385500; 돌파 421500~432000 / 무효 410500 KRW | RS20 +11.39pp, completed MACD GC, food-sector diversification; interim corporate filing review remains pending |
+| KR | 카카오뱅크 (323410) | 매입 검토 · 조건부 | 2026-10-13 independent_recovered_data | MACD 골든; 눌림 19530~20400 / 무효 19240; 돌파 21950~22350 / 무효 21500 KRW | RS20 +7.70pp and completed MACD GC, best KR third candidate under risk-balanced equal ranking |
+| US | Walmart Inc. (WMT) | 이전자료 참고 · 재확인 | 2026-10-12 과거 신호 | MACD 골든 후; 눌림 107.84~112.3 / 무효 103.38; 돌파 111.51~113.74 / 무효 109.27 USD | Previous verified 2026-10-12 defensive signal; current detailed history blocked, reference only |
+| US | Eli Lilly and Company (LLY) | 이전자료 참고 · 재확인 | 2026-10-12 과거 신호 | MACD 골든 후; 눌림 1140.85~1210.23 / 무효 1113.86; 돌파 1215~1249.69 / 무효 1180.3 USD | Previous verified 2026-10-12 MACD-after and diversification; Oct13 target bar missing, reference only |
+| US | Snowflake Inc. (SNOW) | 이전자료 참고 · 재확인 | 2026-10-12 과거 신호 | MACD 골든 후; 눌림 334.83~361.76 / 무효 325.26; 돌파 369.04~382.5 / 무효 355.57 USD | Previous verified 2026-10-12 relative strength and MACD-after; Oct13 market comparison missing, reference only |
 
-- 이력 공간 분리; 기존 판단·자료시각 보존
-- 기록 기준 2026-10-13T10:42:18.000000Z: 현재 가격·거래·기업 위험 미확인으로 조건부; MACD 골든 직전은 확정 골든크로스가 아닌 근접 신호; 이전자료 참고는 과거 신호이며 현재 매입 가능 확인과 구분
-- 신규 신원 확인: KR 2026-10-13 · 실제 신규 20개 · 목표 20/20 · 충족; US 2026-10-13 · 실제 신규 20개 · 목표 20/20 · 충족; JP 2026-10-13 · 실제 신규 0개 · 목표 20/20 · 충족. 상세 확보·수치 적격은 별도 집계.
+- 종목별 자율 판단·근거를 한 번 확정; 현재·과거 신호와 저장 상태 구분
+- 기록 기준 2026-10-13T23:44:22.000000Z: 현재 가격·거래·기업 위험 미확인으로 조건부; MACD 골든 직전은 확정 골든크로스가 아닌 근접 신호; 이전자료 참고는 과거 신호이며 현재 매입 가능 확인과 구분
+- 신규 신원 확인: KR 2026-10-14 · 실제 신규 0개 · 목표 0/20 · 미달 20개; US 2026-10-13 · 실제 신규 20개 · 목표 20/20 · 충족; JP 2026-10-14 · 실제 신규 0개 · 목표 0/20 · 미달 20개. 상세 확보·수치 적격은 별도 집계.
