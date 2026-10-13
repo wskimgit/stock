@@ -4,6 +4,9 @@ on:
     paths:
       - mon.php
       - mon_chatgpt_bridge.php
+      - monitor.md
+      - mon_wiki.md
+      - mon_chatgpt_handoff.md
       - tests/mon_chatgpt_bridge_test.php
       - .github/workflows/mon_chatgpt_handoff.yml
   push:
