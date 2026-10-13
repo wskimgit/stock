@@ -1,10 +1,16 @@
 # MON 실행·복구·통계 안내
 
-2026-10-13 KST · mon.php **1.8.6** · 지시문 **v4.14** · MON-P3.1 · MACD(12,26,9)
+2026-10-14 KST · mon.php **1.8.7** · 지시문 **v4.15** · MON-P3.1 · MACD(12,26,9)
 
 ChatGPT가 자율 선정하고 PHP가 검증·수치·진행·저장을 보조한다. 실제 절차는 [monitor.md](monitor.md)의 MON:INSTRUCTION 블록 하나를 따른다.
 
-## 이번 변경 — 1.8.6 / 복구·감속 D2.1
+## 이번 변경 — ChatGPT 핸드오프 1.8.7 / v4.15
+
+- ChatGPT 후보 요청 `mon_chatgpt_handoff.json` → 수동 시작 데몬의 기존 종목별 상세 수집 → `mon_chatgpt_response.json`에서 검증된 자료를 ChatGPT가 읽음 → ChatGPT 최종 결정 → 기존 MON 결과 파일 쌍·아카이브 원자 게시와 SHA 확인. PHP가 ChatGPT 판단을 자동 생성하지 않는다.
+- 대상은 공식 신원 확인된 종목이며 미등록 신원은 별도 증빙 절차로 보완한다. 등록 중 복구 아카이브 발생 시 단일 PUT을 금지하고 기존 원자 게시 journal을 사용한다. 다수 종목은 30개씩 순차 처리하고 미완료를 허위 성공으로 전환하지 않는다.
+- `MON-CHATGPT-BRIDGE-1.0` [운영 규격](mon_chatgpt_handoff.md), [통합시험](tests/mon_chatgpt_bridge_test.php), [대형 데이터 원자 저장 시험](tests/mon_chatgpt_bridge_compaction_test.php), [CI](.github/workflows/mon_chatgpt_handoff.yml). GitHub PR 검토 단계이며 NAS 적용/실가동 완료가 아니다.
+
+## 이전 변경 — 1.8.6 / 복구·감속 D2.1
 
 NAS 실제 상태와 고정 코드에서 M01~M04를 확인한 뒤 [설계](mon_recovery_upgrade_design.md)와 [설계 검토](tests/mon_recovery_design_review.json)를 완료하고 구현했다. 높은 load만으로 전체 회차를 멈추던 동작을 감속 처리로 바꿨다. 실제 CPU 포화와 메모리 부족은 보호 대기하며 회복 첫 안전 표본 뒤5초로 다시 확인한다. CPU 미계측을0%로 표시하지 않고 메모리 부족 뒤 계측 누락을 회복으로 인정하지 않는다.
 

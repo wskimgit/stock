@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.6 -- measured throttling / KRX source recovery / independent trading refresh.
+ * mon.php 1.8.7 -- measured throttling / KRX source recovery / independent trading refresh.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.6';
+const MON_VERSION = '1.8.7';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -1170,6 +1170,17 @@ final class MonDaemon {
         if($published&&in_array($published['save_status'],['queued','publishing'],true))$this->poll=min($this->poll,5);
         if($cfg->get('GITHUB_TOKEN')===''){$this->poll=300;$this->heartbeat('needs_setup',$cfg->githubTokenError());return;}
         if(!$w->settings->enabled){$this->heartbeat('paused');return;}
+        // MON-CHATGPT-BRIDGE-1.0: receive an explicit, authenticated-by-GitHub
+        // ChatGPT candidate/decision handoff. Never start a daemon or place orders.
+        if(class_exists('MonChatGPTBridge'))try {
+            $next=MonChatGPTBridge::poll($this->store,$this->http,$cfg,$gh,$latest,
+                $deadline(max(18,$settings['tick_budget_seconds']-16)));
+            if(isset($next['sha'],$next['data'])&&$next['sha']!==$latest['sha']){
+                $latest=$next;$knownLatest=$next;$data=clone $next['data'];
+                $data->collection=mon_decode(mon_json($data->collection,false));
+                $w=$data->watchlist;$this->cacheRemote($data,$cfg,$next['sha']);
+            }
+        }catch(MonFault $e){$this->store->log('chatgpt_bridge_pending',['code'=>$e->faultCode]);}
         $signature=MonData::signature($w);$pending=$this->store->read('pending.json');
         $previous=mon_get($pending,'signature')===$signature?mon_get($pending,'collection'):$data->collection;
         $cred=hash('sha256',$cfg->get('KIS_APP_KEY')."\0".$cfg->get('KIS_APP_SECRET'));
@@ -1213,6 +1224,11 @@ final class MonDaemon {
         $data=$work['data'];$this->stageSeconds['detail_work']=round(max(0,$work['handler_seconds']-(($this->stageSeconds['detail_publish']??0)-$publishBefore)),6);
         if($unflushed>0)$data=$flush($data);$w=$data->watchlist;
         $this->detailCounts=MonProgress::build($data,time())['counts'];
+        // Return only data actually published and verified by MonGitHub::publish.
+        if(class_exists('MonChatGPTBridge')&&isset($knownLatest['sha'],$knownLatest['data']))
+            try{MonChatGPTBridge::export($this->store,$this->http,$cfg,$knownLatest['data'],
+                $knownLatest['sha'],min($tickDeadline,microtime(true)+8));}
+            catch(MonFault $e){$this->store->log('chatgpt_bridge_pending',['code'=>$e->faultCode]);}
         if($this->detailCounts['pending']>0)$this->poll=min($this->poll,5);
         if($publishError!==null){$this->heartbeat('detail_publish_pending',$publishError);return;}
         // The faster job poll must not turn the 60-second quote cadence into 10 seconds.
@@ -5634,7 +5650,7 @@ function mon_web(): int {
             $cfg=new MonConfig(getenv('MON_ENV_FILE')?:'',$store->dir);
             $state=mon_web_state($store,$cfg);$health=array_intersect_key($state,array_flip(['version','running','heartbeat_fresh','readiness','monitoring_active','restart_required','boot_verified','watchlist_loaded','watched']));
             $progress=$state['detail_progress'];unset($progress['cards']);$health['detail_progress']=$progress;$health['heartbeat_at']=mon_get($state['status'],'heartbeat_at');$health['repair_job']=MonProgress::nextRepair($store->read('remote_cache.json'),$store->read('detail_pending.json'),time());
-            echo mon_json(['ok'=>true,'processor_version'=>MON_VERSION,'capabilities'=>['detail_codec'=>MonDetails::CODEC,'operation_completion'=>'MON-OPERATION-COMPLETION-1.0','archive'=>'MON-GAP-ARCHIVE-2.0'],
+            echo mon_json(['ok'=>true,'processor_version'=>MON_VERSION,'capabilities'=>['detail_codec'=>MonDetails::CODEC,'operation_completion'=>'MON-OPERATION-COMPLETION-1.0','archive'=>'MON-GAP-ARCHIVE-2.0','chatgpt_bridge'=>class_exists('MonChatGPTBridge')?MonChatGPTBridge::CONTRACT:null],
                 'nas_state'=>$health,'result'=>$result],false);return 0;
         }catch(MonFault $e){http_response_code($e->faultCode==='MON_METHOD_INVALID'?405:400);if($e->faultCode==='MON_METHOD_INVALID')header('Allow: GET');echo mon_json(['ok'=>false,'error_code'=>$e->faultCode],false);return 1;}
         catch(Throwable $e){http_response_code(500);echo mon_json(['ok'=>false,'error_code'=>'MON_BOOTSTRAP_INTERNAL_ERROR'],false);return 1;}
@@ -5713,6 +5729,9 @@ function mon_main(array $argv): int {
     if (!extension_loaded('curl')) throw new MonFault('PHP_CURL_REQUIRED');
     return (new MonDaemon($store,$envFile,$instance,$launchTicket))->run($maxTicks);
 }
+
+// Optional, isolated GitHub mailbox bridge. Legacy MON remains functional when absent.
+if(is_file(__DIR__ . '/mon_chatgpt_bridge.php'))require_once __DIR__ . '/mon_chatgpt_bridge.php';
 
 if (realpath($_SERVER['SCRIPT_FILENAME']??'')===__FILE__) {
     try { exit(mon_main($argv??[])); }
