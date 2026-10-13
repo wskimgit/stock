@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.6 -- measured throttling / KRX source recovery / independent trading refresh.
+ * mon.php 1.8.7 -- measured throttling / KRX source recovery / independent trading refresh.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
