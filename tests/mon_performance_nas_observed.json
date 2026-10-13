@@ -1,0 +1,27 @@
+{
+  "processor_version": "1.8.5",
+  "readiness": "error",
+  "running": true,
+  "heartbeat_at": "2026-10-12T22:30:20Z",
+  "detail_counts": {
+    "requests": 11,
+    "done": 9,
+    "pending": 0,
+    "retry_wait": 0,
+    "serialization_pending": 0,
+    "blocked": 0,
+    "conflict": 2,
+    "current_missing": 4,
+    "latest": 2,
+    "reused": 7,
+    "previous": 2,
+    "no_data": 0,
+    "invalid": 0,
+    "timed_out": 0,
+    "threshold_exceeded": 11
+  },
+  "request_seconds": 9.243366,
+  "HTTP": 200,
+  "read_only": true,
+  "new_code_deployed": false
+}

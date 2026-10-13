@@ -1,0 +1,91 @@
+{
+    "code": "1.8.8",
+    "php": "7.4.33",
+    "memory_limit": "96M",
+    "source_sha256": "0c99babd5ff6d44d252ab35c80d6d223ab7c3e044aa9e4eae9f0e3ce51852aa2",
+    "tests": 19,
+    "passed": 19,
+    "failed": 0,
+    "seconds": 2.8039172240023618,
+    "peak_memory_bytes": 14680064,
+    "cases": [
+        {
+            "case": "transient remote timeout reuses exact bound cache without refreshing its source timestamp",
+            "result": "PASS"
+        },
+        {
+            "case": "changed cached data cannot bypass hash verification",
+            "result": "PASS"
+        },
+        {
+            "case": "authorization errors are not converted to offline success",
+            "result": "PASS"
+        },
+        {
+            "case": "cache expiration and repository scope mismatch are refused",
+            "result": "PASS"
+        },
+        {
+            "case": "one conflict retains successful peers and records repair plus analysis handoff",
+            "result": "PASS"
+        },
+        {
+            "case": "a new completed period creates a durable renewal task even for done requests",
+            "result": "PASS"
+        },
+        {
+            "case": "unpublished successful response remains visible and needs publication",
+            "result": "PASS"
+        },
+        {
+            "case": "blocked/no-data and discovery shortfall are saved rather than dropped",
+            "result": "PASS"
+        },
+        {
+            "case": "checkpoint is protected, idempotent across restart and preserves original analysis time",
+            "result": "PASS"
+        },
+        {
+            "case": "resource pause saves only the existing checkpoint without claiming recovery",
+            "result": "PASS"
+        },
+        {
+            "case": "all 30 requests survive report pagination and stale cursor is refused",
+            "result": "PASS"
+        },
+        {
+            "case": "runtime result remote journal verifies a lost PUT response before writing again",
+            "result": "PASS"
+        },
+        {
+            "case": "remote conflict preserves collection and backs off before rereading",
+            "result": "PASS"
+        },
+        {
+            "case": "daemon source outage reaches local continuity checkpoint without replacing analysis",
+            "result": "PASS"
+        },
+        {
+            "case": "native daemon tick continues quote collection after detail publication timeout",
+            "result": "PASS"
+        },
+        {
+            "case": "missing source still produces a saved explicit recovery result",
+            "result": "PASS"
+        },
+        {
+            "case": "dirty quote checkpoint survives daemon restart as a publication job",
+            "result": "PASS"
+        },
+        {
+            "case": "corrupt local report is rebuilt from verified source and does not break web status",
+            "result": "PASS"
+        },
+        {
+            "case": "tampered pending remote bytes are discarded before any PUT",
+            "result": "PASS"
+        }
+    ],
+    "external_requests": 0,
+    "orders": 0
+}

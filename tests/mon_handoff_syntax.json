@@ -1,0 +1,97 @@
+{
+  "checked_at": "2026-10-13T04:41:57.380551+00:00",
+  "php": "7.4.33",
+  "checks": [
+    {
+      "path": "mon.php",
+      "sha256": "5607857c100082966572ea71c8656b764319fc9a867d83089ad5dcaaf4717068",
+      "command": [
+        "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php",
+        "-d",
+        "memory_limit=96M",
+        "-l",
+        "mon-release-1.8.7/mon.php"
+      ],
+      "result": "PASS",
+      "output": "No syntax errors detected in mon-release-1.8.7/mon.php"
+    },
+    {
+      "path": "tests/mon_performance_test.php",
+      "sha256": "c7d84cc5704a387352149ab04545162396ed407e001a191e001fdedb1dc7591b",
+      "command": [
+        "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php",
+        "-d",
+        "memory_limit=96M",
+        "-l",
+        "mon-release-1.8.7/tests/mon_performance_test.php"
+      ],
+      "result": "PASS",
+      "output": "No syntax errors detected in mon-release-1.8.7/tests/mon_performance_test.php"
+    },
+    {
+      "path": "tests/mon_performance_probe.php",
+      "sha256": "113462e2465982765fb9ea45ee481ed881101096b37793cb30d2c239239d5bd2",
+      "command": [
+        "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php",
+        "-d",
+        "memory_limit=96M",
+        "-l",
+        "mon-release-1.8.7/tests/mon_performance_probe.php"
+      ],
+      "result": "PASS",
+      "output": "No syntax errors detected in mon-release-1.8.7/tests/mon_performance_probe.php"
+    },
+    {
+      "path": "tests/mon_reinforcement_fixture.php",
+      "sha256": "128623d70f0141f11f23f26aefc2f431ac8d562b16434b0a9b08f2389d596f90",
+      "command": [
+        "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php",
+        "-d",
+        "memory_limit=96M",
+        "-l",
+        "mon-release-1.8.7/tests/mon_reinforcement_fixture.php"
+      ],
+      "result": "PASS",
+      "output": "No syntax errors detected in mon-release-1.8.7/tests/mon_reinforcement_fixture.php"
+    },
+    {
+      "path": "tests/mon_performance_http_fixture.php",
+      "sha256": "20f1ab0357458f7f360f76d67181b44bd8a6b2ff9752b2e84fe71bfc52d4d75f",
+      "command": [
+        "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php",
+        "-d",
+        "memory_limit=96M",
+        "-l",
+        "mon-release-1.8.7/tests/mon_performance_http_fixture.php"
+      ],
+      "result": "PASS",
+      "output": "No syntax errors detected in mon-release-1.8.7/tests/mon_performance_http_fixture.php"
+    },
+    {
+      "path": "tests/mon_completion_gate_test.php",
+      "sha256": "53f0fcb2b65a888ad5d9bfe086f18491e671a0ac5ce774b0f49c2cb7bdbe0781",
+      "command": [
+        "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php",
+        "-d",
+        "memory_limit=96M",
+        "-l",
+        "mon-release-1.8.7/tests/mon_completion_gate_test.php"
+      ],
+      "result": "PASS",
+      "output": "No syntax errors detected in mon-release-1.8.7/tests/mon_completion_gate_test.php"
+    },
+    {
+      "path": "tests/mon_progress_fixture.php",
+      "sha256": "59b6ff4b80cac9997045b9ab87047700209bf397c0eb7798a4b204eda763880f",
+      "command": [
+        "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php",
+        "-d",
+        "memory_limit=96M",
+        "-l",
+        "mon-release-1.8.7/tests/mon_progress_fixture.php"
+      ],
+      "result": "PASS",
+      "output": "No syntax errors detected in mon-release-1.8.7/tests/mon_progress_fixture.php"
+    }
+  ]
+}

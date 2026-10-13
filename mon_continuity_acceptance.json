@@ -1,0 +1,128 @@
+{
+  "change_id": "MON-CONTINUITY-188-20261013",
+  "component": "MON",
+  "classification": "MATERIAL",
+  "target": "mon.php 1.8.8 / monitor.md v4.16",
+  "baseline": {
+    "repository": "wskimgit/stock",
+    "main_inspected_commit": "02fbe286c3cd8e2f0899220bc1e55c7f9bc0d9bf",
+    "main_code": "1.8.6",
+    "main_source_sha256": "1b5ba40d41c6aa52615b3dbb8b2ada7c07908f7abe805a009045b3cb3f0e4688",
+    "inherited_review_commit": "3ecd95f58686a9d7e30daf05a0927def93ed814a",
+    "inherited_code": "1.8.7",
+    "inherited_source_sha256": "5607857c100082966572ea71c8656b764319fc9a867d83089ad5dcaaf4717068"
+  },
+  "deployed": {
+    "last_observed_version": "1.8.7",
+    "observed_at": "2026-10-13T06:18:58Z",
+    "source_sha256": "UNKNOWN",
+    "current_identity": "UNKNOWN; not re-observed for this release",
+    "reason": "Prior read-only bootstrap lacked deployed-file hash. No deployment or daemon control performed."
+  },
+  "reproduction": {
+    "source_outage": "Source path confirmed; native readRemote timeout simulation returned bound cache after correction.",
+    "publication_barrier": "Source confirmed early return. Native daemon tick now attempts quotes and retains pending collection after mocked detail PUT timeout.",
+    "late_final_decision": "Earlier live bootstrap had collection_complete with newer completed-period repairs and final decision false. Durable jobs now saved; live final selection is not claimed.",
+    "HTTP_initial_failure": "Test harness used wrong status JSON root; corrected to existing data.continuity. No product contract changed."
+  },
+  "cause_and_fix": "Separate network publication from independent collection, reuse scoped hash-bound cache on transient failure, persist all repair/handoff jobs and operational result, verify remote save through resumable one-request journal.",
+  "files_sha256": {
+    "mon.php": "0c99babd5ff6d44d252ab35c80d6d223ab7c3e044aa9e4eae9f0e3ce51852aa2",
+    "monitor.md": "6b200d14014e18de07a44a12353a591b551e0e5984d39a34a5d58ed5d43494ff",
+    "mon_wiki.md": "a874f7f0605563e1bf04a06e60ae7436ddb859c1261049282e4fd507cdcb8507",
+    "mon_continuity_design.md": "d7032e7a9dabd2dc5ee45ad0c2a1692e1cf81373db5fe0ca339e07fc40ab9b4d",
+    "mon_continuity_implementation.md": "27c837ae1fb4c9da0d42d54fa686cd4ea9e514dc7c415fb95b43c4fd0e24a5f5",
+    "tests/mon_continuity_completion_regression.json": "e1a2634e20c96a6f1a60276a1649bb3ac84d2583652dbbe69af92ee8b186f6cf",
+    "tests/mon_continuity_final_run.json": "6e9e97ec7374776b6ebae0a3815c8cd84ee87aaab7f2bd7c4b8f913d8a401051",
+    "tests/mon_continuity_http_final_run.json": "2cf2469ce70734306c824a227dad093f3160dacf5c03532b54dc72a7eecd024b",
+    "tests/mon_continuity_http_fixture.php": "de7c74334d7f7bc8ffcc7ec8e21f7531e146d45cbe012c6e5eccd0622683398a",
+    "tests/mon_continuity_http_initial.json": "082d0efd6071a908c560aa143dad14d62996ffba40819dbfe974d062e9bfee03",
+    "tests/mon_continuity_http_test.py": "2eb69bf027e2dd05cb7131ff549080b50c6b716dc0be6afb23511b81d12a7ebf",
+    "tests/mon_continuity_http_tests.json": "2cf2469ce70734306c824a227dad093f3160dacf5c03532b54dc72a7eecd024b",
+    "tests/mon_continuity_initial.json": "67bb5915254d0a336085ec03b56fc2cc6c851f3d7fddfc450e459d3d249bdc1c",
+    "tests/mon_continuity_syntax.json": "2dcc9e5658ec033c29a6d10d539ad18fc892435883332d7a2df6d65c08a9862d",
+    "tests/mon_continuity_test.php": "1b11eee6f0d3c56179e00f1ec380aa51d526156852ce3cb257932027638c0488",
+    "tests/mon_continuity_tests.json": "6e9e97ec7374776b6ebae0a3815c8cd84ee87aaab7f2bd7c4b8f913d8a401051"
+  },
+  "test_fixture_sha256": {
+    "tests/mon_continuity_test.php": "1b11eee6f0d3c56179e00f1ec380aa51d526156852ce3cb257932027638c0488",
+    "tests/mon_continuity_http_test.py": "2eb69bf027e2dd05cb7131ff549080b50c6b716dc0be6afb23511b81d12a7ebf",
+    "tests/mon_continuity_http_fixture.php": "de7c74334d7f7bc8ffcc7ec8e21f7531e146d45cbe012c6e5eccd0622683398a",
+    "tests/mon_progress_fixture.php": "59b6ff4b80cac9997045b9ab87047700209bf397c0eb7798a4b204eda763880f",
+    "tests/mon_reinforcement_fixture.php": "128623d70f0141f11f23f26aefc2f431ac8d562b16434b0a9b08f2389d596f90",
+    "tests/mon_completion_gate_test.php": "53f0fcb2b65a888ad5d9bfe086f18491e671a0ac5ce774b0f49c2cb7bdbe0781"
+  },
+  "environment": {
+    "php": "7.4.33",
+    "memory_limit": "96M",
+    "external_requests": 0,
+    "orders": 0
+  },
+  "verified_at": "2026-10-13T09:50:08.272300+00:00",
+  "checks": [
+    {
+      "check": "tests/mon_continuity_tests.json",
+      "command": "PHP7.4.33 -d memory_limit=96M tests/mon_continuity_test.php",
+      "result": "PASS",
+      "passed": 19,
+      "evidence_sha256": "6e9e97ec7374776b6ebae0a3815c8cd84ee87aaab7f2bd7c4b8f913d8a401051",
+      "tested_final_source_sha256": "0c99babd5ff6d44d252ab35c80d6d223ab7c3e044aa9e4eae9f0e3ce51852aa2"
+    },
+    {
+      "check": "tests/mon_continuity_http_tests.json",
+      "command": "MON_TEST_PHP=PHP7.4.33 python3 tests/mon_continuity_http_test.py",
+      "result": "PASS",
+      "passed": 9,
+      "evidence_sha256": "2cf2469ce70734306c824a227dad093f3160dacf5c03532b54dc72a7eecd024b",
+      "tested_final_source_sha256": "0c99babd5ff6d44d252ab35c80d6d223ab7c3e044aa9e4eae9f0e3ce51852aa2"
+    },
+    {
+      "check": "tests/mon_continuity_completion_regression.json",
+      "command": "PHP7.4.33 -d memory_limit=96M tests/mon_completion_gate_test.php",
+      "result": "PASS",
+      "passed": 28,
+      "evidence_sha256": "e1a2634e20c96a6f1a60276a1649bb3ac84d2583652dbbe69af92ee8b186f6cf",
+      "tested_final_source_sha256": "0c99babd5ff6d44d252ab35c80d6d223ab7c3e044aa9e4eae9f0e3ce51852aa2"
+    }
+  ],
+  "syntax": "tests/mon_continuity_syntax.json",
+  "boundaries": [
+    "successful peers survive failures",
+    "new completed period repair",
+    "discovery shortfall retained",
+    "hash/scope/time invalid cache rejection",
+    "native quote continuation after publication timeout",
+    "pending persistence across restart",
+    "source-free explicit saved recovery report",
+    "resource-deferred small checkpoint",
+    "HTTP read-only pagination and stale cursor rejection",
+    "lost PUT response GET verification before retry",
+    "duplicate revisions",
+    "remote conflicts and backoff",
+    "malformed protected journal repair"
+  ],
+  "unaffected_reuse": {
+    "prior_187_performance": "1.8.7 metrics are historical evidence only, not claims of exact new-artifact speedup. No additional real latency measurement performed."
+  },
+  "preserved": [
+    "MON-P3.1",
+    "MACD12/26/9",
+    "ChatGPT final selection",
+    "no orders",
+    "manual-web-start/no-auto-restart",
+    "existing final file pair/receipt ownership",
+    "existing market files and statistics untouched during maintenance"
+  ],
+  "semantic_change": "On transient remote read failure collect from exact protected source cache; publication failure no longer prevents independent quotes. Each iteration saves resumable status and separately publishes mon_runtime_result.json.",
+  "packaging": "Single tested source file, same SHA as review-branch blob. No ZIP created.",
+  "remote_publication": "PENDING exact branch/commit/tree readback; separate receipt will record verification.",
+  "deployment": "NOT_PERFORMED",
+  "rollback": "Review commit 3ecd95f58686a9d7e30daf05a0927def93ed814a source 1.8.7",
+  "remaining": [
+    "manual deployment and deployed source/daemon hash verification",
+    "live source-conflict resolution/current prices",
+    "ChatGPT must consume pending jobs and perform final autonomous selection",
+    "actual full-run latency and live whole-operation completion remain unverified"
+  ],
+  "acceptance": "CODE_COMPLETE / DEPLOYMENT_PENDING"
+}
