@@ -1,0 +1,126 @@
+{
+  "change_id": "MON-PERFORMANCE-1.8.7-HANDOFF-20261013",
+  "component": "MON",
+  "acceptance": "CODE_COMPLETE / DEPLOYMENT_PENDING",
+  "inspected_at": "2026-10-13T04:42:49.484924+00:00",
+  "baseline": {
+    "repository": "wskimgit/stock",
+    "commit": "56ed7636f2820e7a81a916a316385901dee5e1b4",
+    "version": "1.8.6",
+    "mon_php_sha256": "1b5ba40d41c6aa52615b3dbb8b2ada7c07908f7abe805a009045b3cb3f0e4688"
+  },
+  "deployed": {
+    "observed_version": "1.8.5",
+    "hash": "UNKNOWN",
+    "observation_at": "2026-10-13T04:41:48Z",
+    "running": true,
+    "heartbeat_fresh": true,
+    "reason": "Read-only bootstrap exposes version and heartbeat, not deployed-file hash; no deployment performed."
+  },
+  "findings": [
+    {
+      "class": "MATERIAL",
+      "scope": "foreign daily history",
+      "reproduction": "REPRODUCED in native-function transport simulation",
+      "expected": "Use a history route capable of passing split-basis verification",
+      "observed": "KIS foreign raw history is always rejected by existing split-basis guard",
+      "cause": "Guard permits verified domestic branch only",
+      "fix": "Skip unusable foreign history call; preserve diagnostic, domestic KIS and live quote routes."
+    },
+    {
+      "class": "MATERIAL",
+      "scope": "protected artifact transfer",
+      "reproduction": "REPRODUCED using fixed artifact and repeated reads",
+      "expected": "Validate artifact once per bounded read request",
+      "observed": "Eight sequential chunk requests validate complete artifact eight times",
+      "fix": "Accept 1-8 ranges, each <=64KiB; retain per-chunk and whole-file hashes, per-request validation and operator authorization."
+    },
+    {
+      "class": "STALE",
+      "scope": "handoff documentation",
+      "observed": "Earlier monitor.md lacks current development gate reference",
+      "fix": "Restore current CHANGE_GATE.md/AGENTS.md notice, without changing runtime criteria."
+    }
+  ],
+  "changed_files": {
+    "mon.php": "5607857c100082966572ea71c8656b764319fc9a867d83089ad5dcaaf4717068",
+    "monitor.md": "5e11a2dfb4340dcc142de10a079d31337967b05c183c2e5154ffa3a5e9792211",
+    "mon_wiki.md": "4db8680a0f1596fa258c57e38709a508823cdcadae9a3dfe788e0ffd68edefdd",
+    "mon_performance_design.md": "dbcbfcbb7e77e8b5c8fc2383c9b56a80389f6f0860cf17a1455350f0676720f1",
+    "mon_performance_implementation.md": "c8d3225788dd67c9f9603e4c203c89b1261adf372094aa88c6672b75fbf5d5b5",
+    "tests/mon_performance_chunks_baseline.json": "8c6f8864942425295d3b76702812e9325f6c355ea78e9035691ca473e9884f24",
+    "tests/mon_performance_chunks_current.json": "212853ee664f74b414520e61e6c5dc072a7431e6b67997dea4e2cacadf7b8575",
+    "tests/mon_performance_final.json": "a7d9438d95fd0518025c0979910c459b8bf57798dd12b86d316105621473433c",
+    "tests/mon_performance_foreign_baseline.json": "d24de476fc8913a829c1e563a45cdf42da77620d07c789426dc11afba96fd3c5",
+    "tests/mon_performance_foreign_current.json": "caceaf71d1be59480421cd951ce55f8c8339aa75e1ff83730349c100828327ac",
+    "tests/mon_performance_http_fixture.php": "20f1ab0357458f7f360f76d67181b44bd8a6b2ff9752b2e84fe71bfc52d4d75f",
+    "tests/mon_performance_http_initial.json": "adcfa75729ab3987fd6249f46abb7cc88c8cd38f820864095833a3fca70ed774",
+    "tests/mon_performance_http_test.py": "f748d928e731afb57d32fb900030f0b04f5963d96a0e09065ce9cbbfa008bf84",
+    "tests/mon_performance_http_tests.json": "3337bdd13624819d6057d35afadd9b709942a1a64a3fa49d63969697e9045121",
+    "tests/mon_performance_initial.json": "a9361d0bee7c59f038f5742cc99b9a43c6718f8e6f511cec16b1624013114606",
+    "tests/mon_performance_nas_observed.json": "63643c19b5a8ac9614c06dc888497d3905908b0e6c7bd12422602e678bfcecc3",
+    "tests/mon_performance_probe.php": "113462e2465982765fb9ea45ee481ed881101096b37793cb30d2c239239d5bd2",
+    "tests/mon_performance_syntax.json": "1df68f9c61e9689d22d7e44b85ce5549d85a70e1f6bd0a1b0c7c6e3e9e419fb0",
+    "tests/mon_performance_test.php": "c7d84cc5704a387352149ab04545162396ed407e001a191e001fdedb1dc7591b",
+    "tests/mon_performance_tests.json": "1774268cf22969c7e7407b6cae08b6455b9bfe13114c686f632bcce6c5aa7339"
+  },
+  "fixture_identities": {
+    "tests/mon_completion_gate_test.php": "53f0fcb2b65a888ad5d9bfe086f18491e671a0ac5ce774b0f49c2cb7bdbe0781",
+    "tests/mon_performance_http_fixture.php": "20f1ab0357458f7f360f76d67181b44bd8a6b2ff9752b2e84fe71bfc52d4d75f",
+    "tests/mon_performance_probe.php": "113462e2465982765fb9ea45ee481ed881101096b37793cb30d2c239239d5bd2",
+    "tests/mon_performance_test.php": "c7d84cc5704a387352149ab04545162396ed407e001a191e001fdedb1dc7591b",
+    "tests/mon_progress_fixture.php": "59b6ff4b80cac9997045b9ab87047700209bf397c0eb7798a4b204eda763880f",
+    "tests/mon_reinforcement_fixture.php": "128623d70f0141f11f23f26aefc2f431ac8d562b16434b0a9b08f2389d596f90"
+  },
+  "checks": [
+    {
+      "result": "PASS",
+      "check": "native changed-path simulation",
+      "command": "PHP7.4.33 -d memory_limit=96M tests/mon_performance_test.php",
+      "evidence": "tests/mon_performance_tests.json",
+      "cases": 23
+    },
+    {
+      "result": "PASS",
+      "check": "local HTTP authorization/batch integration",
+      "command": "MON_TEST_PHP=PHP7.4.33 python3 tests/mon_performance_http_test.py",
+      "evidence": "tests/mon_performance_http_tests.json",
+      "cases": 9
+    },
+    {
+      "result": "PASS",
+      "check": "syntax",
+      "evidence": "tests/mon_handoff_syntax.json",
+      "cases": 7
+    },
+    {
+      "result": "REUSED",
+      "check": "before/after measurements",
+      "reason": "Fixed baseline/current result files and unchanged probe/source identities retained; no new network speedup claim.",
+      "evidence": [
+        "tests/mon_performance_foreign_baseline.json",
+        "tests/mon_performance_foreign_current.json",
+        "tests/mon_performance_chunks_baseline.json",
+        "tests/mon_performance_chunks_current.json"
+      ]
+    },
+    {
+      "result": "NOT_RUN",
+      "check": "live deployment/full MON latency",
+      "reason": "NAS is still version 1.8.5; read-only bootstrap cannot verify new code behavior."
+    }
+  ],
+  "boundary_coverage": "Batch permission, malformed ranges, ordered bytes/SHA, shortened/end chunks, repeated independent reads, changed dependency/artifact rejection, fallback failure and domestic history preservation. Restart/receipt/publication methods are unchanged; live restart not performed.",
+  "test_repeat_reason": "Inherit previous work from another conversation; bind final source and dependencies to current PHP-CHANGE-GATE evidence. Prior report did not bind all final hashes.",
+  "preserved_contracts": [
+    "MON-P3.1 selection",
+    "MACD(12,26,9)",
+    "no orders",
+    "manual NAS start; no auto restart",
+    "96MiB memory",
+    "no change to market data/results/operational stats"
+  ],
+  "rollback": "baseline commit 56ed7636f2820e7a81a916a316385901dee5e1b4 mon.php 1.8.6; deployed 1.8.5 stays untouched",
+  "publication": "PENDING review branch and exact commit readback",
+  "remaining": "NAS replacement and deployed hash/live behavior verification; actual full-run latency and live price conflicts remain unverified"
+}

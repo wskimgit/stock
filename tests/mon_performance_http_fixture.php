@@ -1,0 +1,4 @@
+<?php
+declare(strict_types=1);
+define('MON_GATE_LIBRARY_ONLY',true);require __DIR__.'/mon_completion_gate_test.php';
+[$s,$b,$pub,$git,$job,$clock,$base]=cg_publication();$original=MonArtifact::load($s,$job['artifact_id']);$files=[];foreach($original->files as $f){$raw=$f->content.($f->path==='mon_data.json'?str_repeat(' ',700000):'');$files[]=['path'=>$f->path,'content'=>$raw,'blob_sha'=>MonRun::gitSha($raw)];}$manifest=MonArtifact::create($s,MonRun::json($base),$files,(array)$original->metadata);$s->write('remote_cache.json',$base);file_put_contents($s->dir.'/fixture.env',"GITHUB_TOKEN=fixture-token\nMON_OPERATOR_TOKEN=synthetic-performance-operator-token-123456\n");echo mon_json(['state_dir'=>$s->dir,'artifact_id'=>$manifest['artifact_id'],'php'=>PHP_VERSION,'run_id'=>$b->run->run_context_id],false);

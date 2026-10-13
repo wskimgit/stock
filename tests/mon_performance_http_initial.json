@@ -1,0 +1,49 @@
+{
+  "code": "1.8.7",
+  "php": "7.4.33",
+  "memory_limit": "96M",
+  "tests": 9,
+  "passed": 9,
+  "failed": 0,
+  "seconds": 0.32030990199928056,
+  "external_requests": 0,
+  "orders": 0,
+  "cases": [
+    {
+      "case": "bootstrap advertises the installed batch capability",
+      "pass": true
+    },
+    {
+      "case": "single chunk HTTP contract remains intact",
+      "pass": true
+    },
+    {
+      "case": "HTTP accepts eight bounded chunks in one protected read",
+      "pass": true
+    },
+    {
+      "case": "batch first chunk exactly matches the original endpoint",
+      "pass": true
+    },
+    {
+      "case": "every returned chunk has valid bytes and SHA",
+      "pass": true
+    },
+    {
+      "case": "batch preserves operator authorization",
+      "pass": true
+    },
+    {
+      "case": "HTTP rejects nine",
+      "pass": true
+    },
+    {
+      "case": "HTTP rejects oversize",
+      "pass": true
+    },
+    {
+      "case": "HTTP rejects private_path",
+      "pass": true
+    }
+  ]
+}

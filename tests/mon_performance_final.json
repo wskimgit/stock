@@ -1,0 +1,106 @@
+{
+    "code": "1.8.7",
+    "php": "7.4.33",
+    "memory_limit": "96M",
+    "tests": 23,
+    "passed": 23,
+    "failed": 0,
+    "seconds": 0.30566016099874105,
+    "peak_memory_bytes": 14680064,
+    "external_requests": 0,
+    "orders": 0,
+    "cases": [
+        {
+            "case": "foreign verified history route US makes no unusable KIS request",
+            "pass": true
+        },
+        {
+            "case": "foreign verified history route JP makes no unusable KIS request",
+            "pass": true
+        },
+        {
+            "case": "domestic KIS history remains first and retains raw split guard",
+            "pass": true
+        },
+        {
+            "case": "foreign Yahoo failure still uses validated StockAnalysis fallback",
+            "pass": true
+        },
+        {
+            "case": "unavailable alternatives never manufacture a success",
+            "pass": true
+        },
+        {
+            "case": "one chunk remains byte-for-byte compatible",
+            "pass": true
+        },
+        {
+            "case": "eight full chunks fit512KiB and match individual protected reads",
+            "pass": true
+        },
+        {
+            "case": "mixed files and final short chunk preserve ordering and hashes",
+            "pass": true
+        },
+        {
+            "case": "batch rejects empty",
+            "pass": true
+        },
+        {
+            "case": "batch rejects nine",
+            "pass": true
+        },
+        {
+            "case": "batch rejects not_list",
+            "pass": true
+        },
+        {
+            "case": "batch rejects path",
+            "pass": true
+        },
+        {
+            "case": "batch rejects negative",
+            "pass": true
+        },
+        {
+            "case": "batch rejects float",
+            "pass": true
+        },
+        {
+            "case": "batch rejects past_end",
+            "pass": true
+        },
+        {
+            "case": "batch rejects large",
+            "pass": true
+        },
+        {
+            "case": "batch rejects zero",
+            "pass": true
+        },
+        {
+            "case": "batch rejects extra",
+            "pass": true
+        },
+        {
+            "case": "batch serves hash-bound dependency bytes",
+            "pass": true
+        },
+        {
+            "case": "batch refuses a changed dependency",
+            "pass": true
+        },
+        {
+            "case": "batch refuses a changed protected artifact on every new read",
+            "pass": true
+        },
+        {
+            "case": "before/after foreign simulation preserves exact result and reduces redundant work",
+            "pass": true
+        },
+        {
+            "case": "before/after chunks simulation preserves exact result and reduces redundant work",
+            "pass": true
+        }
+    ]
+}

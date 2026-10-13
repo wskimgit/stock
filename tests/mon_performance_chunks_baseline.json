@@ -1,0 +1,19 @@
+{
+    "code": "1.8.6",
+    "mode": "chunks",
+    "rounds": 3,
+    "chunks": 24,
+    "artifact_validations": 24,
+    "requests_for8_chunks": 8,
+    "result_sha256": "0b0cb6d47900f784a3b1e1b8740f03423a33290d58f0d855e23bb4114743b853",
+    "seconds_by_round": [
+        0.39161924099971657,
+        0.35597953999968013,
+        0.37714135500027623
+    ],
+    "modeled_request_wait_seconds": 48,
+    "seconds": 1.172840608000115,
+    "peak_memory_bytes": 22945792,
+    "external_requests": 0,
+    "orders": 0
+}

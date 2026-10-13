@@ -1,0 +1,16 @@
+{
+    "code": "1.8.6",
+    "mode": "foreign",
+    "symbols": 80,
+    "calls": 162,
+    "kis_calls": 81,
+    "modeled_network_seconds": 241.5,
+    "result_sha256": "3517340b2916eee193bf07666633afd1d49e3faccb65c5896d71b6bc568e9a1e",
+    "providers": [
+        "YAHOO"
+    ],
+    "seconds": 0.7597302699996362,
+    "peak_memory_bytes": 16777216,
+    "external_requests": 0,
+    "orders": 0
+}

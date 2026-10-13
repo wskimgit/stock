@@ -1,0 +1,22 @@
+{
+  "php": "7.4.33",
+  "files": 4,
+  "cases": [
+    {
+      "file": "mon.php",
+      "pass": true
+    },
+    {
+      "file": "tests/mon_performance_probe.php",
+      "pass": true
+    },
+    {
+      "file": "tests/mon_performance_test.php",
+      "pass": true
+    },
+    {
+      "file": "tests/mon_performance_http_fixture.php",
+      "pass": true
+    }
+  ]
+}

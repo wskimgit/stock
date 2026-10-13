@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.6 -- measured throttling / KRX source recovery / independent trading refresh.
+ * mon.php 1.8.7 -- verified history routing / bounded lossless artifact batches.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.6';
+const MON_VERSION = '1.8.7';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -3419,7 +3419,12 @@ final class MonDaily {
         $kisDeadline=microtime(true)+max(.02,$this->http->remaining($stockDeadline)*.45);
         $routeName='daily-route-'.hash('sha256',$request->symbol_id).'.php';$route=$this->store?$this->store->readPrivate($routeName):null;
         $prefer=mon_get($route,'target_completed_date')===$target&&mon_get($route,'provider')==='SPG_STOCKANALYSIS';
-        if($stock===null&&!$prefer)try{MonDetailStep::mark($this->store,$request,'fetch','KIS');$stock=$this->kisStock($symbol,$target,min($stockDeadline,$kisDeadline),$settings,$cached);}catch(MonFault $e){$errors[]=$e->faultCode;}
+        // Foreign raw KIS daily bars cannot pass this reader's split-basis guard.
+        // Keep domestic KIS first and all current-quote routes; skip only the unusable history call.
+        if($stock===null&&!$prefer){
+            if($symbol->country==='KR')try{MonDetailStep::mark($this->store,$request,'fetch','KIS');$stock=$this->kisStock($symbol,$target,min($stockDeadline,$kisDeadline),$settings,$cached);}catch(MonFault $e){$errors[]=$e->faultCode;}
+            else $errors[]='DETAIL_KIS_SPLIT_BASIS_UNVERIFIED';
+        }
         if($stock===null&&!$prefer){$map=mon_get($symbol->source_codes,'yahoo');$ticker=is_string($map)?$map:mon_get($map,'symbol');if(!is_string($ticker))throw new MonFault('YAHOO_MAPPING_MISSING');
             try{MonDetailStep::mark($this->store,$request,'fetch','YAHOO');$stock=$this->yahoo($symbol,$ticker,$target,$stockDeadline,$settings);}catch(MonFault $e){
                 $errors[]=$e->faultCode;
@@ -5060,6 +5065,7 @@ final class MonArtifact {
             'content_in_model'=>false,'lossless'=>true];
     }
     public static function chunk(MonStore $store,$request): array {
+        if(property_exists($request,'ranges'))return self::batch($store,$request);
         $a=self::load($store,(string)mon_get($request,'artifact_id',''));$path=mon_get($request,'path');$offset=mon_get($request,'offset',0);$size=mon_get($request,'length',65536);
         if(!is_int($offset)||$offset<0||!is_int($size)||$size<1||$size>65536)throw new MonFault('MON_ARTIFACT_RANGE_INVALID');
         $file=null;foreach(array_merge($a->files,mon_get($a,'dependencies',[]))as $f)if($f->path===$path)$file=$f;
@@ -5068,6 +5074,21 @@ final class MonArtifact {
         return ['artifact_id'=>$a->artifact_id,'path'=>$path,'offset'=>$offset,'encoding'=>'base64','data'=>base64_encode($chunk),
             'chunk_bytes'=>strlen($chunk),'chunk_sha256'=>hash('sha256',$chunk),'total_bytes'=>$file->bytes,'sha256'=>$file->sha256,
             'blob_sha'=>$file->blob_sha,'next_offset'=>$next<$file->bytes?$next:null];
+    }
+    public static function batch(MonStore $store,$request): array {
+        $ranges=mon_get($request,'ranges');if(!is_array($ranges)||count($ranges)<1||count($ranges)>8)throw new MonFault('MON_ARTIFACT_RANGE_INVALID');
+        $a=self::load($store,(string)mon_get($request,'artifact_id',''));$files=[];$chunks=[];$bytes=0;
+        foreach($ranges as $range){
+            if(!($range instanceof stdClass)||array_diff(array_keys((array)$range),['path','offset','length']))throw new MonFault('MON_ARTIFACT_RANGE_INVALID');
+            $path=mon_get($range,'path');$offset=mon_get($range,'offset',0);$size=mon_get($range,'length',65536);
+            if(!is_string($path)||!is_int($offset)||$offset<0||!is_int($size)||$size<1||$size>65536)throw new MonFault('MON_ARTIFACT_RANGE_INVALID');
+            if(!isset($files[$path]))$files[$path]=self::file($store,$a,$path);$file=$files[$path];if($offset>$file->bytes)throw new MonFault('MON_ARTIFACT_RANGE_INVALID');
+            $raw=substr($file->content,$offset,$size);$next=$offset+strlen($raw);$bytes+=strlen($raw);
+            $chunks[]=['artifact_id'=>$a->artifact_id,'path'=>$path,'offset'=>$offset,'encoding'=>'base64','data'=>base64_encode($raw),
+                'chunk_bytes'=>strlen($raw),'chunk_sha256'=>hash('sha256',$raw),'total_bytes'=>$file->bytes,'sha256'=>$file->sha256,
+                'blob_sha'=>$file->blob_sha,'next_offset'=>$next<$file->bytes?$next:null];
+        }
+        return ['contract'=>'MON-CHUNKS-1.0','artifact_id'=>$a->artifact_id,'chunks'=>$chunks,'chunk_bytes'=>$bytes,'artifact_validation_count'=>1];
     }
     public static function file(MonStore $store,$a,string $path): stdClass {
         foreach($a->files as $f)if($f->path===$path)return $f;
@@ -5634,7 +5655,7 @@ function mon_web(): int {
             $cfg=new MonConfig(getenv('MON_ENV_FILE')?:'',$store->dir);
             $state=mon_web_state($store,$cfg);$health=array_intersect_key($state,array_flip(['version','running','heartbeat_fresh','readiness','monitoring_active','restart_required','boot_verified','watchlist_loaded','watched']));
             $progress=$state['detail_progress'];unset($progress['cards']);$health['detail_progress']=$progress;$health['heartbeat_at']=mon_get($state['status'],'heartbeat_at');$health['repair_job']=MonProgress::nextRepair($store->read('remote_cache.json'),$store->read('detail_pending.json'),time());
-            echo mon_json(['ok'=>true,'processor_version'=>MON_VERSION,'capabilities'=>['detail_codec'=>MonDetails::CODEC,'operation_completion'=>'MON-OPERATION-COMPLETION-1.0','archive'=>'MON-GAP-ARCHIVE-2.0'],
+            echo mon_json(['ok'=>true,'processor_version'=>MON_VERSION,'capabilities'=>['detail_codec'=>MonDetails::CODEC,'operation_completion'=>'MON-OPERATION-COMPLETION-1.0','archive'=>'MON-GAP-ARCHIVE-2.0','artifact_chunk_batch'=>'MON-CHUNKS-1.0'],
                 'nas_state'=>$health,'result'=>$result],false);return 0;
         }catch(MonFault $e){http_response_code($e->faultCode==='MON_METHOD_INVALID'?405:400);if($e->faultCode==='MON_METHOD_INVALID')header('Allow: GET');echo mon_json(['ok'=>false,'error_code'=>$e->faultCode],false);return 1;}
         catch(Throwable $e){http_response_code(500);echo mon_json(['ok'=>false,'error_code'=>'MON_BOOTSTRAP_INTERNAL_ERROR'],false);return 1;}
