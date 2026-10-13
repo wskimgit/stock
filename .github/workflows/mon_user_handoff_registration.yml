@@ -1,0 +1,31 @@
+name: MON user-requested candidate registration recovery
+on:
+  push:
+    branches:
+      - diag/mon-handoff-21-20261014
+permissions:
+  contents: write
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: curl,zlib,json
+          coverage: none
+      - name: Publish exact existing ChatGPT candidate request to MON data with atomic PHP
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          php -l tests/mon_user_handoff_registration.php
+          php -d memory_limit=128M tests/mon_user_handoff_registration.php | tee handoff_registration_result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mon-20261014-candidate-registration-receipt
+          path: handoff_registration_result.json
+          retention-days: 7
