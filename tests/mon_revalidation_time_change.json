@@ -1,0 +1,114 @@
+{
+  "change_id": "MON-REVALIDATION-TIME-20261013",
+  "component": "MON",
+  "finding_class": "MATERIAL",
+  "scope": "completed autonomous selection timestamp and result publication; no strategy or thresholds changed",
+  "inspected_baseline": {
+    "repository": "wskimgit/stock",
+    "commit": "b4f49703d4bfe4797217c27167aa1ed2390d1d01",
+    "version": "1.8.6",
+    "source_git_blob": "0155e009fce92a0d2080c14c7e03389e5eb32712",
+    "source_sha256": "1b5ba40d41c6aa52615b3dbb8b2ada7c07908f7abe805a009045b3cb3f0e4688",
+    "instruction_revision": "v4.14"
+  },
+  "deployed_identity": {
+    "version": "UNKNOWN",
+    "sha256": "UNKNOWN",
+    "reason": "NAS deployed file identity not observed in this maintenance request; no deployment or daemon control performed"
+  },
+  "reproduction": {
+    "version": "1.8.6",
+    "source_sha256": "1b5ba40d41c6aa52615b3dbb8b2ada7c07908f7abe805a009045b3cb3f0e4688",
+    "executed_at": "2026-10-13T03:21:20Z",
+    "method": "actual exact Git baseline MonDetails::finalize twice with unchanged reinforcement_fixture; next fixed_as_of advanced one second",
+    "previous_as_of": "2026-10-13T03:21:20.000000Z",
+    "requested_new_as_of": "2026-10-13T03:21:21Z",
+    "observed": {
+      "status": "no_change",
+      "write_required": false,
+      "files": 0,
+      "new_analysis_complete": true
+    },
+    "new_contract_assertion": "FAIL"
+  },
+  "cause": "MonDetails::finalize returned no_change and skipped both files after actual unchanged autonomous revalidation. New analysis time was discarded.",
+  "expected": "Persist the actual new fixed_as_of after autonomous finalization, even if recommendations stay the same. Display KST completion, recommendation changes, actual market completed-bar dates and partial-market waiting.",
+  "minimal_fix": "Remove semantic no-change publication bypass; stamp only autonomous selection paths. Separate meaningful_change, selection_changed and write_required. Preserve observation timestamps and completion/publication gates. Regenerate the known result pair during rebase even with archive dependency files.",
+  "final_artifacts": {
+    "mon.php": "c4d2a99881fd39b9245e6fb5d90c58e94fd688956cd59c1af8559ef67fdec0a6",
+    "monitor.md": "8df58461fd2d93c9458e1c2a6bc4f2929c64673d4f7f235570774bae9967cfb8",
+    "mon_wiki.md": "b972feb0b7b2808883f51f98b44ecb05995ff4417cf60793fb46203b51db916b",
+    "tests/mon_revalidation_time_test.php": "40092d3b2f7d301ee6b4ffb87db0232f748ecc29592be88a77d7026c6808f9b9",
+    "tests/mon_revalidation_time_tests.json": "6ff7fb7e618a12aa468958f9ecbf0666422d5ef4c01063d883ff2a8027082dca",
+    "tests/mon_reinforcement_test.php": "ce37e7c5afd707a0dfa88ed82360fea7efccfcfba7a92603bda446bdf62523cf"
+  },
+  "checks": [
+    {
+      "name": "PHP 7.4 syntax",
+      "result": "PASS",
+      "command": "php74 -l mon.php; php74 -l tests/mon_revalidation_time_test.php; php74 -l tests/mon_reinforcement_test.php",
+      "environment": "PHP 7.4.33",
+      "evidence": "syntax tool outputs; changed-path report"
+    },
+    {
+      "name": "Changed-path real PHP tests",
+      "result": "PASS",
+      "command": "/workspace/scratch/2cf573c7ed8f/php74-reinforcement-build/sapi/cli/php tests/mon_revalidation_time_test.php",
+      "executed_at": "2026-10-13T03:22:33Z",
+      "environment": "PHP 7.4.33 with zlib; synthetic IO; no NAS/market requests/orders",
+      "cases": 20,
+      "passed": 20,
+      "failed": 0,
+      "evidence": "tests/mon_revalidation_time_tests.json"
+    },
+    {
+      "name": "Focused independent ERR-C review",
+      "result": "PASS",
+      "scope": "real partial-country reproduction and source review of rebase/dependency boundary; two findings corrected and retested"
+    },
+    {
+      "name": "Instructions/wiki consistency",
+      "result": "PASS",
+      "scope": "new timestamp contract, scope/bar-date fields, pending-market display; prior unrelated checks not repeated"
+    },
+    {
+      "name": "Unchanged broad numerical/lifecycle suites",
+      "result": "NOT_RUN",
+      "reason": "No dependency change to formulas, eligibility thresholds, start/restart authorization or order behavior; no claim that historical full suites tested this exact artifact"
+    },
+    {
+      "name": "Full HTTP handler and real NAS runtime",
+      "result": "NOT_RUN",
+      "reason": "Not needed for offline changed-path acceptance; deployed identity and live behavior remain unverified"
+    }
+  ],
+  "boundary_coverage": [
+    "repeated unchanged finalization",
+    "recommendation/plan changes vs evidence-only updates",
+    "immutable quote/issuer/bar observation times",
+    "legacy render/reuse/failed request",
+    "market-specific partial completion",
+    "atomic pair readback and interrupted publication resume",
+    "actual API rebase code body with synthetic late detail and archive dependency"
+  ],
+  "failed_intermediate_evidence": "Retained in tests/mon_revalidation_time_tests.json: missing zlib runtime and overly strict computed quote-age assertion; neither represented as product defect.",
+  "safety": {
+    "php": "7.4",
+    "orders": 0,
+    "nas_actions": 0,
+    "automatic_start_or_restart_added": false,
+    "criteria": "MON-P3.1 / MACD12,26,9 preserved",
+    "operational_files_modified": false
+  },
+  "package": "NOT_REQUESTED; repository source files only",
+  "publication": {
+    "status": "NOT_RUN",
+    "note": "This checkpoint precedes branch publication; exact remote source commit/readback will be appended after saving."
+  },
+  "rollback": {
+    "source_commit": "b4f49703d4bfe4797217c27167aa1ed2390d1d01",
+    "path": "mon.php"
+  },
+  "acceptance": "CODE_COMPLETE / DEPLOYMENT_PENDING",
+  "remaining_blockers": []
+}
