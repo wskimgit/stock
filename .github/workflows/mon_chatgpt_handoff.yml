@@ -31,9 +31,16 @@ jobs:
           php -l mon.php
           php -l mon_chatgpt_bridge.php
           php -l tests/mon_chatgpt_bridge_test.php
+          php -l tests/mon_chatgpt_bridge_observed.php
+          php -l tests/mon_chatgpt_bridge_compaction_test.php
+          sha256sum mon.php mon_chatgpt_bridge.php monitor.md mon_wiki.md tests/mon_chatgpt_bridge_test.php tests/mon_chatgpt_bridge_compaction_test.php
       - name: Synthetic candidate to saved selection handoff
         run: php -d memory_limit=96M tests/mon_chatgpt_bridge_test.php
       - name: Read-only actual MON payload capacity (no market requests)
         run: php -d memory_limit=96M tests/mon_chatgpt_bridge_observed.php
       - name: Actual MON-size atomic archive intake against fake Git
         run: php -d memory_limit=96M tests/mon_chatgpt_bridge_compaction_test.php
+      - name: Existing manual-web lifecycle regression
+        run: python3 tests/mon_web_test.py
+      - name: Existing local NAS bootstrap / recovery HTTP regression
+        run: python3 tests/mon_nas_http_test.py
