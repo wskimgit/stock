@@ -347,11 +347,28 @@ final class MonChatGPTBridge {
             mon_get($old,'last_detail_receipt_sha')!==$q->details_receipt_sha ||
             mon_get($old,'last_detail_source_sha')!==$q->source_blob_sha)
             throw new MonFault('MON_BRIDGE_HANDOFF_PROOF_REQUIRED');
-        if (!hash_equals($q->source_blob_sha,$latest['sha'])) throw new MonFault('MON_BRIDGE_STALE_SOURCE');
+        if(!hash_equals($q->source_blob_sha,$latest['sha'])){
+            // Only permit an intervening quote-only or unrelated collection
+            // update. All watchlist/analysis and all 21 returned detail facts
+            // (including full snapshot hashes) must remain identical.
+            if(mon_get($old,'last_detail_stable_source_sha256')!==self::stableSource($latest['data']))
+                throw new MonFault('MON_BRIDGE_STALE_SOURCE');
+            $currentRows=self::detailRows($latest['data'],$q);
+            if(mon_get($old,'last_detail_rows_sha256')!==MonRun::digest($currentRows[0]))
+                throw new MonFault('MON_BRIDGE_STALE_SOURCE');
+        }
         $data=$latest['data'];$req=MonDetails::requests($data);$responses=mon_get($data->collection,'detail_responses',new stdClass());
         foreach ($q->selected as $r) {
             $x=mon_get($req,$r->symbol_id);$y=mon_get($responses,$r->symbol_id);
-            if (!($x instanceof stdClass) || !MonDetails::matching($x,$y) || mon_get($y,'state')!=='done' || mon_get($y,'usable')!==true)
+            if(!($x instanceof stdClass))throw new MonFault('MON_BRIDGE_DETAIL_PENDING');
+            if(MonDetails::matching($x,$y)&&mon_get($y,'state')==='done'&&mon_get($y,'usable')===true)continue;
+            // A previously SHA-verified snapshot may be considered only for
+            // the same fully completed target date; MonDetails::finalize will
+            // independently enforce eligibility and conditional readiness.
+            $target=MonDetails::target($data->watchlist,$x->symbol->country,time());
+            $cached=MonDetails::cached($data,$x->symbol);
+            if(!$target['verified']||!($cached instanceof stdClass)||
+                $cached->metrics->bars_as_of!==$target['date'])
                 throw new MonFault('MON_BRIDGE_DETAIL_PENDING');
         }
         $budget=MonExecution::start($store,(object)['run_id'=>'chatbridge-'.$q->request_id,'mode'=>'auto',
@@ -430,6 +447,37 @@ final class MonChatGPTBridge {
         }
         return $latest;
     }
+    // The collection quote mirror can advance without changing the facts
+    // independently verified and returned to ChatGPT. Never release raw OHLCV.
+    private static function stableSource($data): string {
+        return MonRun::digest((object)['analysis'=>$data->analysis,'watchlist'=>$data->watchlist]);
+    }
+    private static function detailRows($data,$q): array {
+        $req=MonDetails::requests($data);$responses=mon_get($data->collection,'detail_responses',new stdClass());
+        $rows=[];$complete=true;
+        foreach($q->candidate_ids as $sid){
+            $request=mon_get($req,$sid);$response=mon_get($responses,$sid);
+            $valid=$request instanceof stdClass&&MonDetails::matching($request,$response);
+            $state=$valid?mon_get($response,'state'):'pending';$error=$valid?mon_get($response,'error'):null;
+            $row=['symbol_id'=>$sid,'request_hash'=>$request instanceof stdClass?mon_get($request,'request_hash'):null,
+                'state'=>$state,'error'=>$error,
+                'bars_as_of'=>$valid?mon_get($response,'bars_as_of'):null,
+                'data_status'=>$valid?mon_get($response,'data_status'):null,
+                'usable'=>$valid&&mon_get($response,'usable')===true];
+            if($valid&&$row['usable']&&$state==='done'){
+                try{
+                    $snapshot=MonDetails::checkedSnapshot($request,$response);
+                    $row['snapshot_sha256']=MonRun::digest($snapshot);
+                    $row['facts']=['metrics'=>MonRun::pick($snapshot->metrics,['last_close','bars_as_of','RS20_pp','R20','ADV20','MA5','MA10','MA20','ATR14','S','R']),
+                        'signals'=>MonRun::pick($snapshot->technical,['qualifying_signals','macd_kind','macd_cross_date','histogram','ma5_reclaim_close']),
+                        'entry_plans'=>$snapshot->entry_plans];
+                }catch(MonFault $e){$row['usable']=false;$row['error']=$e->faultCode;}
+            }
+            if(!$row['usable']||$state!=='done')$complete=false;
+            $rows[]=$row;
+        }
+        return [$rows,$complete];
+    }
     public static function export(MonStore $store, MonHttp $http, MonConfig $cfg, $data, string $sourceSha, float $deadline): void {
         if ($cfg->get('GITHUB_TOKEN')==='') return;
         $inbox=self::get($http,$cfg,self::INBOX,$deadline);
@@ -437,26 +485,17 @@ final class MonChatGPTBridge {
         self::validate($inbox['value']);$q=$inbox['value'];
         $state=$store->readPrivate(self::STATE);
         if(mon_get($state,'candidate_request_sha')!==$inbox['sha'])return;
-        $req=MonDetails::requests($data);$responses=mon_get($data->collection,'detail_responses',new stdClass());
-        $rows=[];$complete=true;
-        foreach ($q->candidate_ids as $sid) {
-            $request=mon_get($req,$sid);$response=mon_get($responses,$sid);
-            $valid=$request instanceof stdClass&&MonDetails::matching($request,$response);
-            $state=$valid?mon_get($response,'state'):'pending';$error=$valid?mon_get($response,'error'):null;
-            $row=['symbol_id'=>$sid,'state'=>$state,'error'=>$error,
-                'bars_as_of'=>$valid?mon_get($response,'bars_as_of'):null,
-                'data_status'=>$valid?mon_get($response,'data_status'):null,
-                'usable'=>$valid&&mon_get($response,'usable')===true];
-            if ($valid&&$row['usable']&&$state==='done') {
-                try { $snapshot=MonDetails::checkedSnapshot($request,$response);
-                    $row['facts']=['metrics'=>MonRun::pick($snapshot->metrics,['last_close','bars_as_of','RS20_pp','R20','ADV20','MA5','MA10','MA20','ATR14','S','R']),
-                        'signals'=>MonRun::pick($snapshot->technical,['qualifying_signals','macd_kind','macd_cross_date','histogram','ma5_reclaim_close']),
-                        'entry_plans'=>$snapshot->entry_plans];
-                } catch (MonFault $e) { $row['usable']=false;$row['error']=$e->faultCode; }
-            }
-            if (!$row['usable'] || $state!=='done') $complete=false;
-            $rows[]=$row;
-        }
+        [$rows,$complete]=self::detailRows($data,$q);
+        $rowsHash=MonRun::digest($rows);
+        $stableHash=self::stableSource($data);
+        $previous=$store->readPrivate(self::STATE);
+        // Preserve a verified old source receipt when only quote collection
+        // changed. Final decision performs a strict semantic/source recheck.
+        if(mon_get($previous,'candidate_request_sha')===$inbox['sha']&&
+            mon_get($previous,'last_detail_rows_sha256')===$rowsHash&&
+            mon_get($previous,'last_detail_stable_source_sha256')===$stableHash&&
+            preg_match('/^[a-f0-9]{40}$/',(string)mon_get($previous,'last_detail_receipt_sha','')))
+            return;
         $receipt=self::report($store,$http,$cfg,['contract'=>self::CONTRACT,'stage'=>'details',
             'request_id'=>$q->request_id,'request_sha'=>$inbox['sha'],
             'status'=>$complete?'collected':'collection_pending',
@@ -469,6 +508,8 @@ final class MonChatGPTBridge {
         $state->candidate_ids_sha256=hash('sha256',mon_json($q->candidate_ids,false));
         $state->last_detail_receipt_sha=$receipt;
         $state->last_detail_source_sha=$sourceSha;
+        $state->last_detail_rows_sha256=$rowsHash;
+        $state->last_detail_stable_source_sha256=$stableHash;
         $store->writePrivate(self::STATE,$state);
     }
 }
