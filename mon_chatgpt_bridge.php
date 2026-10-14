@@ -26,7 +26,7 @@ final class MonChatGPTBridge {
         return $headers;
     }
     private static function get(MonHttp $http, MonConfig $cfg, string $path, float $deadline): ?array {
-        $response = $http->request('GET', self::base($cfg).'contents/'.$path.'?ref=main', self::headers($cfg, true), null, $deadline, 3);
+        $response = $http->request('GET', self::base($cfg).'contents/'.$path.'?ref=main', self::headers($cfg, true), null, $deadline, 5);
         if ($response['status'] === 404) return null;
         if ($response['status'] < 200 || $response['status'] >= 300) MonHttp::decode($response);
         $raw = $response['body'];
@@ -40,8 +40,25 @@ final class MonChatGPTBridge {
         $body = ['message'=>'mon: ChatGPT bridge '.($path === 'mon_data.json'?'register requests':'status'),
             'content'=>base64_encode($raw),'branch'=>'main'];
         if ($oldSha !== null) $body['sha'] = $oldSha;
-        $response = MonHttp::decode($http->request('PUT', self::base($cfg).'contents/'.$path,
-            self::headers($cfg), mon_json($body, false), $deadline, 3));
+        try {
+            $rawResponse=$http->request('PUT',self::base($cfg).'contents/'.$path,
+                self::headers($cfg),mon_json($body,false),$deadline,8);
+        } catch(MonFault $e) {
+            // Lost ACK is not proof that the remote write failed.
+            // Only small mailbox JSON is read back here; financial files
+            // must use MonGitHub or the atomic MonPublication journal.
+            if($path!==self::INBOX&&$path!=='mon_data.json'&&
+                in_array($e->faultCode,['HTTP_TRANSPORT_28','HTTP_LATE_RESPONSE','HTTP_TRANSPORT_52'],true)&&
+                $http->remaining($deadline)>=0.1){
+                try{
+                    $actual=self::get($http,$cfg,$path,$deadline);
+                    if($actual && hash_equals(MonRun::gitSha($raw),$actual['sha']))
+                        return $actual['sha'];
+                }catch(MonFault $readError){}
+            }
+            throw $e;
+        }
+        $response=MonHttp::decode($rawResponse);
         $sha = mon_get(mon_get($response, 'content'), 'sha');
         if (!is_string($sha) || !hash_equals(MonRun::gitSha($raw), $sha)) throw new MonFault('MON_BRIDGE_WRITE_UNCONFIRMED');
         return $sha;
@@ -108,7 +125,7 @@ final class MonChatGPTBridge {
             !hash_equals(MonRun::gitSha($raw),$sourceSha))
             throw new MonFault('MON_BRIDGE_SOURCE_CHANGED');
         $budget=MonExecution::start($store,(object)[
-            'run_id'=>'chatbridge-intake-'.$q->request_id,
+            'run_id'=>'chatbridge-intake-'.substr(hash('sha256',$q->request_id),0,32).'-'.substr($sourceSha,0,12),
             'mode'=>'auto','workload'=>'mon_handoff']);
         try {
             $metadata=['decision_sha256'=>hash('sha256',mon_json((object)[
@@ -135,15 +152,76 @@ final class MonChatGPTBridge {
             MonExecution::$active=null;MonExecution::$store=null;MonPreparation::$store=null;
         }
     }
+    // Exact idempotency proof: the candidate set must be present in the current
+    // immutable request map, independently of any stale local publication journal.
+    private static function registered($data,$q): array {
+        $stored=MonDetails::requests($data);
+        $matched=[];$missing=[];
+        foreach($q->candidate_ids as $sid){
+            $r=mon_get($stored,$sid);
+            $expected='cb.'.substr(hash('sha256',$q->request_id.'|'.$sid),0,48);
+            $valid=false;
+            if($r instanceof stdClass&&mon_get($r,'request_id')===$expected&&mon_get($r,'symbol_id')===$sid){
+                try{MonDetails::validRequest($r,$sid);$valid=true;}
+                catch(MonFault $e){}
+            }
+            if($valid)$matched[]=$sid;
+            else $missing[]=$sid;
+        }
+        return ['matched'=>$matched,'missing'=>$missing];
+    }
+    private static function confirmedExisting(
+        MonStore $store,MonHttp $http,MonConfig $cfg,
+        array $latest,$q,string $inboxSha,float $deadline
+    ): ?array {
+        $proof=self::registered($latest['data'],$q);
+        if($proof['missing'])return null;
+        $state=$store->readPrivate(self::STATE);
+        $state=$state instanceof stdClass?$state:new stdClass();
+        $previousRequest=mon_get($state,'candidate_request_sha');
+        $oldJob=mon_get($state,'pending_candidate_job_id');
+        if($previousRequest!==$inboxSha){
+            $state->last_detail_receipt_sha=null;
+            $state->last_detail_source_sha=null;
+        }
+        $state->candidate_request_id=$q->request_id;
+        $state->candidate_request_sha=$inboxSha;
+        $state->candidate_ids_sha256=hash('sha256',mon_json($q->candidate_ids,false));
+        unset($state->pending_candidate_request_sha,$state->pending_candidate_job_id);
+        $store->writePrivate(self::STATE,$state);
+        // The immutable remote request map is authoritative. A superseded
+        // conflict remains in the protected journal, never rewritten or erased.
+        if($previousRequest!==$inboxSha||is_string($oldJob)){
+            self::report($store,$http,$cfg,[
+                'contract'=>self::CONTRACT,'stage'=>'candidates',
+                'request_id'=>$q->request_id,'request_sha'=>$inboxSha,
+                'status'=>'registered_existing',
+                'registered_count'=>count($proof['matched']),
+                'source_blob_sha'=>$latest['sha'],
+                'superseded_job_id'=>is_string($oldJob)?$oldJob:null],$deadline);
+        }
+        return $latest;
+    }
     private static function resumeCompacted(
         MonStore $store,MonHttp $http,MonConfig $cfg,MonGitHub $gh,
         array $latest,$q,string $inboxSha,float $deadline
     ): ?array {
+        $already=self::confirmedExisting($store,$http,$cfg,$latest,$q,$inboxSha,$deadline);
+        if($already!==null)return $already;
         $st=$store->readPrivate(self::STATE);
         if(mon_get($st,'pending_candidate_request_sha')!==$inboxSha ||
             !is_string(mon_get($st,'pending_candidate_job_id')))return null;
         $pub=new MonPublication($store,$http,$cfg);
         $receipt=$pub->receipt($pub->load($st->pending_candidate_job_id));
+        if(in_array($receipt['save_status'],['failed','conflict','expired'],true)){
+            // The original analysis is no longer the only writer. Abandon only
+            // this obsolete intake journal; preserve its evidence for diagnosis.
+            // A NEW candidate transaction will use the latest source after
+            // the remote missing-id check above.
+            unset($st->pending_candidate_request_sha,$st->pending_candidate_job_id);
+            $store->writePrivate(self::STATE,$st);
+            return null;
+        }
         if($receipt['save_status']!=='saved'){
             self::report($store,$http,$cfg,[
                 'contract'=>self::CONTRACT,'stage'=>'candidates',
