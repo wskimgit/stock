@@ -724,7 +724,7 @@ final class MonData {
         }
     }
     public static function settings($w): array {
-        $defaults = ['request_poll_seconds'=>10, 'detail_budget_seconds'=>25, 'detail_symbol_budget_seconds'=>8, 'detail_jobs_per_tick'=>3, 'detail_publish_batch_size'=>3, 'detail_publish_max_delay_seconds'=>3, 'poll_seconds'=>60, 'mirror_seconds'=>180, 'force_mirror_before_analysis_seconds'=>60, 'collection_budget_seconds'=>45, 'tick_budget_seconds'=>55, 'publish_reserve_seconds'=>10, 'http_timeout_seconds'=>5, 'github_http_timeout_seconds'=>3, 'request_spacing_seconds'=>1.25, 'github_conflict_retries'=>2, 'auxiliary_max_age_seconds'=>900, 'action_price_max_age_seconds'=>300, 'future_clock_tolerance_seconds'=>5];
+        $defaults = ['request_poll_seconds'=>10, 'detail_budget_seconds'=>25, 'detail_symbol_budget_seconds'=>8, 'detail_jobs_per_tick'=>3, 'detail_publish_batch_size'=>3, 'detail_publish_max_delay_seconds'=>3, 'poll_seconds'=>60, 'mirror_seconds'=>180, 'force_mirror_before_analysis_seconds'=>60, 'collection_budget_seconds'=>45, 'tick_budget_seconds'=>55, 'publish_reserve_seconds'=>10, 'http_timeout_seconds'=>5, 'github_http_timeout_seconds'=>5, 'github_write_timeout_seconds'=>12, 'request_spacing_seconds'=>1.25, 'github_conflict_retries'=>2, 'auxiliary_max_age_seconds'=>900, 'action_price_max_age_seconds'=>300, 'future_clock_tolerance_seconds'=>5];
         foreach ($defaults as $k => $v) {
             $n = mon_number(mon_get($w->settings, $k, $v));
             if ($n === null || $n < 0) throw new MonFault('SETTINGS_INVALID');
@@ -738,7 +738,10 @@ final class MonData {
         $defaults['detail_publish_batch_size'] = min(6, max(1, (int)$defaults['detail_publish_batch_size']));
         $defaults['detail_publish_max_delay_seconds'] = min(10, max(0, $defaults['detail_publish_max_delay_seconds']));
         $defaults['http_timeout_seconds'] = min(5, max(0.1, $defaults['http_timeout_seconds']));
-        $defaults['github_http_timeout_seconds'] = min(3, max(0.1, $defaults['github_http_timeout_seconds']));
+        $defaults['github_http_timeout_seconds'] = min(8, max(2, $defaults['github_http_timeout_seconds']));
+        // GitHub can need longer to ingest a 1.5MiB source file than to read it.
+        // This is an individual HTTP cap, NOT a longer daemon tick or run deadline.
+        $defaults['github_write_timeout_seconds'] = min(12, max(3, $defaults['github_write_timeout_seconds']));
         $defaults['request_spacing_seconds'] = max(1.25, $defaults['request_spacing_seconds']);
         $defaults['tick_budget_seconds'] = min(55, max(1, $defaults['tick_budget_seconds']));
         $defaults['publish_reserve_seconds'] = min(10, max(1, $defaults['publish_reserve_seconds']));
@@ -850,7 +853,23 @@ final class MonGitHub {
             $latest['data']->collection=$batch; // Preserve MON-owned instructions and decisions.
             $raw=mon_json($latest['data'],false); if (strlen($raw)>MonRun::MAX_SOURCE) throw new MonFault('DATA_SIZE_EXCEEDED');
             $body=mon_json(['message'=>'mon: mirror collection '.$batch->collection_id,'content'=>base64_encode($raw),'sha'=>$latest['sha'],'branch'=>$this->config->get('MON_BRANCH','main')]);
-            $r=$this->http->request('PUT',$this->url,$headers,$body,$deadline,$settings['github_http_timeout_seconds']);
+            try {
+                $r=$this->http->request('PUT',$this->url,$headers,$body,$deadline,$settings['github_write_timeout_seconds']);
+            } catch (MonFault $e) {
+                // An ACK can be lost after GitHub has already committed the blob.
+                // Do not issue a second PUT until the remote SHA has been observed.
+                if(in_array($e->faultCode,['HTTP_TRANSPORT_28','HTTP_LATE_RESPONSE','HTTP_TRANSPORT_52','HTTP_TRANSPORT_56'],true)
+                   && $this->http->remaining($deadline)>=0.1){
+                    try {
+                        $confirmed=$this->read($deadline,$settings['github_http_timeout_seconds']);
+                        if(hash_equals(MonRun::gitSha($raw),$confirmed['sha']))
+                            return ['sha'=>$confirmed['sha'],'data'=>$confirmed['data'],'written'=>true,'recovered_ack'=>true];
+                    } catch (MonFault $confirmationError) {
+                        // Preserve local pending.json/detail_pending.json for next tick.
+                    }
+                }
+                throw $e;
+            }
             if (in_array($r['status'],[409,422],true) && $attempt < $settings['github_conflict_retries']) continue;
             $saved=MonHttp::decode($r);
             if (!is_string(mon_get(mon_get($saved,'content'),'sha'))) throw new MonFault('GITHUB_WRITE_UNCONFIRMED');
