@@ -33,7 +33,10 @@ jobs:
         run: php -d memory_limit=96M tests/mon_errc_d22_test.php
       - name: Existing ChatGPT candidate-detail-decision-publication
         run: php -d memory_limit=96M tests/mon_chatgpt_bridge_test.php
-      - name: Actual-size atomic archive publication
-        run: php -d memory_limit=96M tests/mon_chatgpt_bridge_compaction_test.php
+      - name: Actual-size atomic archive publication with frozen pre-compaction snapshot
+        run: |
+          git fetch --no-tags --depth=1 origin c6ba07dad278da46cda6be6df7c257ecedd4fb88
+          git show c6ba07dad278da46cda6be6df7c257ecedd4fb88:mon_data.json > "$RUNNER_TEMP/mon_pre_compaction.json"
+          MON_D22_OBSERVED_SOURCE="$RUNNER_TEMP/mon_pre_compaction.json" php -d memory_limit=96M tests/mon_chatgpt_bridge_compaction_test.php
       - name: Original manual-web lifecycle regression
         run: python3 tests/mon_web_test.py
