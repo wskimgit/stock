@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.7 -- measured throttling / KRX source recovery / independent trading refresh.
+ * mon.php 1.8.8 -- ERR-C D2.2 GitHub timeout/SHA recovery; measured throttling / KRX source recovery / independent trading refresh.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.7';
+const MON_VERSION = '1.8.8';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
