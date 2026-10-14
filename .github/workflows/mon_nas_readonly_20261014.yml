@@ -1,4 +1,4 @@
-name: MON NAS v1.8.8 live verification (read only)
+name: MON current-run 2026-10-14 10:24 KST read-only status
 on:
   push:
     branches:
