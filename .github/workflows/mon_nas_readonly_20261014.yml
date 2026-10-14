@@ -1,4 +1,4 @@
-name: MON NAS read-only extended diagnostic
+name: MON NAS v1.8.8 live verification (read only)
 on:
   push:
     branches:
@@ -10,44 +10,67 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
-      - name: Inspect real status, worker progress and errors without credentials
+      - name: Verify actual running MON version, bridge, heartbeat, collection and errors
         run: |
           python3 - <<'PY'
           import json,time,urllib.request
+          from datetime import datetime,timezone
           root="https://k-bizpost.myds.me/mon.php"
-          paths=["?view=status","?view=progress&stage=1","?view=progress&cursor=0"]
-          for path in paths:
-              started=time.monotonic()
-              try:
-                  req=urllib.request.Request(root+path,headers={"Accept":"application/json","User-Agent":"MON-ReadOnly-Extended/1.0"})
-                  with urllib.request.urlopen(req,timeout=12) as response:
-                      d=json.loads(response.read(262144))
-                  obs={"endpoint":path,"success":d.get("ok")}
-                  if path=="?view=status":
-                      x=d.get("data",{}) or {}; st=x.get("status",{}) or {}
-                      obs.update({k:x.get(k) for k in ("version","running","stopping","label","message","readiness","heartbeat_fresh","boot_verified","start_policy","monitoring_active","restart_required")})
-                      obs["error_code"]=x.get("error_code") or st.get("error_code")
-                      obs["daemon_state"]=st.get("state")
-                      obs["daemon_activity"]=st.get("activity_state")
-                      obs["daemon_last_error"]=st.get("error_code")
-                      obs["daemon_heartbeat"]=st.get("heartbeat_at")
-                      obs["runtime_resources"]=st.get("resources",{})
-                      obs["connection"]={k:v for k,v in (x.get("connection",{}) or {}).items() if isinstance(v,bool)}
-                      obs["detail_counts"]=(x.get("detail_progress",{}) or {}).get("counts",{})
-                      obs["request_error"]=d.get("error_code")
-                  elif path.startswith("?view=progress&stage"):
-                      st=d.get("step",{}) or {}
-                      cur=st.get("current",{}) or {}
-                      obs["work_pending"]=st.get("work_pending")
-                      obs["current"]={k:cur.get(k) for k in ("symbol_id","name","stage","label","at","provider","error")}
-                      obs["recent"]=[{k:item.get(k) for k in ("symbol_id","stage","label","error","provider","at")} for item in (st.get("recent",[]) or [])[-5:]]
-                  else:
-                      p=d.get("progress",{}) or {}
-                      obs["counts"]=p.get("counts",{})
-                      obs["cards"]=[{k:item.get(k) for k in ("symbol_id","state","error","bars_as_of","data_status","publication")} for item in (p.get("cards",[]) or [])[:25]]
-                      obs["page"]=p.get("page",{})
-                  obs["seconds"]=round(time.monotonic()-started,3)
-                  print(json.dumps(obs,ensure_ascii=False))
-              except Exception as e:
-                  print(json.dumps({"endpoint":path,"success":False,"error":type(e).__name__+":"+str(e)[:220],"seconds":round(time.monotonic()-started,3)},ensure_ascii=False))
+          observed={}
+          for name,path in [
+            ("bootstrap","?view=bootstrap"),
+            ("status","?view=status"),
+            ("progress","?view=progress&cursor=0"),
+            ("detail_step","?view=progress&stage=1")
+          ]:
+            started=time.monotonic()
+            try:
+              req=urllib.request.Request(root+path,headers={"Accept":"application/json","User-Agent":"MON-ReadOnly-Live-1.8.8-Verification/1.0"})
+              with urllib.request.urlopen(req,timeout=12) as resp:
+                obj=json.loads(resp.read(262144))
+                http_code=resp.status
+              if name=="bootstrap":
+                nas=obj.get("nas_state",{}) or {}
+                caps=obj.get("capabilities",{}) or {}
+                values={"processor_version":obj.get("processor_version"),"chatgpt_bridge":caps.get("chatgpt_bridge"),
+                  "running":nas.get("running"),"boot_verified":nas.get("boot_verified"),
+                  "heartbeat_fresh":nas.get("heartbeat_fresh"),"heartbeat_at":nas.get("heartbeat_at"),
+                  "restart_required":nas.get("restart_required"),"readiness":nas.get("readiness"),
+                  "error":nas.get("error_code") or nas.get("error")}
+              elif name=="status":
+                data=obj.get("data",{}) or {}
+                state=data.get("status",{}) or {}
+                resources=state.get("resources",{}) or {}
+                vals={k:data.get(k) for k in ("version","running","label","message","readiness","heartbeat_fresh","boot_verified","restart_required","error_code","monitoring_active","start_policy")}
+                values={**vals,"daemon_state":state.get("state"),"activity":state.get("activity_state"),
+                  "last_error":state.get("error_code"),"heartbeat_at":state.get("heartbeat_at"),
+                  "resources":{k:resources.get(k) for k in ("state","reason","work_allowed","cpu_busy_percent","memory_available_bytes","memory_floor_bytes","priority_applied","memory_limit_applied")},
+                  "connections":{k:v for k,v in (data.get("connection",{}) or {}).items() if isinstance(v,bool)},
+                  "detail_counts":(data.get("detail_progress",{}) or {}).get("counts",{})}
+              elif name=="progress":
+                pp=obj.get("progress",{}) or {}
+                values={"counts":pp.get("counts",{}),"phase":pp.get("phase"),
+                  "last_response_at":pp.get("last_response_at"),"publication":pp.get("publication"),
+                  "page":pp.get("page"),"cards":[{"symbol_id":v.get("symbol_id"),"state":v.get("state"),"error":v.get("error"),"data_status":v.get("data_status"),"publication":v.get("publication")} for v in (pp.get("cards",[]) or [])[:5]]}
+              else:
+                step=obj.get("step",{}) or {}
+                cur=step.get("current",{}) or {}
+                values={"work_pending":step.get("work_pending"),"current":{k:cur.get(k) for k in ("symbol_id","name","stage","label","at","provider","error")},"recent":[{k:row.get(k) for k in ("symbol_id","stage","label","error","provider","at")} for row in (step.get("recent",[]) or [])[-3:]]}
+              observed[name]={"http_status":http_code,"ok":obj.get("ok"),"values":values,
+                "seconds":round(time.monotonic()-started,3)}
+            except Exception as e:
+              observed[name]={"error_kind":type(e).__name__,"error":str(e)[:160],"seconds":round(time.monotonic()-started,3)}
+          b=(observed.get("bootstrap",{}).get("values") or {})
+          s=(observed.get("status",{}).get("values") or {})
+          checks={
+            "nas_connected":observed.get("bootstrap",{}).get("ok") is True,
+            "mon_v1_8_8_running":b.get("processor_version")=="1.8.8" and b.get("running") is True,
+            "chatgpt_bridge_installed":b.get("chatgpt_bridge")=="MON-CHATGPT-BRIDGE-1.0",
+            "heartbeat_healthy":b.get("heartbeat_fresh") is True and b.get("boot_verified") is True,
+            "no_restart_required":b.get("restart_required") is False,
+            "resource_work_allowed":(s.get("resources") or {}).get("work_allowed") is True,
+            "full_ready":b.get("readiness")=="ready" and s.get("readiness")=="ready",
+          }
+          print("NAS_MON_OBSERVATIONS="+json.dumps(observed,ensure_ascii=False))
+          print("NAS_MON_CHECKS="+json.dumps({"at_utc":datetime.now(timezone.utc).isoformat(),"checks":checks,"passed":sum(bool(v) for v in checks.values()),"total":len(checks)},ensure_ascii=False))
           PY
