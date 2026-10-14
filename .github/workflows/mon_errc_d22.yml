@@ -1,0 +1,39 @@
+name: MON ERR-C D2.2 changed-path verification
+on:
+  push:
+    branches:
+      - fix/mon-errc-d22-20261014
+  pull_request:
+    paths:
+      - mon.php
+      - mon_chatgpt_bridge.php
+      - tests/mon_errc_d22_test.php
+      - .github/workflows/mon_errc_d22.yml
+permissions:
+  contents: read
+jobs:
+  d22:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: curl,zlib,json
+          coverage: none
+      - name: Syntax and changed source SHA
+        run: |
+          php -v
+          php -l mon.php
+          php -l mon_chatgpt_bridge.php
+          php -l tests/mon_errc_d22_test.php
+          sha256sum mon.php mon_chatgpt_bridge.php tests/mon_errc_d22_test.php
+      - name: ERR-C D2.2 source-specific forced failures
+        run: php -d memory_limit=96M tests/mon_errc_d22_test.php
+      - name: Existing ChatGPT candidate-detail-decision-publication
+        run: php -d memory_limit=96M tests/mon_chatgpt_bridge_test.php
+      - name: Actual-size atomic archive publication
+        run: php -d memory_limit=96M tests/mon_chatgpt_bridge_compaction_test.php
+      - name: Original manual-web lifecycle regression
+        run: python3 tests/mon_web_test.py
