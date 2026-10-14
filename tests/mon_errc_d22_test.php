@@ -42,6 +42,11 @@ class D22Git {
    $raw=base64_decode($p->content,true);
    if(!is_string($raw))throw new RuntimeException('bad source base64');
    $this->git->setSource(mon_decode($raw));
+   // GitHub stores the exact transmitted bytes, not canonicalized fixture JSON.
+   $sha=MonRun::gitSha($raw);
+   $this->git->blobs[$sha]=$raw;
+   $tree=$this->git->commits[$this->git->head]['tree'];
+   $this->git->trees[$tree]['mon_data.json']=$sha;
    if($this->loseDataAck){$this->loseDataAck=false;throw new MonFault('HTTP_TRANSPORT_28');}
    return ['status'=>200,'headers'=>[],'body'=>mon_json((object)['content'=>(object)['sha'=>MonRun::gitSha($raw)]])];
   }
@@ -61,7 +66,8 @@ d22_case('S1 GitHub PUT committed but ACK lost: one PUT, SHA readback',function(
  $res=$gh->publish($batch,MonData::signature($d->watchlist),microtime(true)+30,MonData::settings($d->watchlist),$latest);
  d22_assert($res['written']===true&&($res['recovered_ack']??false)===true,'lost ack was not recovered');
  d22_assert($fake->putData===1,'ambiguous write caused duplicate PUT');
- d22_assert($res['sha']===MonRun::gitSha(MonRun::json($fake->git->data())),'remote hash mismatch');
+ $tree=$fake->git->commits[$fake->git->head]['tree'];
+ d22_assert($res['sha']===$fake->git->trees[$tree]['mon_data.json'],'remote hash mismatch');
 });
 d22_case('S1 GitHub PUT failed before commit: preserve pending for later, no duplicate PUT',function(){
  $d=reinforcement_fixture(1);$fake=new D22Git($d);$fake->dropDataBeforeWrite=true;
