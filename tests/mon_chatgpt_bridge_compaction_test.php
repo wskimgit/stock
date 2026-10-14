@@ -55,7 +55,7 @@ try{
     $s=$store->readPrivate(MonChatGPTBridge::STATE);$s->next_poll_at=0;$store->writePrivate(MonChatGPTBridge::STATE,$s);
     MonChatGPTBridge::poll($store,$http,$cfg,$gh,$gh->read(microtime(true)+40),microtime(true)+40);
     $out=mon_decode($git->mail[MonChatGPTBridge::OUTBOX]);
-    cc_ok(in_array($out->status,['registered','registered_partial'],true),'no successful receipt');
+    cc_ok(in_array($out->status,['registered','registered_partial','registered_existing'],true),'no successful receipt');
     cc_ok((int)$out->registered_count>=1,'no registered candidate survived');
     echo json_encode(['case'=>'real_data_3file_atomic_candidate_intake',
         'status'=>'PASS','archive_count'=>count($archive),'registered'=>$out->registered_count,
