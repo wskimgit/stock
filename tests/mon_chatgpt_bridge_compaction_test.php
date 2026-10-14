@@ -23,7 +23,10 @@ class CompactionFakeGit extends ReinforcementGit {
         return parent::transport($method,$url,$headers,$body,$timeout);
     }
 }
-$raw=file_get_contents(dirname(__DIR__).'/mon_data.json');
+// Frozen pre-compaction source makes the multi-file transaction deterministic.
+$observed=getenv('MON_D22_OBSERVED_SOURCE');
+$pathSource=is_string($observed)&&$observed!==''?$observed:dirname(__DIR__).'/mon_data.json';
+$raw=file_get_contents($pathSource);
 if(!is_string($raw))throw new RuntimeException('SOURCE_READ_FAILED');
 $d=mon_decode($raw);MonRun::validate($d);
 $git=new CompactionFakeGit($d);
