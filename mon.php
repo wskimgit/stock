@@ -1,6 +1,6 @@
 <?php
 /**
- * mon.php 1.8.7 -- measured throttling / KRX source recovery / independent trading refresh.
+ * mon.php 1.8.8 -- ERR-C D2.2 GitHub timeout/SHA recovery; measured throttling / KRX source recovery / independent trading refresh.
  * Repository: wskimgit/stock; data interface: mon_data.json schema 3.
  * MON owns analysis and result. The same daemon may publish an authenticated, immutable MON file pair.
  */
@@ -8,7 +8,7 @@ declare(strict_types=1);
 
 // Put mon.php in /volume1/web, open /mon.php in a browser, then press Start.
 // Reuse the existing SIS token and broker credential file in the same folder.
-const MON_VERSION = '1.8.7';
+const MON_VERSION = '1.8.8';
 const MON_PRIVATE_SYNC_CONFIG = __DIR__ . '/sis_private_sync_config.php';
 const MON_BROKER_CONFIG = __DIR__ . '/broker_config.local.php';
 const MON_CONFIG = [
@@ -724,7 +724,7 @@ final class MonData {
         }
     }
     public static function settings($w): array {
-        $defaults = ['request_poll_seconds'=>10, 'detail_budget_seconds'=>25, 'detail_symbol_budget_seconds'=>8, 'detail_jobs_per_tick'=>3, 'detail_publish_batch_size'=>3, 'detail_publish_max_delay_seconds'=>3, 'poll_seconds'=>60, 'mirror_seconds'=>180, 'force_mirror_before_analysis_seconds'=>60, 'collection_budget_seconds'=>45, 'tick_budget_seconds'=>55, 'publish_reserve_seconds'=>10, 'http_timeout_seconds'=>5, 'github_http_timeout_seconds'=>3, 'request_spacing_seconds'=>1.25, 'github_conflict_retries'=>2, 'auxiliary_max_age_seconds'=>900, 'action_price_max_age_seconds'=>300, 'future_clock_tolerance_seconds'=>5];
+        $defaults = ['request_poll_seconds'=>10, 'detail_budget_seconds'=>25, 'detail_symbol_budget_seconds'=>8, 'detail_jobs_per_tick'=>3, 'detail_publish_batch_size'=>3, 'detail_publish_max_delay_seconds'=>3, 'poll_seconds'=>60, 'mirror_seconds'=>180, 'force_mirror_before_analysis_seconds'=>60, 'collection_budget_seconds'=>45, 'tick_budget_seconds'=>55, 'publish_reserve_seconds'=>10, 'http_timeout_seconds'=>5, 'github_http_timeout_seconds'=>5, 'github_write_timeout_seconds'=>12, 'request_spacing_seconds'=>1.25, 'github_conflict_retries'=>2, 'auxiliary_max_age_seconds'=>900, 'action_price_max_age_seconds'=>300, 'future_clock_tolerance_seconds'=>5];
         foreach ($defaults as $k => $v) {
             $n = mon_number(mon_get($w->settings, $k, $v));
             if ($n === null || $n < 0) throw new MonFault('SETTINGS_INVALID');
@@ -738,7 +738,10 @@ final class MonData {
         $defaults['detail_publish_batch_size'] = min(6, max(1, (int)$defaults['detail_publish_batch_size']));
         $defaults['detail_publish_max_delay_seconds'] = min(10, max(0, $defaults['detail_publish_max_delay_seconds']));
         $defaults['http_timeout_seconds'] = min(5, max(0.1, $defaults['http_timeout_seconds']));
-        $defaults['github_http_timeout_seconds'] = min(3, max(0.1, $defaults['github_http_timeout_seconds']));
+        $defaults['github_http_timeout_seconds'] = min(8, max(2, $defaults['github_http_timeout_seconds']));
+        // GitHub can need longer to ingest a 1.5MiB source file than to read it.
+        // This is an individual HTTP cap, NOT a longer daemon tick or run deadline.
+        $defaults['github_write_timeout_seconds'] = min(12, max(3, $defaults['github_write_timeout_seconds']));
         $defaults['request_spacing_seconds'] = max(1.25, $defaults['request_spacing_seconds']);
         $defaults['tick_budget_seconds'] = min(55, max(1, $defaults['tick_budget_seconds']));
         $defaults['publish_reserve_seconds'] = min(10, max(1, $defaults['publish_reserve_seconds']));
@@ -850,7 +853,23 @@ final class MonGitHub {
             $latest['data']->collection=$batch; // Preserve MON-owned instructions and decisions.
             $raw=mon_json($latest['data'],false); if (strlen($raw)>MonRun::MAX_SOURCE) throw new MonFault('DATA_SIZE_EXCEEDED');
             $body=mon_json(['message'=>'mon: mirror collection '.$batch->collection_id,'content'=>base64_encode($raw),'sha'=>$latest['sha'],'branch'=>$this->config->get('MON_BRANCH','main')]);
-            $r=$this->http->request('PUT',$this->url,$headers,$body,$deadline,$settings['github_http_timeout_seconds']);
+            try {
+                $r=$this->http->request('PUT',$this->url,$headers,$body,$deadline,$settings['github_write_timeout_seconds']);
+            } catch (MonFault $e) {
+                // An ACK can be lost after GitHub has already committed the blob.
+                // Do not issue a second PUT until the remote SHA has been observed.
+                if(in_array($e->faultCode,['HTTP_TRANSPORT_28','HTTP_LATE_RESPONSE','HTTP_TRANSPORT_52','HTTP_TRANSPORT_56'],true)
+                   && $this->http->remaining($deadline)>=0.1){
+                    try {
+                        $confirmed=$this->read($deadline,$settings['github_http_timeout_seconds']);
+                        if(hash_equals(MonRun::gitSha($raw),$confirmed['sha']))
+                            return ['sha'=>$confirmed['sha'],'data'=>$confirmed['data'],'written'=>true,'recovered_ack'=>true];
+                    } catch (MonFault $confirmationError) {
+                        // Preserve local pending.json/detail_pending.json for next tick.
+                    }
+                }
+                throw $e;
+            }
             if (in_array($r['status'],[409,422],true) && $attempt < $settings['github_conflict_retries']) continue;
             $saved=MonHttp::decode($r);
             if (!is_string(mon_get(mon_get($saved,'content'),'sha'))) throw new MonFault('GITHUB_WRITE_UNCONFIRMED');
@@ -3204,7 +3223,7 @@ final class MonDaily {
     public function __construct(MonHttp $http,MonCollector $collector,MonConfig $config,?MonStore $store=null){$this->http=$http;$this->collector=$collector;$this->config=$config;$this->store=$store;}
     public static function retryable(string $code): bool {
         return preg_match('/^HTTP_TRANSPORT_(5|6|7|28|35|52|55|56|60)$/',$code)===1||
-            in_array($code,['HTTP_CIRCUIT_OPEN','HTTP_408','HTTP_429','BUDGET_EXHAUSTED','HTTP_LATE_RESPONSE','DETAIL_LATE_RESPONSE','DETAIL_KR_REFERENCE_PENDING'],true)||preg_match('/^HTTP_5\d\d$/',$code)===1;
+            in_array($code,['HTTP_CIRCUIT_OPEN','HTTP_408','HTTP_429','BUDGET_EXHAUSTED','HTTP_LATE_RESPONSE','DETAIL_LATE_RESPONSE','DETAIL_KR_REFERENCE_PENDING','DETAIL_ALTERNATIVE_SOURCE_PENDING'],true)||preg_match('/^HTTP_5\d\d$/',$code)===1;
     }
     private function checkpoint($request,?stdClass $source=null): ?stdClass {
         if(!$this->store)return null;
@@ -3439,9 +3458,26 @@ final class MonDaily {
         if($stock===null&&!$prefer){$map=mon_get($symbol->source_codes,'yahoo');$ticker=is_string($map)?$map:mon_get($map,'symbol');if(!is_string($ticker))throw new MonFault('YAHOO_MAPPING_MISSING');
             try{MonDetailStep::mark($this->store,$request,'fetch','YAHOO');$stock=$this->yahoo($symbol,$ticker,$target,$stockDeadline,$settings);}catch(MonFault $e){
                 $errors[]=$e->faultCode;
-                if($this->store)$this->store->writePrivate($routeName,(object)['target_completed_date'=>$target,'provider'=>'SPG_STOCKANALYSIS','reason'=>$e->faultCode]);$prefer=true;
+                if($this->store)$this->store->writePrivate($routeName,(object)['target_completed_date'=>$target,'provider'=>'SPG_STOCKANALYSIS','reason'=>$e->faultCode,'alternative_failures'=>(int)mon_get($route,'alternative_failures',0)]);$prefer=true;
             }}
-        if($stock===null){MonDetailStep::mark($this->store,$request,'fetch','SPG_STOCKANALYSIS');$stock=$this->stockAnalysis($symbol,$target,$stockDeadline,$settings);}
+        if($stock===null){
+            MonDetailStep::mark($this->store,$request,'fetch','SPG_STOCKANALYSIS');
+            try{$stock=$this->stockAnalysis($symbol,$target,$stockDeadline,$settings);}
+            catch(MonFault $e){
+                // A provider-level 404 or truncated 21-day history is NOT a
+                // verified identity failure and must not permanently block
+                // another valid provider's existing code/symbol mapping.
+                if(!in_array($e->faultCode,['HTTP_404','DETAIL_RS_HISTORY_MISSING'],true))throw $e;
+                $priorRoute=$this->store?$this->store->readPrivate($routeName):null;
+                $failures=max(1,(int)mon_get($priorRoute,'alternative_failures',0)+1);
+                if($this->store)$this->store->writePrivate($routeName,(object)[
+                    'target_completed_date'=>$target,'provider'=>'KIS',
+                    'reason'=>$e->faultCode,'alternative_failures'=>$failures,
+                    'retry_after'=>mon_iso(time()+300)]);
+                if($failures>=3)throw new MonFault('DETAIL_PROVIDER_UNAVAILABLE');
+                throw new MonFault('DETAIL_ALTERNATIVE_SOURCE_PENDING',300);
+            }
+        }
         $this->checkpoint($request,$stock);
         MonDetailStep::mark($this->store,$request,'source_proof',(string)mon_get($stock->origin,'source',''));
         if($cached instanceof stdClass){$comparison=MonBarConflict::compare($cached,$stock,$symbol);$this->conflictDiagnostics=$comparison['diagnostics'];
