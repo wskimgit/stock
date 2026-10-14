@@ -1,0 +1,30 @@
+name: MON v1.8.8 ERR-C D2.2 verified NAS package
+on:
+  push:
+    branches:
+      - fix/mon-errc-d22-20261014
+permissions:
+  contents: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify EXACT source hashes from successful PHP7.4 CI
+        run: |
+          set -eu
+          test "$(sha256sum mon.php | cut -d' ' -f1)" = "bfcccd0c5c21eddc6dba6405099381fa7080e9dfd00e4ef7aeb707bb8e3df5ff"
+          test "$(sha256sum mon_chatgpt_bridge.php | cut -d' ' -f1)" = "685e3b48484c1b758158bfed385ea9b7f222e99c97487b44e601600e9a6a638b"
+          test "$(sha256sum monitor.md | cut -d' ' -f1)" = "7a26f8a61c10b78e6bf1c668f5384592de50fe9a8c6bd2d5c4c0f7f9b23737b7"
+          sha256sum mon.php mon_chatgpt_bridge.php monitor.md
+      - name: Create manual NAS replacement package
+        run: |
+          zip -9 MON_v1.8.8_ERRC_D2.2_NAS.zip mon.php mon_chatgpt_bridge.php monitor.md mon_errc_d22_implementation.md
+          unzip -t MON_v1.8.8_ERRC_D2.2_NAS.zip
+          sha256sum MON_v1.8.8_ERRC_D2.2_NAS.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MON_v1.8.8_ERRC_D2.2_NAS
+          path: MON_v1.8.8_ERRC_D2.2_NAS.zip
+          compression-level: 0
+          retention-days: 30
