@@ -3223,7 +3223,7 @@ final class MonDaily {
     public function __construct(MonHttp $http,MonCollector $collector,MonConfig $config,?MonStore $store=null){$this->http=$http;$this->collector=$collector;$this->config=$config;$this->store=$store;}
     public static function retryable(string $code): bool {
         return preg_match('/^HTTP_TRANSPORT_(5|6|7|28|35|52|55|56|60)$/',$code)===1||
-            in_array($code,['HTTP_CIRCUIT_OPEN','HTTP_408','HTTP_429','BUDGET_EXHAUSTED','HTTP_LATE_RESPONSE','DETAIL_LATE_RESPONSE','DETAIL_KR_REFERENCE_PENDING'],true)||preg_match('/^HTTP_5\d\d$/',$code)===1;
+            in_array($code,['HTTP_CIRCUIT_OPEN','HTTP_408','HTTP_429','BUDGET_EXHAUSTED','HTTP_LATE_RESPONSE','DETAIL_LATE_RESPONSE','DETAIL_KR_REFERENCE_PENDING','DETAIL_ALTERNATIVE_SOURCE_PENDING'],true)||preg_match('/^HTTP_5\d\d$/',$code)===1;
     }
     private function checkpoint($request,?stdClass $source=null): ?stdClass {
         if(!$this->store)return null;
@@ -3458,9 +3458,26 @@ final class MonDaily {
         if($stock===null&&!$prefer){$map=mon_get($symbol->source_codes,'yahoo');$ticker=is_string($map)?$map:mon_get($map,'symbol');if(!is_string($ticker))throw new MonFault('YAHOO_MAPPING_MISSING');
             try{MonDetailStep::mark($this->store,$request,'fetch','YAHOO');$stock=$this->yahoo($symbol,$ticker,$target,$stockDeadline,$settings);}catch(MonFault $e){
                 $errors[]=$e->faultCode;
-                if($this->store)$this->store->writePrivate($routeName,(object)['target_completed_date'=>$target,'provider'=>'SPG_STOCKANALYSIS','reason'=>$e->faultCode]);$prefer=true;
+                if($this->store)$this->store->writePrivate($routeName,(object)['target_completed_date'=>$target,'provider'=>'SPG_STOCKANALYSIS','reason'=>$e->faultCode,'alternative_failures'=>(int)mon_get($route,'alternative_failures',0)]);$prefer=true;
             }}
-        if($stock===null){MonDetailStep::mark($this->store,$request,'fetch','SPG_STOCKANALYSIS');$stock=$this->stockAnalysis($symbol,$target,$stockDeadline,$settings);}
+        if($stock===null){
+            MonDetailStep::mark($this->store,$request,'fetch','SPG_STOCKANALYSIS');
+            try{$stock=$this->stockAnalysis($symbol,$target,$stockDeadline,$settings);}
+            catch(MonFault $e){
+                // A provider-level 404 or truncated 21-day history is NOT a
+                // verified identity failure and must not permanently block
+                // another valid provider's existing code/symbol mapping.
+                if(!in_array($e->faultCode,['HTTP_404','DETAIL_RS_HISTORY_MISSING'],true))throw $e;
+                $priorRoute=$this->store?$this->store->readPrivate($routeName):null;
+                $failures=max(1,(int)mon_get($priorRoute,'alternative_failures',0)+1);
+                if($this->store)$this->store->writePrivate($routeName,(object)[
+                    'target_completed_date'=>$target,'provider'=>'KIS',
+                    'reason'=>$e->faultCode,'alternative_failures'=>$failures,
+                    'retry_after'=>mon_iso(time()+300)]);
+                if($failures>=3)throw new MonFault('DETAIL_PROVIDER_UNAVAILABLE');
+                throw new MonFault('DETAIL_ALTERNATIVE_SOURCE_PENDING',300);
+            }
+        }
         $this->checkpoint($request,$stock);
         MonDetailStep::mark($this->store,$request,'source_proof',(string)mon_get($stock->origin,'source',''));
         if($cached instanceof stdClass){$comparison=MonBarConflict::compare($cached,$stock,$symbol);$this->conflictDiagnostics=$comparison['diagnostics'];
