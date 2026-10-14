@@ -40,3 +40,7 @@ jobs:
           MON_D22_OBSERVED_SOURCE="$RUNNER_TEMP/mon_pre_compaction.json" php -d memory_limit=96M tests/mon_chatgpt_bridge_compaction_test.php
       - name: Original manual-web lifecycle regression
         run: python3 tests/mon_web_test.py
+      - name: Current MON 1.8.8 bridge HTTP bootstrap and safe absence
+        run: python3 tests/mon_chatgpt_bootstrap_test.py
+      - name: Changed-source and documentation identities
+        run: sha256sum mon.php mon_chatgpt_bridge.php monitor.md mon_wiki.md mon_chatgpt_handoff.md tests/mon_errc_d22_test.php
