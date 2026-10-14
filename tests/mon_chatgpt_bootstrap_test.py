@@ -33,7 +33,7 @@ with tempfile.TemporaryDirectory(prefix="mon-chatgpt-http-") as tmp:
             except Exception:time.sleep(.04)
         else:raise RuntimeError("local server not available: "+(path/"server.log").read_text(errors="replace")[-1200:])
         check("bridge capability shown only with deployed module",
-              payload.get("ok") is True and payload.get("processor_version")=="1.8.7" and
+              payload.get("ok") is True and payload.get("processor_version")=="1.8.8" and
               payload.get("capabilities",{}).get("chatgpt_bridge")=="MON-CHATGPT-BRIDGE-1.0")
         check("read-only GET is not a daemon auto-launch",
               payload.get("nas_state",{}).get("running") is False)
