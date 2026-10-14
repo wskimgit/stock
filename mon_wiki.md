@@ -1,10 +1,17 @@
 # MON 실행·복구·통계 안내
 
-2026-10-14 KST · mon.php **1.8.7** · 지시문 **v4.15** · MON-P3.1 · MACD(12,26,9)
+2026-10-14 KST · mon.php **1.8.8** · 지시문 **v4.16** · MON-P3.1 · MACD(12,26,9)
 
 ChatGPT가 자율 선정하고 PHP가 검증·수치·진행·저장을 보조한다. 실제 절차는 [monitor.md](monitor.md)의 MON:INSTRUCTION 블록 하나를 따른다.
 
-## 이번 변경 — ChatGPT 핸드오프 1.8.7 / v4.15
+## 이번 변경 — ERR-C D2.2 / MON 1.8.8 / v4.16
+
+- GitHub 원격 GET/PUT 시간 분리, 대용량 PUT 최대 12초, 응답 유실 시 원격 SHA 확인. 기존 회차와 96MiB 보호 유지.
+- 충돌 journal보다 실제 원격 요청 ID/해시를 우선 확인해 등록 중복과 재게시를 방지한다.
+- 원천별 404·일봉 이력 부족은 종목 단위 대체 원천 재시도 후 증명 불가이면 차단·참고로 보존. 가격/분할 기준은 낮추지 않는다.
+- [ERR-C D2.2 설계](mon_errc_d22_handoff_recovery_design.md), [변경 구역 시험](tests/mon_errc_d22_test.php), [자동 시뮬레이션](.github/workflows/mon_errc_d22.yml). 배포·실가동 검증은 코드 시험과 별도다.
+
+## 이전 변경 — ChatGPT 핸드오프 1.8.7 / v4.15
 
 - ChatGPT 후보 요청 `mon_chatgpt_handoff.json` → 수동 시작 데몬의 기존 종목별 상세 수집 → `mon_chatgpt_response.json`에서 검증된 자료를 ChatGPT가 읽음 → ChatGPT 최종 결정 → 기존 MON 결과 파일 쌍·아카이브 원자 게시와 SHA 확인. PHP가 ChatGPT 판단을 자동 생성하지 않는다.
 - 대상은 공식 신원 확인된 종목이며 미등록 신원은 별도 증빙 절차로 보완한다. 등록 중 복구 아카이브 발생 시 단일 PUT을 금지하고 기존 원자 게시 journal을 사용한다. 다수 종목은 30개씩 순차 처리하고 미완료를 허위 성공으로 전환하지 않는다.
