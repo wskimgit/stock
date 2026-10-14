@@ -149,6 +149,73 @@ d22_case('S3 provider 404/missing history retries other routes, then checkpoint-
  d22_assert(MonDaily::retryable($expected[0])&&!MonDaily::retryable($expected[2]),'retry/block policy wrong');
  d22_assert($calls>=3,'alternatives not queried');
 });
+
+d22_case('S4 quote-only source advance keeps original detail SHA and accepts ChatGPT decision',function(){
+ $d=reinforcement_fixture(1);$sid=$d->watchlist->symbols[0]->symbol_id;
+ $d->collection->detail_responses->$sid=progress_response($d,$sid);
+ $oldSource=MonRun::gitSha(MonRun::json($d));
+ $q=(object)['contract'=>MonChatGPTBridge::CONTRACT,'stage'=>'decision',
+   'request_id'=>'d22-stable-source','candidate_ids'=>[$sid],
+   'candidate_request_sha'=>str_repeat('a',40),
+   'details_receipt_sha'=>str_repeat('b',40),
+   'source_blob_sha'=>$oldSource,
+   'selected'=>[(object)['symbol_id'=>$sid,'reason'=>'Synthetic eligible benchmark-adjusted positive RS after MACD']],
+   'references'=>[]];
+ $detailMethod=new ReflectionMethod('MonChatGPTBridge','detailRows');$detailMethod->setAccessible(true);
+ $oldRows=$detailMethod->invoke(null,$d,$q);
+ $state=(object)[
+  'candidate_request_id'=>$q->request_id,'candidate_request_sha'=>$q->candidate_request_sha,
+  'candidate_ids_sha256'=>hash('sha256',mon_json($q->candidate_ids,false)),
+  'last_detail_receipt_sha'=>$q->details_receipt_sha,
+  'last_detail_source_sha'=>$oldSource,
+  'last_detail_rows_sha256'=>MonRun::digest($oldRows[0]),
+  'last_detail_stable_source_sha256'=>MonRun::digest((object)['analysis'=>$d->analysis,'watchlist'=>$d->watchlist])
+ ];
+ $current=mon_decode(MonRun::json($d));$current->collection->collection_id='d22-later-quote-only';
+ $fake=new D22Git($current);
+ $msg=MonRun::json($q);$fake->mail[MonChatGPTBridge::INBOX]=$msg;
+ $fake->mailSha[MonChatGPTBridge::INBOX]=MonRun::gitSha($msg);
+ $dir=d22_dir();$store=new MonStore($dir);$cfg=progress_test_config($dir);
+ $store->writePrivate(MonChatGPTBridge::STATE,$state);
+ $http=new MonHttp(null,[$fake,'transport']);$gh=new MonGitHub($http,$cfg);
+ $latest=$gh->read(microtime(true)+40);
+ d22_assert($latest['sha']!==$oldSource,'no quote-only source advancement');
+ MonChatGPTBridge::poll($store,$http,$cfg,$gh,$latest,microtime(true)+40);
+ $out=mon_decode($fake->mail[MonChatGPTBridge::OUTBOX]);
+ d22_assert($out->stage==='decision'&&$out->status==='publication_pending','decision rejected benign quote-only source change: '.(string)mon_get($out,'error_code'));
+ $journal=$store->readPrivate(MonChatGPTBridge::STATE);
+ d22_assert(is_string(mon_get($journal,'publication_job_id')),'publication not enqueued');
+});
+d22_case('S4 meaningful analysis change rejects stale decision and leaves no publication',function(){
+ $d=reinforcement_fixture(1);$sid=$d->watchlist->symbols[0]->symbol_id;
+ $d->collection->detail_responses->$sid=progress_response($d,$sid);
+ $oldSource=MonRun::gitSha(MonRun::json($d));
+ $q=(object)['contract'=>MonChatGPTBridge::CONTRACT,'stage'=>'decision',
+   'request_id'=>'d22-meaningful-change','candidate_ids'=>[$sid],
+   'candidate_request_sha'=>str_repeat('a',40),'details_receipt_sha'=>str_repeat('b',40),
+   'source_blob_sha'=>$oldSource,
+   'selected'=>[(object)['symbol_id'=>$sid,'reason'=>'Synthetic candidate']],'references'=>[]];
+ $detailMethod=new ReflectionMethod('MonChatGPTBridge','detailRows');$detailMethod->setAccessible(true);
+ $rows=$detailMethod->invoke(null,$d,$q);
+ $state=(object)[
+  'candidate_request_id'=>$q->request_id,'candidate_request_sha'=>$q->candidate_request_sha,
+  'candidate_ids_sha256'=>hash('sha256',mon_json($q->candidate_ids,false)),
+  'last_detail_receipt_sha'=>$q->details_receipt_sha,'last_detail_source_sha'=>$oldSource,
+  'last_detail_rows_sha256'=>MonRun::digest($rows[0]),
+  'last_detail_stable_source_sha256'=>MonRun::digest((object)['analysis'=>$d->analysis,'watchlist'=>$d->watchlist])
+ ];
+ $latestData=mon_decode(MonRun::json($d));
+ $latestData->analysis->materially_changed='test_verified_new_company_risk';
+ $fake=new D22Git($latestData);$msg=MonRun::json($q);
+ $fake->mail[MonChatGPTBridge::INBOX]=$msg;$fake->mailSha[MonChatGPTBridge::INBOX]=MonRun::gitSha($msg);
+ $dir=d22_dir();$store=new MonStore($dir);$cfg=progress_test_config($dir);
+ $store->writePrivate(MonChatGPTBridge::STATE,$state);
+ $http=new MonHttp(null,[$fake,'transport']);$gh=new MonGitHub($http,$cfg);
+ MonChatGPTBridge::poll($store,$http,$cfg,$gh,$gh->read(microtime(true)+30),microtime(true)+30);
+ $out=mon_decode($fake->mail[MonChatGPTBridge::OUTBOX]);
+ d22_assert($out->status==='refresh_source'&&$out->error_code==='MON_BRIDGE_STALE_SOURCE','material change passed stale decision');
+ d22_assert(mon_get($store->readPrivate(MonChatGPTBridge::STATE),'publication_job_id')===null,'stale decision enqueued publication');
+});
 $passed=count(array_filter($cases,static function($c){return $c['pass'];}));
 echo json_encode(['suite'=>'MON-ERRC-D2.2','passed'=>$passed,'failed'=>count($cases)-$passed,'cases'=>$cases],JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n";
 foreach($dirs as $dir){
