@@ -1,13 +1,13 @@
 # MON 진단
 
 실행: mon-20261014-2117-kst-001
-관측: 2026-10-15T03:49:17Z
+관측: 2026-10-15T07:16:47Z
 출처: nas_observation
 
 결과 저장: 미확인
 증거 저장: 게시 대기
 마지막 확인 커밋: 없음
-현재 오류: BUDGET_EXHAUSTED
+현재 오류: DETAIL_PRICE_BASIS_CONFLICT
 
 - candidate_request_id: match
 - candidate_request_sha: match
