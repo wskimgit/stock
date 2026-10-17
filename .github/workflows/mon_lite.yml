@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r9'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r13'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -122,7 +122,7 @@ jobs:
           php -r 'require "mon.php"; $x=LiteYahoo::benchmarkCandidates("JP"); if ($x!==["^TOPX","1306.T","^N225"]) {var_export($x); exit(1);} echo "JP benchmark fallback policy PASS\n";'
           rm -rf mon_runtime
 
-      - name: Always-three MS7 recommendation contract
+      - name: Reference-only MS7 recommendation contract
         run: |
           set -eu
           php -r 'require "mon.php"; $a=["metrics"=>["RS20_pp"=>5,"last_close"=>110,"MA5"=>105,"MA20"=>100],"technical"=>["technical_qualified"=>true,"histogram"=>1]]; $m=LiteSwing::ms7FromAnalysis($a); if($m["code"]!=="M2") {var_export($m); exit(1);} echo "MS7 strong mapping PASS\n";'
@@ -133,14 +133,174 @@ jobs:
         run: |
           set -eu
           php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","삼성전자","M0"],["KR","KOSPI","105560","KB금융","M1"],["KR","KOSPI","000660","SK하이닉스","W"],["US","NASDAQ","AAPL","Apple","M1"],["US","NASDAQ","NVDA","NVIDIA","M2"],["US","NYSE","JPM","JPMorgan","M0"],["JP","TSE","7203","Toyota","M1"],["JP","TSE","6758","Sony","M0"],["JP","TSE","8306","MUFG","W"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[3],"ms7"=>["code"=>$x[4]],"reason"=>"ChatGPT independent reason", "risk_note"=>"Independent risk"];} $out=LiteMonitor::normalizeChatgptDecision($sel); if(count($out)!==9) exit(1); if($out[4]["symbol_id"]!=="US|NASDAQ|NVDA"||$out[4]["name"]!=="NVIDIA"||$out[4]["ms7"]["code"]!=="M2"||$out[4]["ms7"]["confidence"]!=="CHATGPT_FINAL") exit(2); echo "ChatGPT name+code+MS7 preservation PASS\n";'
-          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","Samsung"],["KR","KOSPI","105560","KB"],["US","NASDAQ","AAPL","Apple"],["US","NASDAQ","NVDA","NVIDIA"],["US","NYSE","JPM","JPMorgan"],["JP","TSE","7203","Toyota"],["JP","TSE","6758","Sony"],["JP","TSE","8306","MUFG"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[3],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_REQUIRES_THREE_PER_COUNTRY";} if(!$ok) exit(1); echo "exact three per country PASS\n";'
+          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","Samsung"],["KR","KOSPI","105560","KB"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[3],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} if(count(LiteMonitor::normalizeChatgptDecision($sel))!==2||LiteMonitor::normalizeChatgptDecision([])!==[]) exit(1); echo "partial and zero selections accepted without filler PASS\n";'
           php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930"],["KR","KOSPI","105560"],["KR","KOSPI","000660"],["US","NASDAQ","AAPL"],["US","NASDAQ","NVDA"],["US","NYSE","JPM"],["JP","TSE","7203"],["JP","TSE","6758"],["JP","TSE","8306"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_NAME_REQUIRED";} if(!$ok) exit(1); echo "decision name required PASS\n";'
           grep -F "'authority'=>'chatgpt_final'" mon.php
           grep -F "'analysis_reference'" mon.php
           grep -F "DECISION_AUTHORITY_REQUIRED" mon.php
           grep -F "DECISION_NAME_REQUIRED" mon.php
+          php -r 'require "mon.php"; $sel=[]; foreach([["005930","Samsung"],["000660","Hynix"],["105560","KB"],["035420","Naver"]] as $x)$sel[]=["symbol_id"=>"KR|KOSPI|".$x[0],"name"=>$x[1],"ms7"=>["code"=>"W"],"reason"=>"Independent current reason","risk_note"=>"Risk note"]; $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_LIMIT_INVALID";} if(!$ok) exit(1); echo "max-three per country PASS\n";'
           grep -F "\$x['name'].' ('.\$x['symbol_id'].') · MS7" mon.php
           rm -rf mon_runtime
+      - name: Final-decision persistence failure injection
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          MON_TEST_SOURCE="$test_dir/mon.php" php <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require getenv('MON_TEST_SOURCE');
+          function ci_assert(bool $ok,string $message): void {if(!$ok)throw new RuntimeException($message);}
+          function ci_call(LiteMonitor $monitor,string $method,array $args=[]) {$r=new ReflectionMethod(LiteMonitor::class,$method);$r->setAccessible(true);return $r->invokeArgs($monitor,$args);}
+          final class CiGithub {
+              public $files=[],$puts=[],$gets=[],$failBefore=[],$failAfter=[],$failRead=[],$badRead=[];
+              public function seed(string $path,string $content): void {$this->files[$path]=['content'=>$content,'sha'=>lm_git_blob_sha($content),'commit_sha'=>null];}
+              public function githubGet(string $path,bool $force=false): ?array {
+                  $this->gets[]=[$path,$force];
+                  $written=false;foreach($this->puts as $put)if($put['path']===$path)$written=true;
+                  if($force&&$written&&($this->failRead[$path]??0)>0){$this->failRead[$path]--;throw new LiteMonFault('CI_READ_FAILED');}
+                  $value=$this->files[$path]??null;
+                  if($force&&$written&&($this->badRead[$path]??0)>0){$this->badRead[$path]--;return $value?array_merge($value,['content'=>$value['content'].'CORRUPT']):null;}
+                  return $value;
+              }
+              public function githubPut(string $path,string $content,string $message,?string $oldSha=null): array {
+                  if(($this->failBefore[$path]??0)>0){$this->failBefore[$path]--;throw new LiteMonFault('CI_PUT_FAILED');}
+                  $current=$this->files[$path]??null;
+                  ci_assert(($current['sha']??null)===$oldSha,'optimistic SHA precondition: '.$path);
+                  $commit=sha1('ci-commit-'.count($this->puts));$sha=lm_git_blob_sha($content);
+                  $this->files[$path]=['content'=>$content,'sha'=>$sha,'commit_sha'=>$commit];$this->puts[]=['path'=>$path,'content'=>$content];
+                  if(($this->failAfter[$path]??0)>0){$this->failAfter[$path]--;throw new LiteMonFault('CI_COMMIT_ACK_LOST');}
+                  return ['blob_sha'=>$sha,'commit_sha'=>$commit,'unchanged'=>false];
+              }
+              public function clearRequestCache(): void {}
+              public function resetStats(): void {}
+              public function stats(): array {return [];}
+              public function get(): string {throw new RuntimeException('Market/network fetch is forbidden in publication recovery');}
+          }
+          function ci_monitor(CiGithub $http): LiteMonitor {
+              $monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();
+              $config=new LiteConfig();$config->githubToken='synthetic-ci-token';
+              foreach(['cfg'=>$config,'http'=>$http] as $name=>$value){$r=new ReflectionProperty(LiteMonitor::class,$name);$r->setAccessible(true);$r->setValue($monitor,$value);}
+              return $monitor;
+          }
+          function ci_reset(): CiGithub {
+              foreach(LiteRuntime::FILES as $key){$path=LiteRuntime::path($key.'.php');if(is_file($path))unlink($path);}
+              $http=new CiGithub();$http->seed('mon_data.json',lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'version'=>MON_LITE_VERSION,'build'=>MON_LITE_BUILD,'scan'=>['decision_status'=>'awaiting_chatgpt'],'results'=>[],'errors'=>[]]));
+              return $http;
+          }
+          function ci_selected(): array {
+              $out=[];foreach([['KR','KOSPI','005930','Samsung'],['US','NASDAQ','NVDA','NVIDIA'],['JP','TSE','7203','Toyota']] as $x)$out[]=['symbol_id'=>$x[0].'|'.$x[1].'|'.$x[2],'name'=>$x[3],'ms7'=>['code'=>'W'],'reason'=>'Fresh independent CI evidence','risk_note'=>'Evidence uncertainty'];
+              return LiteMonitor::normalizeChatgptDecision($out);
+          }
+          function ci_decide(LiteMonitor $monitor,string $rid='ci-request',?array $selected=null,string $handoffSha='ci-handoff-sha'): void {
+              $context=['outcome'=>$selected===[]?'no_candidates':'completed','conclusion'=>'Independent current review completed; preserve this final conclusion.','analysis_at'=>lm_iso(),'independent_sources'=>[['url'=>'https://example.com/source-a','checked_at'=>lm_iso()],['url'=>'https://example.org/source-b','checked_at'=>lm_iso()]]];
+              ci_call($monitor,'saveDecision',[$rid,$selected??ci_selected(),['KR|KOSPI|999999'],'ci-evaluation',['KR'=>'KR current independent review','US'=>'US current independent review','JP'=>'JP current independent review'],$handoffSha,$context]);
+          }
+          function ci_saved(CiGithub $http,string $rid='ci-request'): void {
+              $result=LiteRuntime::read('result');$data=lm_decode($http->files['mon_data.json']['content']);$response=lm_decode($http->files['mon_chatgpt_response.json']['content']);
+              ci_assert(lm_get($result,'save_status')==='saved','local result must be saved');
+              ci_assert(lm_get($result,'request_id')===$rid,'result request identity');
+              ci_assert(lm_get($response,'request_id')===$rid&&lm_get($response,'status')==='saved','receipt request identity');
+              ci_assert(lm_get($result,'pair_readback_verified')===true,'local pair verified');
+              ci_assert(lm_get($result,'receipt_readback_verified')===true,'local receipt verified');
+              ci_assert(lm_get(lm_get($data,'chatgpt_final'),'request_id')===$rid,'data final request identity');
+              ci_assert(lm_get($response,'pair_readback_verified')===true,'receipt pair verified');
+              foreach(['mon_result.md','mon_data.json','mon_chatgpt_response.json'] as $path){$seen=false;foreach($http->gets as $get)if($get[0]===$path&&$get[1])$seen=true;ci_assert($seen,'forced readback required: '.$path);}
+              $conclusion=(string)lm_get($result,'conclusion','');ci_assert(strlen($conclusion)>=8&&strpos($http->files['mon_result.md']['content'],$conclusion)!==false,'conclusion retained in Markdown');
+          }
+          foreach(['mon_result.md','mon_data.json','mon_chatgpt_response.json'] as $failPath){
+              foreach(['failBefore','failAfter','failRead','badRead'] as $failure){
+                  $http=ci_reset();$http->{$failure}[$failPath]=1;$monitor=ci_monitor($http);$thrown=false;
+                  try{ci_decide($monitor);}catch(Throwable $error){$thrown=true;}
+                  ci_assert($thrown,'failure must be surfaced: '.$failure.' '.$failPath);
+                  $pending=LiteRuntime::read('result');ci_assert(lm_get($pending,'save_status')!=='saved','must not mark saved before receipt: '.$failure.' '.$failPath);
+                  ci_assert(in_array(lm_get($pending,'save_status'),['pending_remote','pending_receipt'],true),'durable pending status');
+                  $frozen=lm_json(lm_get($pending,'outbox'));$first=(string)lm_get(lm_get($pending,'outbox'),'markdown','');
+                  ci_assert($first!=='','durable Markdown exists before remote completion');
+                  unset($monitor);$restarted=ci_monitor($http);ci_call($restarted,'retryPublication');ci_saved($http);
+                  $oldOutbox=lm_decode($frozen);$newOutbox=lm_get(LiteRuntime::read('result'),'outbox');foreach(['markdown','data_json','response_json'] as $key){$prior=lm_get($oldOutbox,$key);if(is_string($prior))ci_assert(lm_get($newOutbox,$key)===$prior,'frozen outbox payload must survive restart: '.$key);}
+                  ci_assert($http->files['mon_result.md']['content']===$first,'immutable result replay');
+                  $puts=count($http->puts);ci_call(ci_monitor($http),'retryPublication');ci_assert(count($http->puts)===$puts,'saved retry must not rewrite remote files');
+                  echo 'PASS failure+restart '.$failure.' '.$failPath."\n";
+              }
+          }
+          $http=ci_reset();$monitor=ci_monitor($http);ci_decide($monitor,'ci-empty',[]);ci_saved($http,'ci-empty');
+          ci_assert(lm_get(LiteRuntime::read('result'),'selected')===[],'zero-pick conclusion must not invent filler');
+          echo "PASS zero-pick conclusion persistence\n";
+          $http=ci_reset();$http->failBefore['mon_data.json']=1;$monitor=ci_monitor($http);
+          try{ci_decide($monitor);}catch(Throwable $expected){}
+          $pending=lm_json(LiteRuntime::read('result'));$before=count($http->puts);
+          $summary=['scan_id'=>'ci-new-scan','at'=>lm_iso(),'done'=>0,'pending'=>1,'candidate_count'=>1,'eligible_count'=>0,'results'=>[],'errors'=>[]];
+          try{ci_call($monitor,'publishData',[$summary,[['symbol_id'=>'KR|KOSPI|005930']]]);}catch(LiteMonFault $expected){}
+          ci_assert(count($http->puts)===$before,'reference scan must not overwrite pending final');
+          ci_assert(lm_json(LiteRuntime::read('result'))===$pending,'reference scan must preserve pending result');
+          ci_call(ci_monitor($http),'retryPublication');ci_saved($http);
+          echo "PASS pending final blocks reference overwrite\n";
+          foreach([lm_iso(time()+60),null] as $newerAnalysisAt){
+              $http=ci_reset();$http->failBefore['mon_data.json']=1;$monitor=ci_monitor($http);try{ci_decide($monitor);}catch(LiteMonFault $expected){}
+              $pending=LiteRuntime::read('result');$selected=lm_json(lm_get($pending,'selected'));$before=count($http->puts);
+              $newer=['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'version'=>MON_LITE_VERSION,'build'=>MON_LITE_BUILD,'chatgpt_final'=>['authority'=>'chatgpt_final','request_id'=>'ci-newer-direct','decision_id'=>'ci-newer-direct-id','analysis_at'=>$newerAnalysisAt,'selected'=>[]]];
+              $http->seed('mon_data.json',lm_json($newer));$http->seed('mon_result.md','Direct newer final must remain authoritative.');$dataBytes=$http->files['mon_data.json']['content'];
+              ci_call(ci_monitor($http),'retryPublication');
+              ci_assert(count($http->puts)===$before,'older pending must not write over changed direct final');
+              ci_assert($http->files['mon_data.json']['content']===$dataBytes&&$http->files['mon_result.md']['content']==='Direct newer final must remain authoritative.','direct final pair retained');
+              ci_assert(lm_get(LiteRuntime::read('result'),'save_status')!=='saved'&&lm_json(lm_get(LiteRuntime::read('result'),'selected'))===$selected,'older pending retained without false success');
+              ci_assert(lm_get(ci_monitor($http)->state(),'last_publication_error')==='CONCURRENT_DECISION_CONFLICT','concurrent final conflict is explicit');
+              echo 'PASS newer direct final protects against old pending '.($newerAnalysisAt===null?'identity guard':'freshness guard')."\n";
+          }
+          foreach([false,true] as $wrongReceiptPolicy){
+              $http=ci_reset();$http->seed('mon_chatgpt_handoff.json',lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'decision','request_id'=>'ci-request','authority'=>'chatgpt_final','independent_analysis'=>true]));LiteRuntime::write('request',(object)['request_id'=>'ci-request']);
+              $http->failBefore['mon_data.json']=1;try{ci_decide(ci_monitor($http),'ci-request',null,$http->files['mon_chatgpt_handoff.json']['sha']);}catch(LiteMonFault $expected){}
+              $pending=LiteRuntime::read('result');$originalOutbox=lm_json(lm_get($pending,'outbox'));$before=count($http->puts);
+              $final=['contract'=>'MON-LITE-RESULT-2.1','policy'=>MON_LITE_POLICY,'authority'=>'chatgpt_final','independent_analysis'=>true,'request_id'=>'ci-direct-verified','evaluation_id'=>'ci-direct-eval','decision_id'=>'ci-direct-verified-id','analysis_at'=>lm_iso(time()+60),'selected'=>[]];
+              $http->seed('mon_result.md','Verified newer independent final conclusion.');$http->seed('mon_data.json',lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'chatgpt_final'=>$final]));
+              $receipt=['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>$wrongReceiptPolicy?'MON-WRONG-POLICY':MON_LITE_POLICY,'stage'=>'decision','authority'=>'chatgpt_final','status'=>'saved','request_id'=>$final['request_id'],'evaluation_id'=>$final['evaluation_id'],'decision_id'=>$final['decision_id'],'pair_readback_verified'=>true,'data_blob_sha'=>$http->files['mon_data.json']['sha'],'result_blob_sha'=>$http->files['mon_result.md']['sha']];
+              $http->seed('mon_chatgpt_response.json',lm_json($receipt));ci_call(ci_monitor($http),'retryPublication');$result=LiteRuntime::read('result');
+              ci_assert(count($http->puts)===$before,'supersession verification must not mutate remote results');ci_assert(lm_json(lm_get($result,'outbox'))===$originalOutbox,'supersession retains old durable outbox');
+              if($wrongReceiptPolicy){ci_assert(lm_get($result,'save_status')!=='superseded','wrong-policy receipt cannot supersede old pending');echo "PASS wrong-policy receipt does not supersede pending\n";}
+              else{ci_assert(lm_get($result,'save_status')==='superseded'&&lm_get(lm_get($result,'superseded_by'),'decision_id')===$final['decision_id'],'verified newer result automatically supersedes old pending');ci_assert(lm_get(ci_monitor($http)->state(),'publication_pending')===false,'verified newer final clears publication blockade');ci_call(ci_monitor($http),'processMailbox');ci_assert(lm_get(LiteRuntime::read('result'),'save_status')==='superseded'&&count($http->puts)===$before,'old unchanged handoff cannot resurrect superseded outbox');echo "PASS verified newer final supersedes pending without overwrite or resurrection\n";}
+          }
+          foreach([false,true] as $empty){
+              $http=ci_reset();$monitor=ci_monitor($http);$rid=$empty?'ci-json-empty':'ci-json';
+              $ids=$empty?[]:['KR|KOSPI|005930','US|NASDAQ|NVDA','JP|TSE|7203','KR|KOSPI|005930','KR|NASDAQ|005930'];
+              $http->seed('mon_chatgpt_handoff.json',lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'candidates','request_id'=>$rid,'candidate_ids'=>$ids]));
+              ci_call($monitor,'processMailbox');$request=LiteRuntime::read('request');
+              ci_assert(lm_get($request,'stage')==='details','candidate JSON produces durable details proof');
+              if(!$empty){ci_assert(count((array)lm_get($request,'unresolved_ids',[]))===3,'candidate duplicate is deduplicated');ci_assert(count((array)lm_get($request,'rejected_ids',[]))===1,'wrong-country exchange is rejected');}
+              $packet=['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'decision','request_id'=>$rid,'authority'=>'chatgpt_final','independent_analysis'=>true,'candidate_request_sha'=>lm_get($request,'candidate_request_sha'),'details_receipt_sha'=>lm_get($request,'details_blob_sha'),'evaluation_id'=>lm_get($request,'evaluation_id'),'selected'=>$empty?[]:ci_selected(),'market_view'=>['KR'=>'KR fresh independent analysis','US'=>'US fresh independent analysis','JP'=>'JP fresh independent analysis'],'analysis_at'=>lm_iso(),'outcome'=>$empty?'no_candidates':'completed','conclusion'=>'Independent current review completed with a concrete final conclusion.','independent_sources'=>$empty?[]:[['url'=>'https://example.com/current-a','checked_at'=>lm_iso()],['url'=>'https://example.org/current-b','checked_at'=>lm_iso()]]];
+              $wrong=$packet;$wrong['evaluation_id']='wrong-proof';$http->seed('mon_chatgpt_handoff.json',lm_json($wrong));$blocked=false;
+              try{ci_call($monitor,'processMailbox');}catch(LiteMonFault $fault){$blocked=$fault->faultCode==='DECISION_PROOF_MISMATCH';}
+              ci_assert($blocked,'wrong proof cannot become a saved decision');ci_assert(lm_get(LiteRuntime::read('result'),'request_id')===null,'invalid proof does not create result');
+              $http->seed('mon_chatgpt_handoff.json',lm_json($packet));$http->failAfter['mon_chatgpt_response.json']=1;
+              try{ci_call($monitor,'processMailbox');}catch(LiteMonFault $expected){}
+              ci_assert(lm_get(LiteRuntime::read('result'),'save_status')==='pending_receipt','JSON decision reaches receipt phase');
+              ci_call(ci_monitor($http),'retryPublication');ci_saved($http,$rid);
+              ci_assert(count((array)lm_get(LiteRuntime::read('result'),'selected',[]))===($empty?0:3),'JSON nested selected values retained');
+              $puts=count($http->puts);ci_call(ci_monitor($http),'processMailbox');ci_assert(count($http->puts)===$puts,'same JSON handoff is idempotent');
+              echo 'PASS candidates-details-decision JSON roundtrip '.($empty?'zero picks':'nested views and selected')."\n";
+          }
+          foreach(['pending_remote','saved'] as $legacyStatus){
+              $http=ci_reset();$created=lm_iso(time()-7200);$legacy=['save_status'=>$legacyStatus,'request_id'=>'ci-legacy','authority'=>'chatgpt_final','selected'=>ci_selected(),'unresolved_ids'=>[],'evaluation_id'=>'ci-eval-legacy','market_view'=>['KR'=>'Legacy KR view','US'=>'Legacy US view','JP'=>'Legacy JP view'],'handoff_sha'=>'ci-legacy-sha','saved_at'=>$created,'retry_at'=>$created];
+              LiteRuntime::write('result',(object)$legacy);ci_call(ci_monitor($http),'retryPublication');ci_saved($http,'ci-legacy');
+              ci_assert(lm_get(LiteRuntime::read('result'),'saved_at')===$created,'legacy original timestamp retained');
+              echo 'PASS r12 '.$legacyStatus." migration without receipt\n";
+          }
+          $http=ci_reset();LiteRuntime::write('result',(object)['sentinel'=>'previous-complete-local-result']);$original=file_get_contents(LiteRuntime::path('result.php'));
+          $fill=[];while(LiteRuntime::view()['file_count']<LiteRuntime::MAX_FILES){$path=LiteRuntime::path('ci-capacity-'.count($fill));file_put_contents($path,'synthetic capacity fixture');$fill[]=$path;}
+          $blocked=false;try{ci_decide(ci_monitor($http));}catch(LiteMonFault $fault){$blocked=$fault->faultCode==='RUNTIME_FILE_COUNT_LIMIT';}
+          ci_assert($blocked&&count($http->puts)===0,'no remote writes when durable local save fails');ci_assert(file_get_contents(LiteRuntime::path('result.php'))===$original,'failed local save retains previous complete result');foreach($fill as $path)unlink($path);
+          echo "PASS local capacity failure preserves prior result before any remote write\n";
+          file_put_contents(LiteRuntime::path('.write.tmp'),MON_LITE_PREFIX.'{"partial":');
+          ci_assert(lm_get(LiteRuntime::read('result'),'sentinel')==='previous-complete-local-result','restart ignores interrupted temporary write');
+          ci_decide(ci_monitor($http));ci_saved($http);ci_assert(!is_file(LiteRuntime::path('.write.tmp')),'successful atomic save consumes temporary file');
+          echo "PASS interrupted local temporary write recovery\n";
+          $view=LiteRuntime::view();ci_assert($view['file_count']<=LiteRuntime::MAX_FILES&&$view['bytes']<=LiteRuntime::MAX_TOTAL,'bounded runtime');
+          echo 'PASS runtime bounds; tested source sha256 '.hash_file('sha256',getenv('MON_TEST_SOURCE'))."\n";
+          PHP
+
       - name: Persisted JSON object normalization
         run: |
           php -r 'require "mon.php"; $x=json_decode("{\"results\":[{\"eligible\":true,\"metrics\":{\"RS20_pp\":10}}]}"); $a=lm_array($x); if (!is_array($a) || !is_array($a["results"][0]) || !is_array($a["results"][0]["metrics"])) exit(1); echo "persisted normalization PASS\\n";'
@@ -158,3 +318,4 @@ jobs:
 
       - name: Source identities
         run: sha256sum mon.php monitor.md MON-Wiki.md mon_data.json mon_result.md mon_chatgpt_handoff.json mon_chatgpt_response.json
+

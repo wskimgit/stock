@@ -1,25 +1,28 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
-> 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r12`**  
-> 단일 권위 저장소: **`wskimgit/stock`**  
-> 실행 권위 문서: **`monitor.md`**  
-> 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
-> 실행 코드: **`mon.php`**  
+> 운영 규격: **MON-LITE-OPS-2.2.3**
+> Build: **`MON-LITE-2.2.3-20261017-r13`**
+> 단일 권위 저장소: **`wskimgit/stock`**
+> 실행 권위 문서: **`monitor.md`**
+> 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.
+> 실행 코드: **`mon.php`**
 > NAS: `/web/mon.php`, PHP 7.4+, 웹 수동 시작, cron/자동주문 없음
 
 ## 1. 목적
-한·미·일 스윙 후보를 **완료 일봉** 기준으로 가볍게 감시한다. PHP/MON은 수집·계산·3×3 참고후보·참고 MS7을 제공하지만 **최종 추천권은 없다.** 최종 결정은 ChatGPT가 MON 결과를 보조자료로만 사용하고 최신 시장·업종·가격·뉴스·상대강도·추격위험·리스크를 독립적으로 재검토한 뒤 **한국·미국·일본 각 3종목을 직접 선정하고 최종 MS7을 결정**한다. MON 시스템 내부의 최종 추천 권한은 ChatGPT decision에만 있다. 주문은 실행하지 않는다.
+
+한·미·일 스윙 후보를 **완료 일봉** 기준으로 가볍게 감시한다. PHP/MON은 수집·계산·3×3 참고후보·참고 MS7을 제공하지만 **최종 추천권은 없다.** 최종 결정은 ChatGPT가 MON 결과를 보조자료로만 사용하고 최신 시장·업종·가격·뉴스·상대강도·추격위험·리스크를 독립적으로 재검토한 뒤 **한국·미국·일본별 최대 3종목과 최종 MS7을 직접 결정**한다. 기본 목표는 나라별 3종목이지만 근거가 부족하면 일부 또는 전부를 대기로 결론 내린다. **매 실행의 새 결론을 저장하는 책임은 이 ChatGPT 지시문에 있다.** MON 시스템 내부의 최종 추천 권한은 ChatGPT decision에만 있다. 주문은 실행하지 않는다.
 
 ## 2. Clean Start와 단일 권위
+
 - NAS 로컬 MON 자료가 없어도 `/web/mon_runtime`을 자동 생성한다.
 - MON의 현재 코드·지시문·상태·결과는 `wskimgit/stock`만 사용한다. SIS에는 MON CURRENT 사본을 두지 않는다.
-- 활성 파일의 `policy`는 모두 `MON-LITE-OPS-2.2.3`이어야 한다.
-- 초기 handoff는 `stage=idle`이다. 후보가 없어도 대기만 하지 않고 내장 fallback 후보군(KR/US/JP 각 3개)으로 결과를 만든다.
+- 활성 파일의 `policy`는 모두 `MON-LITE-OPS-2.2.3`이어야 한다. 코드/지시문은 r13이며 기존 시장 결과에 남은 r10 등의 `build`는 그 결과를 생성한 당시 identity다. 코드 정비만으로 시장 JSON의 시각·build·결과를 새 실행처럼 수정하지 않는다.
+- 초기 handoff는 `stage=idle`이다. PHP는 내장 fallback 후보군(KR/US/JP 각 3개)으로 보조자료를 만들 수 있다. 미검증 fallback은 최종 추천이 아니다.
 - 로컬 request 증명이 없는 과거 `decision`은 재실행하지 않는다.
 - 새 candidates 요청은 **현재 활성 후보군 전체를 교체**한다. 과거 강한 후보를 유지하려면 새 후보군에 다시 포함한다.
 
 ## 3. 활성 파일
+
 | 파일 | 역할 |
 |---|---|
 | `mon.php` | 유일한 PHP 실행 코드 |
@@ -33,6 +36,7 @@
 `mon_chatgpt_bridge.php` 등 1.x 보조코드는 사용하지 않는다.
 
 ## 4. 운영 주기
+
 - Mailbox 확인: **5분**. ETag/304를 사용해 내용이 같으면 본문 다운로드를 생략한다.
 - 경량 확인: **30분**.
 - 정밀 스캔: 평일 **16:40 KST** 기본.
@@ -45,7 +49,9 @@
 - NAS 재부팅 후 자동 시작하지 않는다. 웹에서 다시 시작한다.
 
 ## 5. NAS 사전점검
+
 웹 상태와 `?view=health`에서 다음을 점검한다.
+
 - PHP >= 7.4
 - cURL 확장
 - GitHub token (`sis_private_sync_config.php` 우선)
@@ -59,9 +65,11 @@
 필수 BLOCKER가 있으면 `시작`을 거부한다. 메모리 압박은 시작 자체를 막지 않고 적응형 소량 배치로 처리하며, 안전 하한 미만 또는 CPU load 압박일 때만 정밀 작업을 연기한다.
 
 ## 6. 데이터와 계산
+
 주 원천은 Yahoo 완료 일봉이다. 정상 자료는 재사용하고, 중대한 중복구간 차이가 있는 종목만 220봉 전체 재수집한다. Yahoo의 고립된 과거 OHLC 이상봉은 전체 자료의 약 1% 범위에서만 제외하여 한 개의 공급원 오류가 220봉 전체를 폐기하지 않게 한다. **최신 완료봉 이상은 제외로 우회하지 않고 오류로 유지**한다.
 
 핵심 계산:
+
 - MA5/10/20
 - MACD **12·26·9**
 - ATR14
@@ -71,14 +79,16 @@
 - 눌림·돌파 참고구간
 
 시장 기준:
+
 - KOSPI `^KS11`
 - KOSDAQ `^KQ11`
 - 미국 `^GSPC`
 - 일본 `^TOPX` 우선, 불가 시 TOPIX 추종 `1306.T`, 마지막 대안 `^N225`
 
-`RS20 > 0 AND (MA5 재돌파 OR MACD GOLD/AFTER/BEFORE)`는 **정밀 적격 참고신호**로만 유지하며 추천의 필수조건으로 사용하지 않는다. 추천은 가능한 평가결과를 우선 사용하고, 자료가 부족해도 나라별 3종목을 채운다.
+`RS20 > 0 AND (MA5 재돌파 OR MACD GOLD/AFTER/BEFORE)`는 **정밀 적격 참고신호**로만 유지하며 추천의 필수조건으로 사용하지 않는다. 자료가 부족하면 부족한 범위와 이유를 기록한다. PHP 보조자료 3×3을 채우기 위해 사용한 미확인 후보를 최종 추천으로 승격하지 않는다.
 
 ## 7. 후보 요청
+
 사용자가 `mon 지시문을 수행하라`고 하면 ChatGPT는 먼저 신규 후보·최근 MON 후보·과거 강한 후보를 넓게 섞어 조사용 후보군을 만든다. 기본은 나라별 약 10개, 총 30개 내외다. PHP가 후보 수집에 실패해도 `analysis_reference`는 fallback으로 3×3을 만들 수 있지만, **최종 추천은 반드시 ChatGPT가 별도 독립 분석으로 다시 결정**한다.
 
 ```json
@@ -88,17 +98,19 @@
 새 request SHA가 들어오면 기존 cache가 있더라도 해당 후보는 `CANDIDATE_REFRESH_REQUIRED`로 전환하여 최신 완료봉을 확인한 뒤 details를 만든다. 후보 ID는 중복 제거하며 거래소 조합은 **KR=KOSPI/KOSDAQ, US=NASDAQ/NYSE/AMEX, JP=TSE**만 허용한다. 잘못된 ID는 `rejected_ids`로 분리해 정상 후보 처리를 막지 않는다. 빈 후보군은 `ready_empty`로 정상 응답한다. 따라서 오래된 캐시나 잘못된 신원을 새 판단 근거로 즉시 사용하지 않는다.
 
 ## 8. 최종 결정 — ChatGPT 단독 권한
+
 - PHP/MON이 만드는 `analysis_reference` 3×3과 참고 MS7은 **보조 참고자료**다. 그대로 복사·추종하지 않는다.
 - ChatGPT는 최종 결정 전에 MON 자료와 별도로 최신 시장 레짐, 업종·테마 주도성, 현재 거래가능 가격, 추세·상대강도, 거래량, 과열·추격위험, 주요 뉴스·촉매, 하방위험을 독립적으로 확인한다.
 - ChatGPT는 필요하면 **PHP 후보군 밖 종목도 새로 발굴하여 선정**할 수 있다. PHP 후보 이력·적격·final_check는 최종 권한을 제한하지 않는다.
-- 최종 결과는 KR/US/JP 각각 **정확히 3종목**이다.
+- 최종 결과의 기본 목표는 KR/US/JP 각각 3종목이며, 검증된 종목만 **나라별 0~3종목** 선정한다. 미달·없음도 이번 실행의 새 결론으로 반드시 저장한다. 대상국 KR/US/JP의 시장판단은 모두 기록한다.
 - 각 최종 종목에는 **종목명 `name`과 종목코드 `symbol_id`를 모두 필수로 포함**하고, ChatGPT가 직접 결정한 MS7, 선정 근거 `reason`, 위험요인 `risk_note`를 포함한다.
 - **MS7 고정 체계:** `M0 관찰 → M1 매입 검토 → M2 분할매입 → W 대기 → S1 매도 준비 → S2 분할매도 → S3 대부분 매도`.
 - ChatGPT final MS7은 PHP 참고 MS7에 의해 자동 변경되거나 덮어써지지 않는다.
 - 최종 decision에는 `authority: chatgpt_final`, `independent_analysis: true`, KR/US/JP별 `market_view`가 필수다.
-- PHP는 최종 decision에서 종목 ID 형식, 나라별 3개, MS7 코드, 필수 설명의 존재만 검증하고 **추천 내용 자체를 재판정하지 않는다**.
+- PHP는 최종 decision에서 종목 ID·국가·중복, 나라별 최대 3개, MS7 코드, 필수 설명, 독립 근거와 저장 무결성을 검증하고 **추천 내용 자체를 재판정하지 않는다**.
 
-최종 decision 예시:
+최종 decision 필드 예시(시각·출처·ID는 실행 시 확인한 실제 값으로 치환하며 예시 그대로 제출하지 않는다):
+
 ```json
 {
   "contract":"MON-LITE-BRIDGE-1.0",
@@ -106,6 +118,11 @@
   "stage":"decision",
   "authority":"chatgpt_final",
   "independent_analysis":true,
+  "decision_id":"고유 결정 ID",
+  "analysis_at":"실제 분석 시각 ISO 8601",
+  "outcome":"completed",
+  "conclusion":"이번 실행의 독립 최종 결론",
+  "independent_sources":[{"url":"실제 HTTP(S) 출처 1","checked_at":"실제 확인 시각"},{"url":"실제 HTTP(S) 출처 2","checked_at":"실제 확인 시각"}],
   "request_id":"...",
   "candidate_request_sha":"...",
   "details_receipt_sha":"...",
@@ -116,13 +133,50 @@
   ]
 }
 ```
-## 9. 결과 저장과 게시 복구
-스캔 종료 시 PHP/MON은 `mon_data.json`과 `mon_result.md`에 **`analysis_reference` 3×3과 참고 MS7만 저장**하고 `decision_status=awaiting_chatgpt`로 표시한다. 이것은 최종 추천이 아니다. ChatGPT가 독립 final decision을 저장한 뒤에만 `recommendations`와 `mon_result.md`가 최종 결과로 갱신되며, **최종 결과 표시는 항상 `종목명 (종목코드)` 형식**으로 하고 JSON에도 `name`과 `symbol_id`를 모두 보존한다. 두 파일의 readback이 일치해야 `saved`로 처리한다.
 
-GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.** 로컬 `evidence.php`의 최신 scan summary와 cache watchlist로 결과 게시만 재시도한다. 저메모리 중간 배치는 로컬 체크포인트와 details 응답을 우선하고, 현재 pending 큐를 한 차례 모두 시도한 시점에 `mon_data.json`/`mon_result.md`를 게시해 통신을 줄인다. 정상 후보가 일부만 확인돼도 그 범위의 결과를 저장하고 미확인 범위를 명시한다.
+## 9. 결과 저장 — ChatGPT가 끝까지 책임진다
+
+`mon 지시문을 수행하라`는 조사·판단·최종 결론 작성·저장·재조회까지 포함한다. PHP 응답을 기다리다 결론 없이 종료하거나, 화면 답변만 남기거나, handoff 접수만으로 완료하지 않는다. 최종 선정이 없어도 현재 시각·조사 범위·미확인 사유·대기 결론을 저장한다. 실제 시장 판단은 실행 시 최신 자료로 다시 한다.
+
+### 9.1 결정과 저장 상태를 분리한다
+
+- 판단 필드: `authority=chatgpt_final`, `independent_analysis=true`, 고유 `decision_id`·`request_id`·`evaluation_id`, `analysis_at`, `market_view`(KR/US/JP), `selected`, `independent_sources`, `outcome`, 비어 있지 않은 `conclusion`을 기록한다. `outcome`은 `completed`(판단 완료), `limited_evidence`(근거 제한), `no_candidates`(선정 없음) 중 하나다. 종목이 없으면 `selected=[]`, `limited_evidence` 또는 `no_candidates`와 대기 이유를 기록한다.
+- 한 종목이라도 선정하면 서로 다른 독립 근거 최소 2개의 실제 HTTP(S) URL과 `checked_at`을 포함한다. `checked_at`은 제출 시 24시간 이내의 실제 확인 시각이며 미래 시각을 만들지 않는다. `analysis_at`은 새 판단 시각이며 완료봉 일자·현재가 확인 시각과 구분한다. 휴장일에는 최신 완료 거래일을 명시한다.
+- 새 추천의 독립 분석 시각은 제출 시 24시간 이내다. 네트워크 장애로 이미 검증된 동일 결정을 재게시할 때는 원래 `analysis_at`·근거를 보존하며 날짜를 새로 꾸미지 않는다. 지연된 결과는 과거 판단으로 표시한다.
+- 자료 접근 자체가 실패하면 확인하지 못한 URL·가격·추천을 만들지 않는다. `selected=[]`, `outcome=limited_evidence`, 필요 시 `independent_sources=[]`로 하고 확인 범위와 한계를 적은 이번 실행의 새 대기 결론을 저장한다. 근거 최소 수 규칙 때문에 대기 결론 저장까지 막지 않는다.
+
+### 9.2 기본 경로: ChatGPT 직접 GitHub 저장
+
+1. `wskimgit/stock` 운영 ref의 최신 HEAD와 `mon_data.json`, `mon_result.md`, `mon_chatgpt_response.json`을 읽는다. 현재 최신 결정과 충돌하는 과거 작업을 재게시하지 않는다.
+2. 동일 `decision_id`·`request_id`·`evaluation_id`·`analysis_at`을 가진 JSON과 Markdown을 작성한다. JSON에는 `chatgpt_final` 및 같은 종목·MS7의 `recommendations`를 기록하고, Markdown에도 식별자·분석시각·국가별 판단·결론·근거·위험·부족 범위를 표시한다. 최종 종목 표시는 **`종목명 (종목코드)`**로 통일한다.
+   JSON 최상위는 `contract=MON-LITE-DATA-2.2`, 현재 policy/version/build를 사용한다. `chatgpt_final`은 `contract=MON-LITE-RESULT-2.1`, 현재 policy, `authority=chatgpt_final`, `independent_analysis=true` 및 9.1절 판단 필드를 포함한다. receipt는 `contract=MON-LITE-BRIDGE-1.0`, 현재 policy, `stage=decision`, `authority=chatgpt_final`을 사용한다.
+3. **두 결과 파일을 하나의 Git commit으로 원자적으로 갱신**한다. 다중 파일 commit 기능 또는 현재 HEAD를 부모로 한 Git tree/commit과 non-force ref 갱신을 사용한다. 파일별 연속 PUT을 원자 저장이라고 부르지 않는다. 저장 중 HEAD가 바뀌면 최신 파일을 읽고 충돌을 판단한 후 같은 결정을 재적용한다.
+4. 게시 commit의 **정확한 ref**에서 두 파일을 cache 없이 다시 읽는다. 예상 바이트/내용 해시와 반환 blob SHA를 확인하고, 결정 식별자·시각·국가별 종목·MS7·미달 사유가 서로 같은지 검사한다. API가 200을 반환한 사실만으로 저장을 확정하지 않는다.
+5. 검증된 두 파일의 실제 commit/blob SHA와 결정 식별자를 담은 저장 receipt를 `mon_chatgpt_response.json`에 기록하고 **receipt 자체도 정확한 ref에서 다시 읽는다**. receipt 쓰기/재조회가 실패하면 `pending_receipt`이며 아직 `SAVED_VERIFIED`가 아니다. 이미 맞게 저장된 결과를 다시 계산하지 말고 receipt만 복구한다.
+6. 두 파일과 receipt의 재조회가 모두 끝난 뒤에만 **`SAVED_VERIFIED`**를 보고한다. 실제 확인한 commit 및 세 파일의 GitHub 링크와 결정 시각을 제시한다. receipt가 가리키는 결과 쌍과 운영 ref의 활성 결정이 다르면 과거 저장 증명으로만 표시한다.
+
+저장 receipt는 `status=saved`, `decision_id`, `request_id`, `evaluation_id`, `result_blob_sha`, `data_blob_sha`, `result_commit_sha`, `data_commit_sha`, `pair_readback_verified=true`, `saved_at`, `outcome`을 포함한다. 직접 원자 commit 경로에서는 두 결과의 commit SHA가 같다. JSON의 불변 게시 스냅샷에는 `chatgpt_final.save_status=receipt_required`와 `pair_readback_verified=false`가 남을 수 있다. 자기 자신의 미래 blob SHA를 JSON에 넣는 순환을 피하기 위한 상태이며, 이 필드만으로 실패 또는 성공을 판단하지 않는다. **실제 저장 증명은 현재 결과 쌍과 일치하는 receipt 및 세 파일의 재조회**다. PHP 로컬 outbox의 `save_status=saved`도 이 검증 후에만 기록한다.
+NAS 경로에서 PUT 응답만 유실되었다면 재조회로 정확한 blob SHA와 바이트는 확인해도 해당 쓰기의 commit SHA를 얻지 못할 수 있다. 이때 해당 commit 필드는 `null`로 보존하고 실제 blob 링크와 운영 ref 재조회 증거를 제시한다. 모르는 commit SHA를 만들거나 다른 commit을 해당 쓰기의 commit으로 표시하지 않는다. 직접 원자 commit 경로의 정확한 commit 재조회 규칙은 유지한다.
+
+### 9.3 NAS 장애·증명 소실 대안
+
+- NAS 연결 실패, PHP 정지, 로컬 request/details 증명 소실은 **ChatGPT 최종 판단·직접 저장의 차단 조건이 아니다.** 독립 조사 후 9.2절의 GitHub 직접 경로를 사용하며 `decision_only` 성격과 MON 자료 미확인 범위를 명시한다. 이 경로의 `evaluation_id`는 ChatGPT 독립 조사 실행을 식별하며 PHP 평가 증명인 것처럼 표시하지 않는다. 없는 `candidate_request_sha`·`details_receipt_sha`를 만들어 NAS proof 검증을 우회하지 않는다.
+- 직접 GitHub commit을 사용할 수 없고 NAS mailbox가 동작하면 동일 결정 원문을 `stage=decision` handoff에 전달한다. 이때는 실제 접수된 candidate request SHA·details blob SHA·evaluation ID를 그대로 사용한다. PHP의 `DECISION_PROOF_MISMATCH`는 증명 복구 또는 직접 저장으로 해결하고 가짜 SHA로 대체하지 않는다.
+- PHP 경로도 원격 결과 쌍과 receipt가 재조회될 때까지 저장 완료가 아니다. ChatGPT는 응답의 결정 식별자·실제 blob SHA를 다시 대조한다. `pending_remote` 응답은 저장 성공이 아니다.
+
+### 9.4 유한 시도와 영속 복구
+
+- 통신 한 번의 timeout과 제한된 재시도를 사용한다. 같은 장애를 무한 반복하거나 시장 전체를 재스캔하며 대화 처리를 붙잡지 않는다.
+- NAS 경로는 **원격 쓰기 전에** 최종 결정 원문·원래 분석시각/근거·JSON/Markdown/receipt의 정확한 게시 내용을 기존 `result.php`에 보존한다. `pending_remote → pending_receipt → saved`로 복구하며, 새 스캔·후보 요청이 미완료 결정을 덮어쓰지 못한다.
+- 프로세스가 계속 실행 중이면 다음 주기의 게시 복구에서 동일 내용을 이어간다. 재시작 후에도 먼저 pending 결정을 복구한다. NAS가 꺼지면 수동 재시작 전까지 PHP 복구가 실행되지 않는다.
+- 한쪽 파일만 반영되면 readback으로 현재 상태를 판별한 뒤 같은 결정으로 쌍을 맞춘다. readback 실패·receipt 실패 때문에 새 시각/새 결정을 만들거나 정상 파일을 반복해서 덮어쓰지 않는다.
+- GitHub가 완전히 불가하면 저장 가능한 로컬 복구 원문을 보존하고 **`PENDING_REMOTE`**와 원인·복구 위치를 보고한다. 로컬 저장도 불가능하면 **`UNSAVED_REMOTE`**와 실제 실패 범위를 보고한다. 이 상태를 완료로 바꾸어 말하지 않는다. 외부 저장소와 디스크가 모두 불가한데 물리적 저장 성공을 보장할 수는 없다.
+- 더 최신 결정이 운영 ref에 있으면 오래된 pending 결정을 그 위에 덮어쓰지 않는다. 최신 결과 쌍과 receipt까지 검증되면 이전 복구 원문을 그대로 보존한 채 `superseded`와 대체 결정 식별자를 기록하고 계속한다. 최신 저장 증명이 불완전하면 `CONCURRENT_DECISION_CONFLICT`로 보존하며 직접 저장 경로에서 충돌을 해결한다. `superseded`를 이전 결정의 저장 성공으로 보고하지 않는다. 동일 decision의 반복 접수·재시도는 멱등 처리한다.
 
 ## 10. 파일 운영
+
 모든 로컬 부속파일은 `/web/mon_runtime` 안의 소수 고정파일만 사용한다.
+
 - 최대 파일 수: 11
 - 총량: 64 MiB
 - 단일 파일: 16 MiB
@@ -131,57 +185,40 @@ GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.*
 - 로그는 `mon.log.php` / `mon.log.old.php`로 PHP guard를 붙여 직접 노출을 줄인다.
 
 ## 11. 통신 원칙
+
 - GitHub ETag/304
 - 동일 회차 메모리 cache
 - gzip/deflate
 - cURL handle/keepalive 재사용
 - GET의 일시 오류만 제한 재시도
-- PUT 자동 재시도 금지
-- 동일 결과 fingerprint면 재게시 생략
+- PUT의 무조건 자동 재시도 금지: readback 후 실패 단계만 멱등 복구
+- 동일 결과 fingerprint면 불필요한 쓰기를 생략하되, 최종 결정의 pending 복구는 실제 원격 readback과 receipt 검증을 생략하지 않는다
 - 일본 benchmark는 `^TOPX → 1306.T → ^N225` 순의 제한된 fallback만 사용
 - Yahoo 과거 이상봉 제외·미세 범위 보정 횟수는 network stats에 기록
 - 중요한 결과는 readback 검증
 
 ## 12. 상태·오류 분리
+
 운영 상태는 `IDLE / SCAN / WAIT / RESULT / ERROR` 중심으로 표시한다. Mailbox 오류와 결과 게시 오류는 각각 `last_mailbox_error`, `last_publication_error`로 분리해 **시장 스캔 전체 오류로 확대하지 않는다.**
 
 ## 13. 금지사항
-자동 주문/자동매매, cron/부팅 자동시작, 과거 decision 재사용, 미확인 가격의 현재가 표시, 정상 PASS 자료 반복 재검증, 운영상 필요 없는 파일·통신 확대를 금지한다. 또한 **PHP/MON 참고순위나 참고 MS7을 ChatGPT 최종 결정으로 자동 승격하는 것을 금지**한다.
 
-## 14. 한 줄 운영 원칙
-**파일·통신·계산은 최소화하되, PHP 분석은 보조자료로만 쓰고 최종 추천은 ChatGPT가 독립적으로 깊게 판단하여 나라별 3종목과 MS7을 확정한다.**
+자동 주문/자동매매, cron/부팅 자동시작, 과거 decision을 새 판단으로 재사용, 미확인 가격의 현재가 표시, 정상 PASS 자료 반복 재검증, 운영상 필요 없는 파일·통신 확대를 금지한다. 또한 **PHP/MON 참고순위나 참고 MS7을 ChatGPT 최종 결정으로 자동 승격하는 것을 금지**한다.
 
-## 15. 최종 결론 보존·장애 복구 규칙 (2026-10-17 보강)
-- 새 스캔은 기존 `chatgpt_final` 및 `recommendations`를 삭제하거나 `awaiting_chatgpt`로 덮어쓰지 않는다. 새 독립 결정이 없으면 `previous_final_preserved`로 명시한다.
-- 마지막 정상 결정은 **과거 결정**으로 표기한다. 데이터 부재·시장 휴장·통신 오류 때 신규 매입 추천으로 승격하지 않는다.
-- 새 결론 저장은 `mon_result.md`와 `mon_data.json` 모두 원격 readback 성공 시에만 완료로 인정한다. 일부 성공은 미완료로 기록하고 재시도한다.
-- NAS·GitHub가 모두 불가하면 원격 저장 성공을 주장하지 않는다. 로컬 복구 자료를 보존하고 통신 회복 시 재게시한다.
-- PHP가 ChatGPT의 새 독립 판단을 임의 생성하지 않는다. 새 결정이 없을 때는 마지막 검증된 결론과 새 스캔 참고자료를 함께 제공한다.
+## 14. 새 스캔과 과거 결정
 
-## 16. 독립 결정 강제 (r10)
-- 이전 추천, MON 순위, PHP 참고 MS7은 보조자료이며 최종 선정에 복사·자동승격하지 않는다.
-- ChatGPT가 최신 완료봉과 시장·업종·가격·뉴스·상대강도·추격위험을 독립 검증하여 국가별 3종목과 최종 MS7을 직접 결정한다.
-- 새 decision은 analysis_at (24시간 이내)과 independent_sources (각 url 및 checked_at 포함, 최소 2개)를 요구한다.
-- 새 스캔에서는 과거 결정을 previous_chatgpt_final에 보존하고 활성 recommendations는 비운다. 상태 independent_chatgpt_required는 신규 추천 미확정을 뜻한다.
-- 독립 검증 실패 시 억지 추천 금지. 저장 성공은 GitHub readback 검증 후에만 선언한다.
+PHP 스캔은 `analysis_reference`와 참고 MS7만 만들며 최종 추천으로 저장하지 않는다. 새 독립 결정이 필요한 스캔에서는 과거 최종 결론을 `previous_chatgpt_final`에 보존하고 활성 `recommendations`를 비운다. `independent_chatgpt_required` 또는 `awaiting_chatgpt`는 새 ChatGPT 결론이 아직 없다는 뜻이다. 과거 결론은 원래 분석시각을 붙인 과거 판단으로 표시한다. `mon_result.md`에 마지막 최종 결론을 보존하더라도 새 스캔의 활성 추천으로 읽지 않는다. 소비자는 JSON의 scan 상태와 `decision_id`를 함께 대조하여 과거 결과·보조분석·현재 최종 결과를 구분한다.
 
-## r11 결과 저장 안전성
-새 스캔 결과 게시 중 Markdown 결과를 GitHub에 쓰기 전에 로컬 evidence에 스캔 및 게시 스냅샷을 체크포인트한다. 기존 최종 결론을 임의로 신규 추천으로 재사용하지 않는다. GitHub 접근 실패·NAS 디스크 장애 등에서는 원격 저장 완료를 보장할 수 없으며 readback 성공 전에는 미완료로 표시한다.
+새 스캔은 미완료 최종 결정의 outbox를 덮어쓰지 않는다. GitHub 게시 실패만으로 시장 전체를 다시 스캔하지 않는다. 저메모리 중간 배치는 로컬 체크포인트와 details 응답을 우선하고, pending 후보 큐 한 차례를 시도한 시점에 참고 결과를 게시하여 통신을 줄인다.
 
-## 17. ChatGPT 직접 저장 우선 · 실패 복구 필수 (r12)
-사용자가 MON 수행을 요청하면 ChatGPT는 과거 결정을 복사하지 않고 최신 시장·종목 자료를 독립 조사해 국가별 3개, 총 9개와 MS7, 근거·위험·자료시각을 결정한다. **최종 결정의 주체와 GitHub 게시 작업의 1차 책임은 ChatGPT 지시문**이다. PHP의 참고분석은 후보 검토자료에 불과하다.
+## 15. 실행 완료 보고
 
-### 필수 저장 순서
-1. 최신 GitHub 파일의 SHA를 읽고, 독립 판단을 완료한다. 이전 추천을 새 판단으로 자동 승격하지 않는다.
-2. 같은 request_id 및 evaluation_id로 최종 결과 JSON과 사람이 읽는 Markdown을 작성한다. analysis_at 및 independent_sources (서로 다른 독립 근거 최소 2개, url과 checked_at)를 함께 기록한다.
-3. ChatGPT가 직접 GitHub의 mon_data.json과 mon_result.md를 갱신하고, 양쪽을 재조회하여 request_id·선정 3×3·MS7·내용이 일치하는지 확인한다. 성공 시에만 SAVED_VERIFIED를 보고한다.
-4. 한쪽만 저장되거나 SHA 충돌이 나면 최신 원격 파일을 다시 읽고 같은 결정을 안전하게 재적용한다. 시장 재스캔을 반복하지 않는다. 기존 정상 결과를 파괴하거나 다른 최신 결정으로 덮어쓰지 않는다.
-5. 직접 게시가 실패하면 **동일 결정 원문**을 mon_chatgpt_handoff.json의 stage=decision으로 게시한다. PHP는 로컬 result에 pending_remote로 먼저 기록하고 게시 후 재조회한다. 연결 복구 시 동일 결정을 재게시한다.
-6. GitHub 자체에 접근할 수 없으면 지시문만으로 영구 저장할 수 없다. 사용자에게 UNSAVED_REMOTE와 정확한 실패 원인을 알리고, 확인하지 못한 저장을 완료라고 주장하지 않는다.
-7. 실패해도 ChatGPT가 이전 추천을 최종 결론으로 대신하지 않는다. 사용자에게 새 분석 결론과 저장 상태를 각각 명시한다.
+- ChatGPT는 이번 실행의 새 분석시각, 국가별 결론, 저장 상태를 별도로 보고한다. 검증 부족으로 선정하지 않은 국가도 이유와 대기 결론을 남긴다.
+- `SAVED_VERIFIED`: 결과 JSON·Markdown·receipt의 실제 재조회 증명이 모두 있다. 결정 식별자와 확인한 GitHub commit/file 링크를 제시한다.
+- `PENDING_REMOTE` / `pending_receipt`: 복구 원문은 보존되어 있고 실패 단계의 복구가 남았다. 저장 완료라고 하지 않는다.
+- `UNSAVED_REMOTE`: 원격 저장이 검증되지 않았고 영속 복구도 확보하지 못했다. 원인과 마지막으로 성공한 단계를 정확히 알린다.
+- 코드 검증 완료, GitHub 반영, NAS 배포, NAS 실동작은 별도 상태다. NAS의 실제 배포 identity와 lifecycle을 관찰하지 못했으면 `DEPLOYMENT_PENDING` 또는 `UNKNOWN`으로 보고한다.
 
-### 복구 불변조건
-- 동일 request_id 반복 요청은 멱등 처리한다. 더 최신 request_id가 이미 게시되어 있으면 과거 결과로 덮어쓰지 않는다.
-- PHP가 새 ChatGPT 결정을 자체 생성하거나 임의로 MS7을 변경하지 않는다.
-- mon_data.json과 mon_result.md가 다르면 SAVED_VERIFIED가 아니다. 저장 장애 복구가 신규 종목 분석을 촉발해서는 안 된다.
-- NAS가 꺼져도 ChatGPT 직접 GitHub 저장 경로는 독립적으로 작동할 수 있다. NAS가 재시작하지 않는 동안 PHP 복구는 실행되지 않는다.
+## 16. 한 줄 운영 원칙
+
+**ChatGPT가 최신 자료로 독립 판단하고 매 실행의 새 결론을 끝까지 저장·재조회한다. PHP는 보조자료와 영속 복구를 맡으며, 검증되지 않은 저장이나 과거 판단을 현재 완료로 표시하지 않는다.**
