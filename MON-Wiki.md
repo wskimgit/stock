@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r4` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r5` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
 `IDLE → candidates 접수 → 후보 최신화 → SCAN → details → ChatGPT decision → mon_result.md + mon_data.json readback → RESULT/WAIT`
@@ -25,6 +25,8 @@
 - GitHub 결과 게시 실패: 시장 재스캔 없이 게시만 재시도
 - 후보 재확인 실패: 해당 후보만 pending 후 30분 뒤 재확인
 - bad handoff/policy: mailbox 오류로 격리, 시장 스캔은 계속
+- 일본 benchmark: `^TOPX`가 불가하면 `1306.T`, 다시 불가하면 `^N225` 사용
+- Yahoo 과거 고립 OHLC 오류: 제한적으로 제외하되 최신 완료봉 오류는 차단
 - 구형 NAS 메모리: `MemAvailable`이 없으면 reclaimable cache/buffer를 포함해 추정
 - 메모리 압박: 약 20 MiB 이상이면 3/2/1종목씩 처리하고 2분 후 다음 배치
 - 메모리 안전 하한 미만 또는 CPU load 압박: 정밀 작업 30분 연기
