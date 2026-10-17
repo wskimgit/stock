@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r5`**  
+> Build: **`MON-LITE-2.2.3-20261017-r6`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -9,7 +9,7 @@
 > NAS: `/web/mon.php`, PHP 7.4+, 웹 수동 시작, cron/자동주문 없음
 
 ## 1. 목적
-한·미·일 스윙 후보를 **완료 일봉** 기준으로 감시한다. PHP는 수집·검증·지표계산·참고순위를 제공하고, **ChatGPT가 최종 후보를 자율 선정**한다. 주문은 실행하지 않는다.
+한·미·일 스윙 후보를 **완료 일봉** 기준으로 가볍게 감시하고, 시장 상황과 자료 상태에 관계없이 **한국·미국·일본 각 3종목을 항상 추천**한다. 이는 정밀 매수판정이 아니라 모니터링 우선순위이며, 각 종목은 반드시 **MS7** 상태를 함께 표시한다. 주문은 실행하지 않는다.
 
 ## 2. Clean Start와 단일 권위
 - NAS 로컬 MON 자료가 없어도 `/web/mon_runtime`을 자동 생성한다.
@@ -76,10 +76,10 @@
 - 미국 `^GSPC`
 - 일본 `^TOPX` 우선, 불가 시 TOPIX 추종 `1306.T`, 마지막 대안 `^N225`
 
-기본 자격은 **RS20 > 0 AND (MA5 재돌파 OR MACD GOLD/AFTER/BEFORE)** 이다. `rank_hint`는 RS20 → R20 → ADV20 순의 참고값이며 최종 선정 권한은 ChatGPT에 있다.
+`RS20 > 0 AND (MA5 재돌파 OR MACD GOLD/AFTER/BEFORE)`는 **정밀 적격 참고신호**로만 유지하며 추천의 필수조건으로 사용하지 않는다. 추천은 가능한 평가결과를 우선 사용하고, 자료가 부족해도 나라별 3종목을 채운다.
 
 ## 7. 후보 요청
-사용자가 `mon 지시문을 수행하라`고 하면 ChatGPT는 신규 후보·최근 MON 후보·과거 강한 후보를 동등 경쟁시켜 후보군을 만든다. NAS 부하를 위해 KR/US/JP 합계 약 30개 이내를 권장하되 억지로 채우지 않는다.
+사용자가 `mon 지시문을 수행하라`고 하면 ChatGPT는 신규 후보·최근 MON 후보·과거 강한 후보를 넓게 섞어 후보군을 만든다. 기본은 나라별 약 10개, 총 30개 내외이며 **각 나라는 최소 3개 후보**를 넣는다. 후보가 부족하거나 수집이 실패해도 MON은 내장 fallback까지 사용해 나라별 3종목을 항상 출력한다.
 
 ```json
 {"contract":"MON-LITE-BRIDGE-1.0","policy":"MON-LITE-OPS-2.2.3","stage":"candidates","request_id":"고유 실행 ID","candidate_ids":["KR|KOSPI|005930","US|NASDAQ|NVDA","JP|TSE|6758"]}
@@ -87,19 +87,16 @@
 
 새 request SHA가 들어오면 기존 cache가 있더라도 해당 후보는 `CANDIDATE_REFRESH_REQUIRED`로 전환하여 최신 완료봉을 확인한 뒤 details를 만든다. 후보 ID는 중복 제거하며 거래소 조합은 **KR=KOSPI/KOSDAQ, US=NASDAQ/NYSE/AMEX, JP=TSE**만 허용한다. 잘못된 ID는 `rejected_ids`로 분리해 정상 후보 처리를 막지 않는다. 빈 후보군은 `ready_empty`로 정상 응답한다. 따라서 오래된 캐시나 잘못된 신원을 새 판단 근거로 즉시 사용하지 않는다.
 
-## 8. 최종 재확인과 ChatGPT 판단
-- 적격 후보 중 국가별 상위 3개는 최종 짧은 구간 재확인을 수행한다.
-- 재확인 성공 후보만 `selection_ready=true`, `final_check.status=confirmed`가 된다.
-- 재확인 실패/불일치 후보는 `pending`으로 남기고 30분 주기에서 다시 확인한다.
-- ChatGPT는 `evaluated_ids` 범위 안에서 판단하되 **실제 selected에는 `selection_ready=true` 후보만 사용**한다.
-- 국가별 최대 3종목.
-- 적격 후보가 없으면 `selected: []`가 정상 결과다.
-- `unresolved_ids`는 탈락으로 간주하지 않는다.
-
-Decision은 동일 policy와 MON 응답의 `candidate_request_sha`, `details_receipt_sha`, `evaluation_id`를 그대로 사용한다.
-
+## 8. 나라별 3종목 + MS7
+- MON은 평가 완료 종목을 먼저 순위화하고 **KR/US/JP 각각 정확히 3종목**을 추천한다.
+- 평가 종목이 3개 미만이면 같은 나라의 pending 후보를 `W 대기 / PROVISIONAL`로 채우고, 그래도 부족하면 내장 fallback 후보를 사용한다.
+- 정밀 적격 여부와 최종 재확인은 추천 배제조건이 아니다. 재확인 실패는 참고 경고로만 남긴다.
+- **MS7 고정 체계:** `M0 관찰 → M1 매입 검토 → M2 분할매입 → W 대기 → S1 매도 준비 → S2 분할매도 → S3 대부분 매도`.
+- 추천 3종목은 매수 3종목을 뜻하지 않는다. 약한 장에서는 W·S계열이 포함될 수 있다.
+- `unresolved_ids`도 자동 탈락시키지 않는다.
+- ChatGPT decision은 선택사항이다. 기본 결과는 MON의 `recommendations`만으로 완성되며, decision을 쓰는 경우에도 나라별 정확히 3종목을 사용한다.
 ## 9. 결과 저장과 게시 복구
-정밀 스캔 종료 시 `mon_data.json`과 `mon_result.md`를 현재 스캔 내용으로 갱신한다. ChatGPT decision 뒤 두 파일을 저장하고 실제 readback이 일치해야 `saved`로 처리한다.
+스캔 종료 시 `mon_data.json`과 `mon_result.md`에 **나라별 3종목 recommendations와 MS7**을 바로 저장한다. ChatGPT decision을 기다리지 않아도 결과는 완성된다. 선택적으로 decision을 저장할 때도 두 파일의 readback을 확인한다.
 
 GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.** 로컬 `evidence.php`의 최신 scan summary와 cache watchlist로 결과 게시만 재시도한다. 저메모리 중간 배치는 로컬 체크포인트와 details 응답을 우선하고, 현재 pending 큐를 한 차례 모두 시도한 시점에 `mon_data.json`/`mon_result.md`를 게시해 통신을 줄인다. 정상 후보가 일부만 확인돼도 그 범위의 결과를 저장하고 미확인 범위를 명시한다.
 

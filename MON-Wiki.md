@@ -1,10 +1,10 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r5` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r6` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
-`IDLE → candidates 접수 → 후보 최신화 → SCAN → details → ChatGPT decision → mon_result.md + mon_data.json readback → RESULT/WAIT`
+`IDLE → candidates 접수 → 후보 최신화 → SCAN → 나라별 3종목+MS7 생성 → mon_result.md + mon_data.json → RESULT/WAIT`
 
 후보가 없으면 `WAITING_FOR_CANDIDATES`로 대기한다. 새 후보 요청은 기존 활성 후보군을 교체하며 기존 cache가 있어도 최신 완료봉을 다시 확인한다.
 
@@ -16,14 +16,15 @@
 
 ## 결과 신뢰도
 - MA5/10/20, MACD(12,26,9), ATR14, R20, RS20, ADV20, S/R
-- 기본 자격: `RS20 > 0` + 스윙 기술신호
-- 국가별 상위 3개 최종 재확인
-- `final_check.status=confirmed`인 후보만 최종 selected 가능
-- 추천 0개도 정상 결과
+- 정밀 적격: `RS20 > 0` + 스윙 기술신호는 참고값일 뿐 추천 gate가 아님
+- **KR/US/JP 각 3종목을 항상 추천**
+- 모든 추천에 MS7 `M0/M1/M2/W/S1/S2/S3` 표시
+- 자료 부족 후보는 `W PROVISIONAL`로 포함 가능
+- 추천은 매수 강제가 아니라 모니터링 우선순위
 
 ## 장애 시나리오
 - GitHub 결과 게시 실패: 시장 재스캔 없이 게시만 재시도
-- 후보 재확인 실패: 해당 후보만 pending 후 30분 뒤 재확인
+- 후보 재확인 실패: 추천에서 배제하지 않고 경고만 표시; 자료 부족 시 W PROVISIONAL
 - bad handoff/policy: mailbox 오류로 격리, 시장 스캔은 계속
 - 일본 benchmark: `^TOPX`가 불가하면 `1306.T`, 다시 불가하면 `^N225` 사용
 - Yahoo 과거 고립 OHLC 오류: 제한적으로 제외하되 최신 완료봉 오류는 차단
