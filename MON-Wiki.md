@@ -1,12 +1,12 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r7` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r8` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
-`IDLE → candidates 접수 → 후보 최신화 → SCAN → 나라별 3종목+MS7 생성 → mon_result.md + mon_data.json → RESULT/WAIT`
+`IDLE → ChatGPT 후보 발굴 → MON 분석_reference → ChatGPT 독립 최종 3×3+MS7 → mon_result.md + mon_data.json → RESULT/WAIT`
 
-후보가 없어도 내장 fallback으로 KR/US/JP 각 3개를 구성해 결과를 만든다. 새 후보 요청은 기존 활성 후보군을 교체하며 기존 cache가 있어도 최신 완료봉을 다시 확인한다.
+후보가 없어도 MON은 fallback 3×3 참고자료를 만들 수 있다. 그러나 이것은 최종추천이 아니다. 최종추천은 ChatGPT가 별도 판단해 저장하며, 새 후보 요청은 기존 활성 후보군을 교체하고 최신 완료봉을 확인한다.
 
 ## 주기
 - Mailbox: 대기 상태 5분; 스캔 중이면 종료 직후
@@ -14,14 +14,16 @@
 - 정밀 스캔: 평일 16:40 KST
 - 전체 220봉 재동기화: 7일
 
-## 결과 신뢰도
-- MA5/10/20, MACD(12,26,9), ATR14, R20, RS20, ADV20, S/R
-- 정밀 적격: `RS20 > 0` + 스윙 기술신호는 참고값일 뿐 추천 gate가 아님
-- **KR/US/JP 각 3종목을 항상 추천**
-- 모든 추천에 MS7 `M0/M1/M2/W/S1/S2/S3` 표시
-- 자료 부족 후보는 `W PROVISIONAL`로 포함 가능
-- 추천은 매수 강제가 아니라 모니터링 우선순위
-
+## 권위와 결과
+- MON/PHP: 데이터 수집, 기술·상대강도 계산, MS7 계산, `analysis_reference` 3×3 제공
+- `analysis_reference`는 **보조 참고자료이며 최종추천이 아님**
+- ChatGPT: 시장·업종·기업·가격·리스크를 독립적으로 다시 검토
+- ChatGPT는 MON 상위 3개·적격·final_check에 구속되지 않음
+- 필요하면 MON 후보군 밖 종목도 최종선정 가능
+- 최종 KR/US/JP 각 3종목과 최종 MS7은 ChatGPT가 직접 결정
+- PHP는 형식과 요청 최신성만 검증하고 종목/순위/MS7을 덮어쓰지 않음
+- 최종 저장 필드: `chatgpt_final`, `authority=CHATGPT_FINAL`
+- `mon_result.md`는 ChatGPT 최종결정 저장 전에는 '최종 아님'을 표시
 ## 장애 시나리오
 - GitHub 결과 게시 실패: 시장 재스캔 없이 게시만 재시도
 - 후보 재확인 실패: 추천에서 배제하지 않고 경고만 표시; 자료 부족 시 W PROVISIONAL
@@ -43,8 +45,9 @@ Runtime은 최대 11개 파일, 64 MiB, 단일 16 MiB이며 로그도 PHP guard�
 
 ## 권위 규칙
 1. `monitor.md` — 유일한 운영/지시문 권위
-2. `mon.php` — 구현체, policy/버전이 monitor와 같아야 함
-3. `MON-Wiki.md` — 설명용 요약, 충돌 시 수정 대상
-4. `mon_data.json`, `mon_result.md`, handoff/response — 현재 실행 상태/결과
+2. **ChatGPT final decision — 종목 추천과 최종 MS7의 유일한 의사결정 권위**
+3. `mon.php` — 수집·분석·형식검증 구현체; ChatGPT 최종내용을 덮어쓰지 않음
+4. `MON-Wiki.md` — 설명용 비권위 요약
+5. `mon_data.json`, `mon_result.md`, handoff/response — 현재 실행 상태/참고분석/최종결과
 
 버전 변경은 `mon.php + monitor.md + MON-Wiki.md + 활성 JSON policy`를 같은 변경 묶음에서 맞춘다.
