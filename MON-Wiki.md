@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r8` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r9` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
 `IDLE → candidates 접수 → PHP 보조분석 3×3 → ChatGPT 독립 재분석 → ChatGPT 최종 3×3+MS7 → 저장 → RESULT/WAIT`
@@ -26,8 +26,8 @@
 ## 최종 권한
 - MON 시스템 내부 최종 추천 권한은 **ChatGPT final decision**에만 있다.
 - PHP/MON의 점수·순위·적격·참고 MS7은 보조증거다.
-- 최종 decision은 나라별 3종목, ChatGPT MS7, 선정 근거, 위험요인, 국가별 시장판단을 포함한다.
-- PHP는 형식·무결성만 확인하고 최종 종목·MS7을 재판정하지 않는다.
+- 최종 decision은 나라별 3종목, **종목명과 종목코드**, ChatGPT MS7, 선정 근거, 위험요인, 국가별 시장판단을 포함한다.
+- PHP는 형식·무결성만 확인하고 최종 종목·MS7을 재판정하지 않는다. 최종 저장 화면은 **`종목명 (종목코드)`** 형식으로 표시한다.
 
 ## 장애 시나리오
 - GitHub 결과 게시 실패: 시장 재스캔 없이 게시만 재시도

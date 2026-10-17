@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r8';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r9';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -363,9 +363,9 @@ final class LiteMonitor {
     public static function normalizeChatgptDecision(array $selected): array {
         $labels=['M0'=>'관찰','M1'=>'매입 검토','M2'=>'분할매입','W'=>'대기','S1'=>'매도 준비','S2'=>'분할매도','S3'=>'대부분 매도'];$per=['KR'=>0,'US'=>0,'JP'=>0];$out=[];$seen=[];
         foreach($selected as $x){if(!is_array($x))throw new LiteMonFault('DECISION_ITEM_INVALID');$sid=trim((string)($x['symbol_id']??''));$sym=self::symbolFromId($sid);if(!$sym)throw new LiteMonFault('DECISION_SYMBOL_INVALID');if(isset($seen[$sid]))throw new LiteMonFault('DECISION_DUPLICATE_SYMBOL');$seen[$sid]=true;$country=$sym['country'];$per[$country]++;if($per[$country]>3)throw new LiteMonFault('DECISION_LIMIT_INVALID');
-            $reason=trim((string)($x['reason']??''));$risk=trim((string)($x['risk_note']??''));if(strlen($reason)<8||strlen($risk)<4)throw new LiteMonFault('DECISION_ANALYSIS_TOO_THIN');
+            $name=trim((string)($x['name']??''));if($name===''||strcasecmp($name,(string)$sym['symbol'])===0)throw new LiteMonFault('DECISION_NAME_REQUIRED');$reason=trim((string)($x['reason']??''));$risk=trim((string)($x['risk_note']??''));if(strlen($reason)<8||strlen($risk)<4)throw new LiteMonFault('DECISION_ANALYSIS_TOO_THIN');
             $ms=$x['ms7']??null;if(!is_array($ms))throw new LiteMonFault('DECISION_MS7_REQUIRED');$code=(string)($ms['code']??'');if(!isset($labels[$code]))throw new LiteMonFault('DECISION_MS7_INVALID');
-            $y=$x;$y['symbol_id']=$sid;$y['country']=$country;$y['name']=trim((string)($x['name']??$sym['name']));$y['reason']=$reason;$y['risk_note']=$risk;$y['ms7']=['code'=>$code,'label'=>$labels[$code],'confidence'=>'CHATGPT_FINAL','reason_codes'=>(array)($ms['reason_codes']??[])];$y['authority']='chatgpt_final';$out[]=$y;
+            $y=$x;$y['symbol_id']=$sid;$y['country']=$country;$y['name']=$name;$y['reason']=$reason;$y['risk_note']=$risk;$y['ms7']=['code'=>$code,'label'=>$labels[$code],'confidence'=>'CHATGPT_FINAL','reason_codes'=>(array)($ms['reason_codes']??[])];$y['authority']='chatgpt_final';$out[]=$y;
         }
         foreach($per as $n)if($n!==3)throw new LiteMonFault('DECISION_REQUIRES_THREE_PER_COUNTRY');return $out;
     }
@@ -448,7 +448,7 @@ final class LiteMonitor {
     private function saveDecision(string $rid,array $selected,array $unresolved,string $evaluationId,array $marketView,string $handoffSha): void {
         $now=lm_iso();$grouped=['KR'=>[],'US'=>[],'JP'=>[]];foreach($selected as $x)$grouped[$x['country']][]=$x;
         $result=['contract'=>'MON-LITE-RESULT-2.1','policy'=>MON_LITE_POLICY,'authority'=>'chatgpt_final','independent_analysis'=>true,'request_id'=>$rid,'evaluation_id'=>$evaluationId,'handoff_sha'=>$handoffSha,'market_view'=>$marketView,'selected'=>$selected,'recommendations'=>$grouped,'unresolved_ids'=>$unresolved,'saved_at'=>$now,'save_status'=>'preparing'];
-        $lines=["MON 2.2.3 Lite · ChatGPT 최종 결정 · ".$now,"",'- 최종 추천 권한: ChatGPT 독립 분석','- MON/PHP 분석은 보조 참고자료로만 사용',""];$heads=['KR'=>'한국','US'=>'미국','JP'=>'일본'];foreach(['KR','US','JP'] as $cc){$lines[]='## '.$heads[$cc].' · '.$marketView[$cc];foreach($grouped[$cc] as $x){$ms=$x['ms7'];$price=array_key_exists('reference_price',$x)&&$x['reference_price']!==null?' · 참고가 '.(string)$x['reference_price']:'';$lines[]='- '.$x['symbol_id'].' · MS7 '.$ms['code'].' '.$ms['label'].$price.' · '.$x['reason'].' · 위험: '.$x['risk_note'];}$lines[]='';}
+        $lines=["MON 2.2.3 Lite · ChatGPT 최종 결정 · ".$now,"",'- 최종 추천 권한: ChatGPT 독립 분석','- MON/PHP 분석은 보조 참고자료로만 사용',""];$heads=['KR'=>'한국','US'=>'미국','JP'=>'일본'];foreach(['KR','US','JP'] as $cc){$lines[]='## '.$heads[$cc].' · '.$marketView[$cc];foreach($grouped[$cc] as $x){$ms=$x['ms7'];$price=array_key_exists('reference_price',$x)&&$x['reference_price']!==null?' · 참고가 '.(string)$x['reference_price']:'';$lines[]='- '.$x['name'].' ('.$x['symbol_id'].') · MS7 '.$ms['code'].' '.$ms['label'].$price.' · '.$x['reason'].' · 위험: '.$x['risk_note'];}$lines[]='';}
         if($unresolved)$lines[]='- MON 미확인 자료 '.count($unresolved).'개는 보조자료 미확인으로만 기록되며 ChatGPT 최종 결정 권한을 제한하지 않습니다.';$md=implode("\n",$lines)."\n";
         $putR=$this->putVerified('mon_result.md',$md,'MON Lite: ChatGPT authoritative final decision',true);
         $remote=$this->http->githubGet('mon_data.json');$data=(object)['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'version'=>MON_LITE_VERSION,'build'=>MON_LITE_BUILD,'updated_at'=>$now,'watchlist'=>(object)['symbols'=>[]],'scan'=>(object)['state'=>'decision_only'],'results'=>[],'errors'=>[]];

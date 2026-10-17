@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r8'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r9'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -132,11 +132,14 @@ jobs:
       - name: ChatGPT final authority contract
         run: |
           set -eu
-          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","M0"],["KR","KOSPI","105560","M1"],["KR","KOSPI","000660","W"],["US","NASDAQ","AAPL","M1"],["US","NASDAQ","NVDA","M2"],["US","NYSE","JPM","M0"],["JP","TSE","7203","M1"],["JP","TSE","6758","M0"],["JP","TSE","8306","W"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[2],"ms7"=>["code"=>$x[3]],"reason"=>"ChatGPT independent reason", "risk_note"=>"Independent risk"];} $out=LiteMonitor::normalizeChatgptDecision($sel); if(count($out)!==9) exit(1); if($out[4]["symbol_id"]!=="US|NASDAQ|NVDA"||$out[4]["ms7"]["code"]!=="M2"||$out[4]["ms7"]["confidence"]!=="CHATGPT_FINAL") exit(2); echo "ChatGPT MS7 preservation PASS\n";'
-          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930"],["KR","KOSPI","105560"],["US","NASDAQ","AAPL"],["US","NASDAQ","NVDA"],["US","NYSE","JPM"],["JP","TSE","7203"],["JP","TSE","6758"],["JP","TSE","8306"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_REQUIRES_THREE_PER_COUNTRY";} if(!$ok) exit(1); echo "exact three per country PASS\n";'
+          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","삼성전자","M0"],["KR","KOSPI","105560","KB금융","M1"],["KR","KOSPI","000660","SK하이닉스","W"],["US","NASDAQ","AAPL","Apple","M1"],["US","NASDAQ","NVDA","NVIDIA","M2"],["US","NYSE","JPM","JPMorgan","M0"],["JP","TSE","7203","Toyota","M1"],["JP","TSE","6758","Sony","M0"],["JP","TSE","8306","MUFG","W"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[3],"ms7"=>["code"=>$x[4]],"reason"=>"ChatGPT independent reason", "risk_note"=>"Independent risk"];} $out=LiteMonitor::normalizeChatgptDecision($sel); if(count($out)!==9) exit(1); if($out[4]["symbol_id"]!=="US|NASDAQ|NVDA"||$out[4]["name"]!=="NVIDIA"||$out[4]["ms7"]["code"]!=="M2"||$out[4]["ms7"]["confidence"]!=="CHATGPT_FINAL") exit(2); echo "ChatGPT name+code+MS7 preservation PASS\n";'
+          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","Samsung"],["KR","KOSPI","105560","KB"],["US","NASDAQ","AAPL","Apple"],["US","NASDAQ","NVDA","NVIDIA"],["US","NYSE","JPM","JPMorgan"],["JP","TSE","7203","Toyota"],["JP","TSE","6758","Sony"],["JP","TSE","8306","MUFG"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[3],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_REQUIRES_THREE_PER_COUNTRY";} if(!$ok) exit(1); echo "exact three per country PASS\n";'
+          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930"],["KR","KOSPI","105560"],["KR","KOSPI","000660"],["US","NASDAQ","AAPL"],["US","NASDAQ","NVDA"],["US","NYSE","JPM"],["JP","TSE","7203"],["JP","TSE","6758"],["JP","TSE","8306"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_NAME_REQUIRED";} if(!$ok) exit(1); echo "decision name required PASS\n";'
           grep -F "'authority'=>'chatgpt_final'" mon.php
           grep -F "'analysis_reference'" mon.php
           grep -F "DECISION_AUTHORITY_REQUIRED" mon.php
+          grep -F "DECISION_NAME_REQUIRED" mon.php
+          grep -F "\$x['name'].' ('.\$x['symbol_id'].') · MS7" mon.php
           rm -rf mon_runtime
       - name: Persisted JSON object normalization
         run: |
