@@ -434,6 +434,7 @@ final class LiteMonitor {
         // Preserve the last confirmed final decision across subsequent reference scans.
         // A scan must never silently downgrade a saved decision to awaiting_chatgpt.
         $prior=$this->http->githubGet('mon_data.json');
+        if(!$prior || trim((string)$prior['content'])==='') throw new LiteMonFault('PRIOR_FINAL_STATUS_UNVERIFIED');
         if($prior&&trim((string)$prior['content'])!==''){
             try{
                 $previous=lm_decode($prior['content']);
