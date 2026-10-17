@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r6'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r7'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -106,7 +106,7 @@ jobs:
           set -eu
           php -r 'require "mon.php"; $m=LiteResource::memoryInfo("MemTotal: 262144 kB\nMemFree: 12000 kB\nBuffers: 3000 kB\nCached: 18000 kB\nSReclaimable: 4000 kB\nShmem: 1000 kB\n"); if ($m["source"]!=="reclaimable_estimate" || $m["available_bytes"]!==36000*1024) {var_export($m); exit(1);} echo "legacy meminfo PASS\n";'
           php -r 'require "mon.php"; foreach ([[31,3],[26,2],[21,1],[19,0]] as $x) { $r=["memory_available_bytes"=>$x[0]*1048576]; if (LiteMonitor::lowMemoryBatch($r)!==$x[1]) exit(1);} echo "low-memory batch PASS\n";'
-          grep -F "const LOW_MEMORY_RETRY_SECONDS=120;" mon.php
+          grep -F "const LOW_MEMORY_RETRY_SECONDS=120;" mon.php\n          grep -F "WATCHLIST_FALLBACK_UNAVAILABLE" mon.php
           grep -F "full_resync_pending" mon.php
           rm -rf mon_runtime
 
