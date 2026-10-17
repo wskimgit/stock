@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r11` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r12` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
 `IDLE → candidates 접수 → PHP 보조분석 3×3 → ChatGPT 독립 재분석 → ChatGPT 최종 3×3+MS7 → 저장 → RESULT/WAIT`
@@ -64,3 +64,6 @@ Runtime은 최대 11개 파일, 64 MiB, 단일 16 MiB이며 로그도 PHP guard�
 
 ## r11 결과 저장 안전성
 새 스캔 결과 게시 중 Markdown 결과를 GitHub에 쓰기 전에 로컬 evidence에 스캔 및 게시 스냅샷을 체크포인트한다. 기존 최종 결론을 임의로 신규 추천으로 재사용하지 않는다. GitHub 접근 실패·NAS 디스크 장애 등에서는 원격 저장 완료를 보장할 수 없으며 readback 성공 전에는 미완료로 표시한다.
+
+## r12 최종 결정 저장
+ChatGPT 지시문이 최신 자료를 독립 검증하여 최종 결정을 내리고, GitHub mon_data.json과 mon_result.md에 **직접 저장·재조회**하는 것이 1순위입니다. 실패하면 동일 decision을 handoff로 전달하며 PHP는 pending_remote를 먼저 로컬 기록한 뒤 복구 재게시합니다. GitHub 연결이 완전히 불가능하면 저장 완료를 보장하지 않으며 UNSAVED_REMOTE로 표시합니다. 실행 규칙은 monitor.md 17절을 따릅니다.
