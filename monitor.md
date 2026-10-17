@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r9`**  
+> Build: **`MON-LITE-2.2.3-20261017-r10`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -157,3 +157,10 @@ GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.*
 - 새 결론 저장은 `mon_result.md`와 `mon_data.json` 모두 원격 readback 성공 시에만 완료로 인정한다. 일부 성공은 미완료로 기록하고 재시도한다.
 - NAS·GitHub가 모두 불가하면 원격 저장 성공을 주장하지 않는다. 로컬 복구 자료를 보존하고 통신 회복 시 재게시한다.
 - PHP가 ChatGPT의 새 독립 판단을 임의 생성하지 않는다. 새 결정이 없을 때는 마지막 검증된 결론과 새 스캔 참고자료를 함께 제공한다.
+
+## 16. 독립 결정 강제 (r10)
+- 이전 추천, MON 순위, PHP 참고 MS7은 보조자료이며 최종 선정에 복사·자동승격하지 않는다.
+- ChatGPT가 최신 완료봉과 시장·업종·가격·뉴스·상대강도·추격위험을 독립 검증하여 국가별 3종목과 최종 MS7을 직접 결정한다.
+- 새 decision은 analysis_at (24시간 이내)과 independent_sources (각 url 및 checked_at 포함, 최소 2개)를 요구한다.
+- 새 스캔에서는 과거 결정을 previous_chatgpt_final에 보존하고 활성 recommendations는 비운다. 상태 independent_chatgpt_required는 신규 추천 미확정을 뜻한다.
+- 독립 검증 실패 시 억지 추천 금지. 저장 성공은 GitHub readback 검증 후에만 선언한다.
