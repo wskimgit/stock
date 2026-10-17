@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r3` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
 `IDLE → candidates 접수 → 후보 최신화 → SCAN → details → ChatGPT decision → mon_result.md + mon_data.json readback → RESULT/WAIT`
@@ -9,7 +9,7 @@
 후보가 없으면 `WAITING_FOR_CANDIDATES`로 대기한다. 새 후보 요청은 기존 활성 후보군을 교체하며 기존 cache가 있어도 최신 완료봉을 다시 확인한다.
 
 ## 주기
-- Mailbox: 5분
+- Mailbox: 대기 상태 5분; 스캔 중이면 종료 직후
 - 경량 확인: 30분
 - 정밀 스캔: 평일 16:40 KST
 - 전체 220봉 재동기화: 7일
@@ -27,9 +27,12 @@
 - bad handoff/policy: mailbox 오류로 격리, 시장 스캔은 계속
 - 자원 압박: 정밀 작업 연기, 30분 뒤 재확인
 - 재시작 후 cache: 저장 객체를 배열로 정규화해 기존 분석을 정상 복원
+- 잘못된 국가/거래소 후보 ID: `rejected_ids`로 분리, 정상 후보는 계속 처리
+- 중복 후보 ID: 한 번만 처리
+- 빈 후보 목록: `ready_empty` 정상 응답
 
 ## NAS
-`/web/mon.php`가 `/web/mon_runtime`을 자동 생성한다. `?view=health`에서 PHP 7.4+, cURL, GitHub token, PHP CLI, exec, runtime 쓰기/용량, CPU/메모리를 확인한다. 필수 blocker가 있으면 시작을 거부한다.
+`/web/mon.php`가 `/web/mon_runtime`을 자동 생성한다. `?view=health`에서 웹 PHP 7.4+, cURL, GitHub token, PHP CLI 절대경로, **CLI PHP 버전/SAPI/cURL**, exec, runtime 쓰기/용량, CPU/메모리와 GitHub/Yahoo read-only 통신을 확인한다. CLI/runtime 필수 blocker가 있으면 시작을 거부하며 일시적 외부 통신 실패는 warning으로 남긴다.
 
 Runtime은 최대 11개 파일, 64 MiB, 단일 16 MiB이며 로그도 PHP guard가 있는 `.php` 파일로 보관한다.
 
