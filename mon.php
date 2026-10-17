@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r10';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r11';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -459,7 +459,10 @@ final class LiteMonitor {
                 $lines[]='- '.($item['name']??''). ' ('.($item['symbol_id']??'').') · '.($item['ms7']['code']??'W').' · '.($item['reason']??'');
             }
         }
-        $this->putVerified('mon_result.md',implode("\n",$lines)."\n",'MON Lite: reference with final retention',true);return true;
+        // Keep a durable local snapshot before attempting either remote write.
+        $markdown=implode("\n",$lines)."\n";
+        LiteRuntime::write('evidence',(object)['latest_scan'=>$summary,'publication_snapshot'=>(object)['data'=>$data,'markdown'=>$markdown,'at'=>lm_iso()]]);
+        $this->putVerified('mon_result.md',$markdown,'MON Lite: reference with final retention',true);return true;
     }
     private function processMailbox(): void {
         if($this->cfg->githubToken==='')return;$m=$this->http->githubGet('mon_chatgpt_handoff.json');if(!$m||trim((string)$m['content'])==='')return;$q=lm_decode($m['content']);if(lm_get($q,'contract')!=='MON-LITE-BRIDGE-1.0')return;$stage=(string)lm_get($q,'stage');if($stage==='idle')return;$rid=(string)lm_get($q,'request_id');if($rid===''||!in_array($stage,['candidates','decision'],true))return;$req=LiteRuntime::read('request');if($stage==='decision'&&(!is_string(lm_get($req,'request_id'))||lm_get($req,'request_id')==='')){LiteRuntime::write('request',(object)['stage'=>'ignored_stale_decision','ignored_handoff_sha'=>$m['sha'],'request_id'=>$rid,'updated_at'=>lm_iso()]);return;}if(lm_get($q,'policy')!==MON_LITE_POLICY)throw new LiteMonFault('BRIDGE_POLICY_MISMATCH');$c=$this->cacheObj();
