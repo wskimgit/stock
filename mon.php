@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r9';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r10';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -440,21 +440,22 @@ final class LiteMonitor {
                 $previous=lm_decode($prior['content']);
                 $final=lm_get($previous,'chatgpt_final');
                 if($final&&lm_get($final,'authority')==='chatgpt_final'&&lm_get($final,'selected')){
-                    $data['recommendations']=lm_array(lm_get($previous,'recommendations'));
-                    $data['chatgpt_final']=lm_array($final);
-                    $data['scan']['decision_status']='previous_final_preserved';
-                    $data['scan']['decision_note']='Latest scan is reference only; previous final remains valid as historical decision, not a fresh recommendation.';
+                    // Archive only: historical picks are never active recommendations for a new scan.
+                    $data['previous_chatgpt_final']=lm_array($final);
+                    $data['recommendations']=['KR'=>[],'US'=>[],'JP'=>[]];
+                    $data['scan']['decision_status']='independent_chatgpt_required';
+                    $data['scan']['decision_note']='New independent ChatGPT analysis required; archived final is historical only.';
                 }
             }catch(Throwable $ignored){}
         }
         $this->putVerified('mon_data.json',lm_json($data),'MON Lite: analysis reference update',true);
         $lines=["MON 2.2.3 Lite · 보조 참고분석 · ".$summary['at'],"",'- 아래 3×3은 PHP/MON 참고분석이며 최종 추천이 아닙니다.','- 최종 결정 권한: ChatGPT 독립 분석','- 평가 '.$summary['done'].' / '.$summary['candidate_count'].' · 미확인 '.$summary['pending'].' · 정밀 적격 '.$summary['eligible_count']];
         $heads=['KR'=>'한국','US'=>'미국','JP'=>'일본'];foreach(['KR','US','JP'] as $country){$lines[]='';$lines[]='## '.$heads[$country].' 참고';foreach($ref[$country]??[] as $r){$ms=$r['ms7']??['code'=>'W','label'=>'대기','confidence'=>'PROVISIONAL'];$price=$r['last_close']===null?'가격 미확인':(string)$r['last_close'];$lines[]='- '.($r['symbol_id']??'').' · 참고 MS7 '.($ms['code']??'W').' '.($ms['label']??'대기').' · '.$price.' · '.($ms['confidence']??'PROVISIONAL');}}
-        if(($data['scan']['decision_status']??'')==='previous_final_preserved'){
+        if(($data['scan']['decision_status']??'')==='independent_chatgpt_required'){
             $lines[]='';
             $lines[]='## 이전 ChatGPT 최종 결정 (새 분석 아님)';
             $lines[]='- 새 스캔에서 확정 결정을 생성하지 않았으므로 마지막 저장 결정을 보존합니다. 현재 매입 신호로 간주하지 마세요.';
-            foreach(($data['recommendations']??[]) as $cc=>$items)foreach($items as $item){
+            foreach((lm_array(lm_get($data['previous_chatgpt_final'],'recommendations'))??[]) as $cc=>$items)foreach($items as $item){
                 $lines[]='- '.($item['name']??''). ' ('.($item['symbol_id']??'').') · '.($item['ms7']['code']??'W').' · '.($item['reason']??'');
             }
         }
@@ -465,6 +466,12 @@ final class LiteMonitor {
         if($stage==='candidates'){$rawIds=lm_get($q,'candidate_ids',[]);if(!is_array($rawIds))return;$ids=[];$rejected=[];$seen=[];foreach($rawIds as $raw){if(!is_string($raw)){$rejected[]='<non-string>';continue;}$sid=trim($raw);if($sid===''||isset($seen[$sid]))continue;$seen[$sid]=true;if(!self::symbolFromId($sid)){$rejected[]=$sid;continue;}$ids[]=$sid;}$newRequest=lm_get($req,'candidate_request_sha')!==$m['sha'];$changed=false;if($newRequest){$nextWatch=[];$nextSymbols=new stdClass();foreach($ids as $sid){$row=lm_get($c->symbols,$sid);if(!$row){$sym=self::symbolFromId($sid);$row=(object)['status'=>'pending','symbol'=>(object)$sym,'last_error'=>'CANDIDATE_NOT_COLLECTED','checked_at'=>lm_iso()];}$row->status='pending';$row->last_error='CANDIDATE_REFRESH_REQUIRED';$row->candidate_request_sha=$m['sha'];$row->checked_at=lm_iso();$nextWatch[]=$row->symbol;$nextSymbols->{$sid}=$row;}$c->watchlist=$nextWatch;$c->symbols=$nextSymbols;$changed=true;}if($changed){$c->updated_at=lm_iso();LiteRuntime::write('cache',$c);}if($newRequest&&$ids){$wake=$this->state();$wake->next_light_check=lm_iso(time()+30);$wake->heartbeat_at=lm_iso();$this->saveState($wake);}$rows=[];$usable=[];$unresolved=[];foreach($ids as $sid){$r=lm_get($c->symbols,$sid);$a=$r?lm_get($r,'analysis'):null;if($r&&lm_get($r,'status')==='ok'&&is_array($a)){$rows[]=$a;$usable[]=$sid;}else{$rows[]=['symbol_id'=>$sid,'status'=>'pending','error'=>$r?lm_get($r,'last_error'):null];$unresolved[]=$sid;}}foreach($rejected as $sid)$rows[]=['symbol_id'=>$sid,'status'=>'rejected','error'=>'INVALID_SYMBOL_ID'];$status=$unresolved?($usable?'ready_subset':'collection_pending'):($rejected?($usable?'ready_subset':'rejected'):($usable?'ready':'ready_empty'));foreach($rows as &$rr)if(is_array($rr)&&isset($rr['metrics'])&&(!isset($rr['ms7'])||!is_array($rr['ms7'])))$rr['ms7']=LiteSwing::ms7FromAnalysis($rr);unset($rr);$analysisReference=self::recommendThree($rows,$ids);$status='ready_for_chatgpt';$evaluationId=lm_hash([$rid,$m['sha'],$usable,$rejected,$analysisReference,array_map(function($r){return lm_hash($r);},$rows)]);if(lm_get($req,'candidate_request_sha')===$m['sha']&&lm_get($req,'evaluation_id')===$evaluationId&&is_string(lm_get($req,'details_blob_sha')))return;$response=['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'details','request_id'=>$rid,'candidate_request_sha'=>$m['sha'],'status'=>$status,'evaluation_id'=>$evaluationId,'evaluated_ids'=>$usable,'unresolved_ids'=>$unresolved,'rejected_ids'=>$rejected,'analysis_reference'=>$analysisReference,'rows'=>$rows,'as_of'=>lm_iso()];$put=$this->putVerified('mon_chatgpt_response.json',lm_json($response),'MON Lite: evidence package for ChatGPT',false);LiteRuntime::write('request',(object)['request_id'=>$rid,'stage'=>'details','candidate_request_sha'=>$m['sha'],'details_blob_sha'=>$put['blob_sha'],'evaluation_id'=>$evaluationId,'evaluated_ids'=>$usable,'unresolved_ids'=>$unresolved,'rejected_ids'=>$rejected,'analysis_reference'=>$analysisReference,'updated_at'=>lm_iso()]);return;}
         if(lm_get($q,'authority')!=='chatgpt_final'||lm_get($q,'independent_analysis')!==true)throw new LiteMonFault('DECISION_AUTHORITY_REQUIRED');
         $views=lm_get($q,'market_view',[]);if(!is_array($views))throw new LiteMonFault('DECISION_MARKET_VIEW_REQUIRED');foreach(['KR','US','JP'] as $cc){$v=trim((string)($views[$cc]??''));if(strlen($v)<8)throw new LiteMonFault('DECISION_MARKET_VIEW_TOO_THIN');$views[$cc]=$v;}
+        // A decision must include fresh independent analysis, not just a replay of MON rankings.
+        $analysisAt=(string)lm_get($q,'analysis_at','');
+        $sources=lm_get($q,'independent_sources',[]);
+        if($analysisAt===''||strtotime($analysisAt)===false||abs(time()-strtotime($analysisAt))>86400)throw new LiteMonFault('DECISION_FRESH_ANALYSIS_REQUIRED');
+        if(!is_array($sources)||count($sources)<2)throw new LiteMonFault('DECISION_INDEPENDENT_SOURCES_REQUIRED');
+        foreach($sources as $source)if(!is_array($source)||trim((string)($source['url']??''))===''||trim((string)($source['checked_at']??''))==='')throw new LiteMonFault('DECISION_SOURCE_EVIDENCE_REQUIRED');
         $selected=lm_get($q,'selected',[]);if(!is_array($selected))throw new LiteMonFault('DECISION_ITEMS_REQUIRED');$saved=LiteRuntime::read('result');if(lm_get($saved,'handoff_sha')===$m['sha']&&lm_get($saved,'request_id')===$rid&&lm_get($saved,'save_status')==='saved')return;
         if(lm_get($req,'request_id')!==$rid||lm_get($q,'candidate_request_sha')!==lm_get($req,'candidate_request_sha')||lm_get($q,'details_receipt_sha')!==lm_get($req,'details_blob_sha')||lm_get($q,'evaluation_id')!==lm_get($req,'evaluation_id'))throw new LiteMonFault('DECISION_PROOF_MISMATCH');
         $normalized=self::normalizeChatgptDecision($selected);$this->saveDecision($rid,$normalized,(array)lm_get($req,'unresolved_ids',[]),(string)$req->evaluation_id,$views,$m['sha']);
