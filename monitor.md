@@ -1,6 +1,7 @@
 # mon 지시문 — MON 2.2.2 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.2**  
+> **단일 권위 저장소:** MON의 코드·지시문·상태·결과는 `wskimgit/stock`만 사용한다. `wskimgit/SIS`에는 MON의 현재 사본·미러·별도 CURRENT 문서를 두지 않는다.  
 > 기준일: **2026-10-17 KST**  
 > 코드: `wskimgit/stock/mon.php`  
 > 실행: NAS `/web/mon.php`, PHP 7.4+, 웹에서 수동 시작, cron/자동주문 없음
