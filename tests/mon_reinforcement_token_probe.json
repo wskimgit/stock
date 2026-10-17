@@ -1,8 +1,0 @@
-{
-  "runtime": "PHP7.4",
-  "processor_version": "1.5.0",
-  "synthetic_only": true,
-  "raw_tokens_equal": false,
-  "normalized_tokens_equal": true,
-  "actual_source_change_invalidates_token": true
-}
