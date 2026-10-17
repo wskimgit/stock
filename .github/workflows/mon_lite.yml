@@ -1,0 +1,101 @@
+name: MON Lite 2.x consistency
+
+on:
+  pull_request:
+    paths:
+      - mon.php
+      - monitor.md
+      - MON-Wiki.md
+      - mon_data.json
+      - mon_result.md
+      - mon_chatgpt_handoff.json
+      - mon_chatgpt_response.json
+      - .github/workflows/mon_lite.yml
+  push:
+    branches: [main]
+    paths:
+      - mon.php
+      - monitor.md
+      - MON-Wiki.md
+      - mon_data.json
+      - mon_result.md
+      - mon_chatgpt_handoff.json
+      - mon_chatgpt_response.json
+      - .github/workflows/mon_lite.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.4'
+          extensions: curl,zlib,json
+          coverage: none
+
+      - name: PHP 7.4 syntax
+        run: |
+          set -eu
+          php -v
+          php -l mon.php
+
+      - name: MON policy and active-file consistency
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, re, sys
+
+          root = pathlib.Path('.')
+          src = (root/'mon.php').read_text(encoding='utf-8')
+          prompt = (root/'monitor.md').read_text(encoding='utf-8')
+          wiki = (root/'MON-Wiki.md').read_text(encoding='utf-8')
+
+          version = re.search(r"MON_LITE_VERSION\s*=\s*'([^']+)'", src)
+          policy = re.search(r"MON_LITE_POLICY\s*=\s*'([^']+)'", src)
+          build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
+          assert version and version.group(1) == '2.2.3'
+          assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
+          assert build and '2.2.3' in build.group(1)
+
+          for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
+              assert 'MON-LITE-OPS-2.2.3' in text, name
+              assert '2.2.3' in text, name
+
+          assert '유일한 실행 권위 지시문' in prompt
+          assert '비권위 요약' in wiki
+          assert 'mon_chatgpt_bridge.php' in prompt and '사용하지 않는다' in prompt
+
+          data = json.loads((root/'mon_data.json').read_text(encoding='utf-8'))
+          hand = json.loads((root/'mon_chatgpt_handoff.json').read_text(encoding='utf-8'))
+          resp = json.loads((root/'mon_chatgpt_response.json').read_text(encoding='utf-8'))
+
+          assert data['policy'] == 'MON-LITE-OPS-2.2.3'
+          assert data['version'] == '2.2.3'
+          assert hand['policy'] == 'MON-LITE-OPS-2.2.3'
+          assert resp['policy'] == 'MON-LITE-OPS-2.2.3'
+          assert hand['contract'] == 'MON-LITE-BRIDGE-1.0'
+          assert resp['contract'] == 'MON-LITE-BRIDGE-1.0'
+
+          assert not (root/'mon_chatgpt_bridge.php').exists()
+          assert not (root/'mon_wiki.md').exists()
+
+          print('MON consistency PASS')
+          PY
+
+      - name: Low-load runtime invariants
+        run: |
+          set -eu
+          grep -F "const MAX_FILES = 11;" mon.php
+          grep -F "const MAX_TOTAL = 67108864;" mon.php
+          grep -F "const MAX_FILE = 16777216;" mon.php
+          grep -F "const LIGHT_SECONDS=1800;" mon.php
+          grep -F "const MAILBOX_SECONDS=300;" mon.php
+          grep -F "const FULL_RESYNC_SECONDS=604800;" mon.php
+          grep -F "no cron / no orders" mon.php
+
+      - name: Source identities
+        run: sha256sum mon.php monitor.md MON-Wiki.md mon_data.json mon_result.md mon_chatgpt_handoff.json mon_chatgpt_response.json
