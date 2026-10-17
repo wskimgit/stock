@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r5'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r6'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -118,6 +118,13 @@ jobs:
           php -r 'require "mon.php"; $x=LiteYahoo::benchmarkCandidates("JP"); if ($x!==["^TOPX","1306.T","^N225"]) {var_export($x); exit(1);} echo "JP benchmark fallback policy PASS\n";'
           rm -rf mon_runtime
 
+      - name: Always-three MS7 recommendation contract
+        run: |
+          set -eu
+          php -r 'require "mon.php"; $a=["metrics"=>["RS20_pp"=>5,"last_close"=>110,"MA5"=>105,"MA20"=>100],"technical"=>["technical_qualified"=>true,"histogram"=>1]]; $m=LiteSwing::ms7FromAnalysis($a); if($m["code"]!=="M2") {var_export($m); exit(1);} echo "MS7 strong mapping PASS\n";'
+          php -r 'require "mon.php"; $r=LiteMonitor::recommendThree([],[]); foreach(["KR","US","JP"] as $c){if(count($r[$c])!==3) exit(1); foreach($r[$c] as $x) if(($x["ms7"]["code"]??"")!=="W") exit(2);} echo "always-three fallback PASS\n";'
+          php -r 'require "mon.php"; $rows=[["symbol_id"=>"KR|KOSPI|111111","country"=>"KR","name"=>"A","metrics"=>["RS20_pp"=>4,"R20"=>.1,"ADV20"=>100,"last_close"=>110,"MA5"=>105,"MA20"=>100],"technical"=>["technical_qualified"=>true,"histogram"=>1],"reason_codes"=>[]]]; $r=LiteMonitor::recommendThree($rows,["KR|KOSPI|111111","KR|KOSPI|222222","KR|KOSPI|333333"]); if(count($r["KR"])!==3||$r["KR"][0]["ms7"]["code"]!=="M2") exit(1); echo "evaluated plus pending fill PASS\n";'
+          rm -rf mon_runtime
       - name: Persisted JSON object normalization
         run: |
           php -r 'require "mon.php"; $x=json_decode("{\"results\":[{\"eligible\":true,\"metrics\":{\"RS20_pp\":10}}]}"); $a=lm_array($x); if (!is_array($a) || !is_array($a["results"][0]) || !is_array($a["results"][0]["metrics"])) exit(1); echo "persisted normalization PASS\\n";'
