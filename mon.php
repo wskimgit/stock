@@ -431,10 +431,33 @@ final class LiteMonitor {
         if($this->cfg->githubToken==='')return false;
         $ids=array_map(function($x){return $x['symbol_id'];},$watch);$ref=$summary['analysis_reference']??self::recommendThree($summary['results']??[],$ids);
         $data=['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'version'=>MON_LITE_VERSION,'build'=>MON_LITE_BUILD,'updated_at'=>lm_iso(),'watchlist'=>['symbols'=>$watch],'scan'=>['scan_id'=>$summary['scan_id'],'at'=>$summary['at'],'done'=>$summary['done'],'pending'=>$summary['pending'],'candidate_count'=>$summary['candidate_count'],'eligible_count'=>$summary['eligible_count'],'mode'=>$summary['mode']??null,'network_stats'=>$summary['network_stats']??null,'decision_status'=>'awaiting_chatgpt'],'analysis_reference'=>$ref,'results'=>$summary['results'],'errors'=>$summary['errors']];
+        // Preserve the last confirmed final decision across subsequent reference scans.
+        // A scan must never silently downgrade a saved decision to awaiting_chatgpt.
+        $prior=$this->http->githubGet('mon_data.json');
+        if($prior&&trim((string)$prior['content'])!==''){
+            try{
+                $previous=lm_decode($prior['content']);
+                $final=lm_get($previous,'chatgpt_final');
+                if($final&&lm_get($final,'authority')==='chatgpt_final'&&lm_get($final,'selected')){
+                    $data['recommendations']=lm_array(lm_get($previous,'recommendations'));
+                    $data['chatgpt_final']=lm_array($final);
+                    $data['scan']['decision_status']='previous_final_preserved';
+                    $data['scan']['decision_note']='Latest scan is reference only; previous final remains valid as historical decision, not a fresh recommendation.';
+                }
+            }catch(Throwable $ignored){}
+        }
         $this->putVerified('mon_data.json',lm_json($data),'MON Lite: analysis reference update',true);
         $lines=["MON 2.2.3 Lite · 보조 참고분석 · ".$summary['at'],"",'- 아래 3×3은 PHP/MON 참고분석이며 최종 추천이 아닙니다.','- 최종 결정 권한: ChatGPT 독립 분석','- 평가 '.$summary['done'].' / '.$summary['candidate_count'].' · 미확인 '.$summary['pending'].' · 정밀 적격 '.$summary['eligible_count']];
         $heads=['KR'=>'한국','US'=>'미국','JP'=>'일본'];foreach(['KR','US','JP'] as $country){$lines[]='';$lines[]='## '.$heads[$country].' 참고';foreach($ref[$country]??[] as $r){$ms=$r['ms7']??['code'=>'W','label'=>'대기','confidence'=>'PROVISIONAL'];$price=$r['last_close']===null?'가격 미확인':(string)$r['last_close'];$lines[]='- '.($r['symbol_id']??'').' · 참고 MS7 '.($ms['code']??'W').' '.($ms['label']??'대기').' · '.$price.' · '.($ms['confidence']??'PROVISIONAL');}}
-        $this->putVerified('mon_result.md',implode("\n",$lines)."\n",'MON Lite: analysis reference awaiting ChatGPT',true);return true;
+        if(($data['scan']['decision_status']??'')==='previous_final_preserved'){
+            $lines[]='';
+            $lines[]='## 이전 ChatGPT 최종 결정 (새 분석 아님)';
+            $lines[]='- 새 스캔에서 확정 결정을 생성하지 않았으므로 마지막 저장 결정을 보존합니다. 현재 매입 신호로 간주하지 마세요.';
+            foreach(($data['recommendations']??[]) as $cc=>$items)foreach($items as $item){
+                $lines[]='- '.($item['name']??''). ' ('.($item['symbol_id']??'').') · '.($item['ms7']['code']??'W').' · '.($item['reason']??'');
+            }
+        }
+        $this->putVerified('mon_result.md',implode("\n",$lines)."\n",'MON Lite: reference with final retention',true);return true;
     }
     private function processMailbox(): void {
         if($this->cfg->githubToken==='')return;$m=$this->http->githubGet('mon_chatgpt_handoff.json');if(!$m||trim((string)$m['content'])==='')return;$q=lm_decode($m['content']);if(lm_get($q,'contract')!=='MON-LITE-BRIDGE-1.0')return;$stage=(string)lm_get($q,'stage');if($stage==='idle')return;$rid=(string)lm_get($q,'request_id');if($rid===''||!in_array($stage,['candidates','decision'],true))return;$req=LiteRuntime::read('request');if($stage==='decision'&&(!is_string(lm_get($req,'request_id'))||lm_get($req,'request_id')==='')){LiteRuntime::write('request',(object)['stage'=>'ignored_stale_decision','ignored_handoff_sha'=>$m['sha'],'request_id'=>$rid,'updated_at'=>lm_iso()]);return;}if(lm_get($q,'policy')!==MON_LITE_POLICY)throw new LiteMonFault('BRIDGE_POLICY_MISMATCH');$c=$this->cacheObj();
