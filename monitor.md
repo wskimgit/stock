@@ -1,6 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
+> Build: **`MON-LITE-2.2.3-20261017-r3`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -35,7 +36,7 @@
 - Mailbox 확인: **5분**. ETag/304를 사용해 내용이 같으면 본문 다운로드를 생략한다.
 - 경량 확인: **30분**.
 - 정밀 스캔: 평일 **16:40 KST** 기본.
-- 새 candidates 요청을 받으면 최대 5분 안에 접수하고, 약 30초 뒤 새 후보를 최신 완료봉으로 재확인한다.
+- 새 candidates 요청은 **대기 상태에서는 최대 5분 안에** 접수한다. 정밀 스캔 중이면 현재 스캔 종료 직후 접수하고, 접수 후 약 30초 뒤 새 후보를 최신 완료봉으로 재확인한다.
 - 정상 운용은 최근 구간 증분수집을 우선한다.
 - **7일마다 220봉 전체 재동기화**한다.
 - 자원 압박 시 정밀 처리를 시작하지 않고 30분 뒤 재확인한다.
@@ -47,9 +48,11 @@
 - cURL 확장
 - GitHub token (`sis_private_sync_config.php` 우선)
 - 실제 실행 가능한 PHP CLI 절대경로
+- **CLI PHP 버전·SAPI·cURL 확장** (`?view=health` 및 시작 직전에 실제 CLI 프로브)
 - 웹 `exec()` 사용 가능 여부
 - `/web/mon_runtime` 생성·쓰기·용량 제한
 - CPU load / 가용 메모리
+- GitHub handoff 읽기와 Yahoo 소규모 read-only 통신 (`?view=health` deep 검사; 일시적 통신 실패는 warning)
 
 필수 BLOCKER가 있으면 `시작`을 거부한다. 메모리·load 압박은 시작 자체를 막기보다 경고로 표시하고 정밀 작업에서 감속/연기한다.
 
@@ -80,7 +83,7 @@
 {"contract":"MON-LITE-BRIDGE-1.0","policy":"MON-LITE-OPS-2.2.3","stage":"candidates","request_id":"고유 실행 ID","candidate_ids":["KR|KOSPI|005930","US|NASDAQ|NVDA","JP|TSE|6758"]}
 ```
 
-새 request SHA가 들어오면 기존 cache가 있더라도 해당 후보는 `CANDIDATE_REFRESH_REQUIRED`로 전환하여 최신 완료봉을 확인한 뒤 details를 만든다. 따라서 오래된 캐시를 새 판단 근거로 즉시 반환하지 않는다.
+새 request SHA가 들어오면 기존 cache가 있더라도 해당 후보는 `CANDIDATE_REFRESH_REQUIRED`로 전환하여 최신 완료봉을 확인한 뒤 details를 만든다. 후보 ID는 중복 제거하며 거래소 조합은 **KR=KOSPI/KOSDAQ, US=NASDAQ/NYSE/AMEX, JP=TSE**만 허용한다. 잘못된 ID는 `rejected_ids`로 분리해 정상 후보 처리를 막지 않는다. 빈 후보군은 `ready_empty`로 정상 응답한다. 따라서 오래된 캐시나 잘못된 신원을 새 판단 근거로 즉시 사용하지 않는다.
 
 ## 8. 최종 재확인과 ChatGPT 판단
 - 적격 후보 중 국가별 상위 3개는 최종 짧은 구간 재확인을 수행한다.
