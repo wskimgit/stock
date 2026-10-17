@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r10`**  
+> Build: **`MON-LITE-2.2.3-20261017-r11`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -164,3 +164,6 @@ GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.*
 - 새 decision은 analysis_at (24시간 이내)과 independent_sources (각 url 및 checked_at 포함, 최소 2개)를 요구한다.
 - 새 스캔에서는 과거 결정을 previous_chatgpt_final에 보존하고 활성 recommendations는 비운다. 상태 independent_chatgpt_required는 신규 추천 미확정을 뜻한다.
 - 독립 검증 실패 시 억지 추천 금지. 저장 성공은 GitHub readback 검증 후에만 선언한다.
+
+## r11 결과 저장 안전성
+새 스캔 결과 게시 중 Markdown 결과를 GitHub에 쓰기 전에 로컬 evidence에 스캔 및 게시 스냅샷을 체크포인트한다. 기존 최종 결론을 임의로 신규 추천으로 재사용하지 않는다. GitHub 접근 실패·NAS 디스크 장애 등에서는 원격 저장 완료를 보장할 수 없으며 readback 성공 전에는 미완료로 표시한다.
