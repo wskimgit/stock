@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r1';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r2';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -320,7 +320,7 @@ final class LiteMonitor {
         $s=$this->state();$s->last_mailbox_check=lm_iso();$s->next_mailbox_check=lm_iso(time()+self::MAILBOX_SECONDS);$s->last_mailbox_error=$error;$s->heartbeat_at=lm_iso();$this->saveState($s);
     }
     private function retryPublication(): void {
-        $s=$this->state();if(lm_get($s,'publication_pending')!==true)return;$e=LiteRuntime::read('evidence');$summary=lm_get($e,'latest_scan');if($summary instanceof stdClass)$summary=(array)$summary;if(!is_array($summary)){$s->publication_pending=true;$s->last_publication_error='PUBLICATION_SUMMARY_MISSING';$this->saveState($s);return;}$watch=$this->cachedWatchlist();if(!$watch){$s->last_publication_error='PUBLICATION_WATCHLIST_MISSING';$this->saveState($s);return;}
+        $s=$this->state();if(lm_get($s,'publication_pending')!==true)return;$e=LiteRuntime::read('evidence');$summary=lm_get($e,'latest_scan');if($summary instanceof stdClass)$summary=lm_array($summary);if(!is_array($summary)){$s->publication_pending=true;$s->last_publication_error='PUBLICATION_SUMMARY_MISSING';$this->saveState($s);return;}$watch=$this->cachedWatchlist();if(!$watch){$s->last_publication_error='PUBLICATION_WATCHLIST_MISSING';$this->saveState($s);return;}
         try{$ok=$this->publishData($summary,$watch);if($ok){$s=$this->state();$s->last_publish_fingerprint=(string)lm_get($s,'publication_fingerprint','');$s->publication_pending=false;$s->last_publication_error=null;$this->saveState($s);}}
         catch(Throwable $x){$s=$this->state();$s->publication_pending=true;$s->last_publication_error=$x instanceof LiteMonFault?$x->faultCode:'PUBLICATION_FAILED';$this->saveState($s);try{LiteRuntime::log('publication_retry_pending',['code'=>$s->last_publication_error]);}catch(Throwable $ignore){}}
     }
