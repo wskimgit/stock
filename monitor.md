@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r11`**  
+> Build: **`MON-LITE-2.2.3-20261017-r12`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -167,3 +167,21 @@ GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.*
 
 ## r11 결과 저장 안전성
 새 스캔 결과 게시 중 Markdown 결과를 GitHub에 쓰기 전에 로컬 evidence에 스캔 및 게시 스냅샷을 체크포인트한다. 기존 최종 결론을 임의로 신규 추천으로 재사용하지 않는다. GitHub 접근 실패·NAS 디스크 장애 등에서는 원격 저장 완료를 보장할 수 없으며 readback 성공 전에는 미완료로 표시한다.
+
+## 17. ChatGPT 직접 저장 우선 · 실패 복구 필수 (r12)
+사용자가 MON 수행을 요청하면 ChatGPT는 과거 결정을 복사하지 않고 최신 시장·종목 자료를 독립 조사해 국가별 3개, 총 9개와 MS7, 근거·위험·자료시각을 결정한다. **최종 결정의 주체와 GitHub 게시 작업의 1차 책임은 ChatGPT 지시문**이다. PHP의 참고분석은 후보 검토자료에 불과하다.
+
+### 필수 저장 순서
+1. 최신 GitHub 파일의 SHA를 읽고, 독립 판단을 완료한다. 이전 추천을 새 판단으로 자동 승격하지 않는다.
+2. 같은 request_id 및 evaluation_id로 최종 결과 JSON과 사람이 읽는 Markdown을 작성한다. analysis_at 및 independent_sources (서로 다른 독립 근거 최소 2개, url과 checked_at)를 함께 기록한다.
+3. ChatGPT가 직접 GitHub의 mon_data.json과 mon_result.md를 갱신하고, 양쪽을 재조회하여 request_id·선정 3×3·MS7·내용이 일치하는지 확인한다. 성공 시에만 SAVED_VERIFIED를 보고한다.
+4. 한쪽만 저장되거나 SHA 충돌이 나면 최신 원격 파일을 다시 읽고 같은 결정을 안전하게 재적용한다. 시장 재스캔을 반복하지 않는다. 기존 정상 결과를 파괴하거나 다른 최신 결정으로 덮어쓰지 않는다.
+5. 직접 게시가 실패하면 **동일 결정 원문**을 mon_chatgpt_handoff.json의 stage=decision으로 게시한다. PHP는 로컬 result에 pending_remote로 먼저 기록하고 게시 후 재조회한다. 연결 복구 시 동일 결정을 재게시한다.
+6. GitHub 자체에 접근할 수 없으면 지시문만으로 영구 저장할 수 없다. 사용자에게 UNSAVED_REMOTE와 정확한 실패 원인을 알리고, 확인하지 못한 저장을 완료라고 주장하지 않는다.
+7. 실패해도 ChatGPT가 이전 추천을 최종 결론으로 대신하지 않는다. 사용자에게 새 분석 결론과 저장 상태를 각각 명시한다.
+
+### 복구 불변조건
+- 동일 request_id 반복 요청은 멱등 처리한다. 더 최신 request_id가 이미 게시되어 있으면 과거 결과로 덮어쓰지 않는다.
+- PHP가 새 ChatGPT 결정을 자체 생성하거나 임의로 MS7을 변경하지 않는다.
+- mon_data.json과 mon_result.md가 다르면 SAVED_VERIFIED가 아니다. 저장 장애 복구가 신규 종목 분석을 촉발해서는 안 된다.
+- NAS가 꺼져도 ChatGPT 직접 GitHub 저장 경로는 독립적으로 작동할 수 있다. NAS가 재시작하지 않는 동안 PHP 복구는 실행되지 않는다.
