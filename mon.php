@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r4';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r5';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -252,8 +252,20 @@ final class LiteYahoo {
     const RANGE_CACHE_BARS=40;
     private $http;private $rangeCache=[];private $stats=[];
     public function __construct(LiteHttp $http){$this->http=$http;$this->beginTurn();}
-    public function beginTurn(): void {$this->rangeCache=[];$this->stats=['yahoo_range_requests'=>0,'yahoo_range_cache_hits'=>0];}
+    public function beginTurn(): void {$this->rangeCache=[];$this->stats=['yahoo_range_requests'=>0,'yahoo_range_cache_hits'=>0,'yahoo_rows_dropped'=>0,'yahoo_rows_clamped'=>0,'benchmark_fallbacks'=>0,'jp_benchmark_source'=>null];}
     public function stats(): array {return $this->stats;}
+    public static function benchmarkCandidates(string $country,?string $exchange=null): array {
+        if($country==='KR')return [$exchange==='KOSDAQ'?'^KQ11':'^KS11'];if($country==='US')return ['^GSPC'];if($country==='JP')return ['^TOPX','1306.T','^N225'];throw new LiteMonFault('BENCHMARK_COUNTRY_INVALID');
+    }
+    private static function benchmarkFallbackFault(string $code): bool {return in_array($code,['HTTP_404','YAHOO_EMPTY','YAHOO_ROWS_INVALID','YAHOO_CURRENCY_MISMATCH','YAHOO_INVALID_BAR_BURST','YAHOO_LATEST_BAR_INVALID'],true);}
+    public static function sanitizeProviderRows(array $rows): array {
+        $out=[];$dropped=0;$clamped=0;$n=count($rows);$limit=max(2,(int)ceil(max(1,$n)*0.01));
+        foreach($rows as $i=>$r){$bad=false;if(!is_array($r)||count($r)<6||!is_string($r[0])||!preg_match('/^\d{4}-\d{2}-\d{2}$/',$r[0]))$bad=true;$v=[];if(!$bad)for($k=1;$k<6;$k++){$x=lm_num($r[$k]??null);if($x===null||($k<5?$x<=0:$x<0)){$bad=true;break;}$v[$k]=$x;}
+            if(!$bad){$o=$v[1];$h=$v[2];$l=$v[3];$c=$v[4];$top=max($o,$c);$bottom=min($o,$c);$tol=max(1e-8,max(abs($o),abs($h),abs($l),abs($c),1.0)*1e-9);if($h+$tol<$l||$h+$tol<$top||$l-$tol>$bottom)$bad=true;else{if($h<$top){$h=$top;$clamped++;}if($l>$bottom){$l=$bottom;$clamped++;}$r[1]=$o;$r[2]=$h;$r[3]=$l;$r[4]=$c;$r[5]=$v[5];}}
+            if($bad){if($i===$n-1)throw new LiteMonFault('YAHOO_LATEST_BAR_INVALID');$dropped++;if($dropped>$limit)throw new LiteMonFault('YAHOO_INVALID_BAR_BURST');continue;}$out[]=$r;
+        }
+        return ['rows'=>$out,'dropped'=>$dropped,'clamped'=>$clamped];
+    }
 
     public static function ticker(array $s): string {if(isset($s['raw_ticker']))return (string)$s['raw_ticker'];if($s['country']==='KR')return $s['symbol'].($s['exchange']==='KOSDAQ'?'.KQ':'.KS');if($s['country']==='JP')return $s['symbol'].'.T';return str_replace('.','-',$s['symbol']);}
     // Yahoo daily OHLC/Close is already split-adjusted; never apply split events a second time.
@@ -263,7 +275,7 @@ final class LiteYahoo {
     private function fetchRange(array $s,int $p1,int $p2): array {
         $tickerRaw=self::ticker($s);$p2Day=gmdate('Y-m-d',$p2);$cached=$this->rangeCache[$tickerRaw]??null;
         if(is_array($cached)&&$cached['p2_day']===$p2Day&&$cached['p1']<=$p1){$this->stats['yahoo_range_cache_hits']++;$from=gmdate('Y-m-d',$p1);return array_values(array_filter($cached['rows'],static function($r)use($from){return $r[0]>=$from;}));}
-        $ticker=rawurlencode($tickerRaw);$url='https://query1.finance.yahoo.com/v8/finance/chart/'.$ticker.'?period1='.$p1.'&period2='.$p2.'&interval=1d&events=splits&includeAdjustedClose=false';$this->stats['yahoo_range_requests']++;$j=lm_decode($this->http->get($url,[],8));$r=lm_get(lm_get(lm_get($j,'chart'),'result'),0);if(!$r)throw new LiteMonFault('YAHOO_EMPTY');$m=lm_get($r,'meta');$cur=(string)lm_get($m,'currency');if($cur!==$s['currency'])throw new LiteMonFault('YAHOO_CURRENCY_MISMATCH');$ts=lm_get($r,'timestamp',[]);$q=lm_get(lm_get(lm_get($r,'indicators'),'quote'),0);if(!is_array($ts)||!is_object($q))throw new LiteMonFault('YAHOO_ROWS_INVALID');$rows=[];foreach($ts as $i=>$t){$o=lm_num(lm_get($q,'open',[])[$i]??null);$h=lm_num(lm_get($q,'high',[])[$i]??null);$l=lm_num(lm_get($q,'low',[])[$i]??null);$c=lm_num(lm_get($q,'close',[])[$i]??null);$v=lm_num(lm_get($q,'volume',[])[$i]??null);if($o===null||$h===null||$l===null||$c===null||$v===null)continue;$date=gmdate('Y-m-d',(int)$t);$rows[]=['_ts'=>(int)$t,0=>$date,1=>$o,2=>$h,3=>$l,4=>$c,5=>$v];}$rows=self::completed(LiteSwing::bars($rows),$s['country']);
+        $ticker=rawurlencode($tickerRaw);$url='https://query1.finance.yahoo.com/v8/finance/chart/'.$ticker.'?period1='.$p1.'&period2='.$p2.'&interval=1d&events=splits&includeAdjustedClose=false';$this->stats['yahoo_range_requests']++;$j=lm_decode($this->http->get($url,[],8));$r=lm_get(lm_get(lm_get($j,'chart'),'result'),0);if(!$r)throw new LiteMonFault('YAHOO_EMPTY');$m=lm_get($r,'meta');$cur=(string)lm_get($m,'currency');if($cur!==$s['currency'])throw new LiteMonFault('YAHOO_CURRENCY_MISMATCH');$ts=lm_get($r,'timestamp',[]);$q=lm_get(lm_get(lm_get($r,'indicators'),'quote'),0);if(!is_array($ts)||!is_object($q))throw new LiteMonFault('YAHOO_ROWS_INVALID');$rows=[];foreach($ts as $i=>$t){$o=lm_num(lm_get($q,'open',[])[$i]??null);$h=lm_num(lm_get($q,'high',[])[$i]??null);$l=lm_num(lm_get($q,'low',[])[$i]??null);$c=lm_num(lm_get($q,'close',[])[$i]??null);$v=lm_num(lm_get($q,'volume',[])[$i]??null);if($o===null||$h===null||$l===null||$c===null||$v===null)continue;$date=gmdate('Y-m-d',(int)$t);$rows[]=['_ts'=>(int)$t,0=>$date,1=>$o,2=>$h,3=>$l,4=>$c,5=>$v];}$rows=self::completed($rows,$s['country']);$clean=self::sanitizeProviderRows($rows);$this->stats['yahoo_rows_dropped']+=$clean['dropped'];$this->stats['yahoo_rows_clamped']+=$clean['clamped'];$rows=LiteSwing::bars($clean['rows']);
         $cacheRows=array_slice($rows,-self::RANGE_CACHE_BARS);$cacheP1=$cacheRows?strtotime($cacheRows[0][0].' 00:00:00 UTC'):$p1;if($cacheP1===false)$cacheP1=$p1;if(!is_array($cached)||$cacheP1<$cached['p1'])$this->rangeCache[$tickerRaw]=['p1'=>$cacheP1,'p2_day'=>$p2Day,'rows'=>$cacheRows];return $rows;
     }
     public function daily(array $s,int $days=220): array {
@@ -273,7 +285,7 @@ final class LiteYahoo {
         $t=strtotime($lastDate.' 00:00:00 UTC');if($t===false)throw new LiteMonFault('INCREMENTAL_DATE_INVALID');$p1=$t-max(7,$overlapDays)*86400;$p2=time()+86400;return $this->fetchRange($s,$p1,$p2);
     }
     public function benchmark(string $country,?string $exchange=null,int $days=220): array {
-        if($country==='KR')$ticker=$exchange==='KOSDAQ'?'^KQ11':'^KS11';elseif($country==='US')$ticker='^GSPC';else $ticker='^TOPX';$s=['symbol_id'=>$country.'|INDEX|'.$ticker,'symbol'=>$ticker,'raw_ticker'=>$ticker,'country'=>$country,'exchange'=>$country==='JP'?'TSE':($country==='KR'?($exchange==='KOSDAQ'?'KOSDAQ':'KOSPI'):'NYSE'),'currency'=>['KR'=>'KRW','US'=>'USD','JP'=>'JPY'][$country],'name'=>$ticker];return $this->daily($s,$days);
+        $tickers=self::benchmarkCandidates($country,$exchange);$last=null;foreach($tickers as $i=>$ticker){$s=['symbol_id'=>$country.'|INDEX|'.$ticker,'symbol'=>$ticker,'raw_ticker'=>$ticker,'country'=>$country,'exchange'=>$country==='JP'?'TSE':($country==='KR'?($exchange==='KOSDAQ'?'KOSDAQ':'KOSPI'):'NYSE'),'currency'=>['KR'=>'KRW','US'=>'USD','JP'=>'JPY'][$country],'name'=>$ticker];try{$rows=$this->daily($s,$days);if($country==='JP')$this->stats['jp_benchmark_source']=$ticker;if($i>0)$this->stats['benchmark_fallbacks']++;return $rows;}catch(LiteMonFault $e){$last=$e;if($country!=='JP'||$i===count($tickers)-1||!self::benchmarkFallbackFault($e->faultCode))throw $e;}}if($last)throw $last;throw new LiteMonFault('BENCHMARK_UNAVAILABLE');
     }
 }
 
