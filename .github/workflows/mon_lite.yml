@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r4'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r5'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -108,6 +108,14 @@ jobs:
           php -r 'require "mon.php"; foreach ([[31,3],[26,2],[21,1],[19,0]] as $x) { $r=["memory_available_bytes"=>$x[0]*1048576]; if (LiteMonitor::lowMemoryBatch($r)!==$x[1]) exit(1);} echo "low-memory batch PASS\n";'
           grep -F "const LOW_MEMORY_RETRY_SECONDS=120;" mon.php
           grep -F "full_resync_pending" mon.php
+          rm -rf mon_runtime
+
+      - name: Provider data recovery
+        run: |
+          set -eu
+          php -r 'require "mon.php"; $rows=[["2026-01-01",100,101,99,100,10],["2026-01-02",100,90,95,100,10],["2026-01-03",101,102,100,101,10]]; $x=LiteYahoo::sanitizeProviderRows($rows); if ($x["dropped"]!==1 || count($x["rows"])!==2) {var_export($x); exit(1);} echo "isolated old bad bar recovery PASS\n";'
+          php -r 'require "mon.php"; $ok=false; try {LiteYahoo::sanitizeProviderRows([["2026-01-01",100,101,99,100,10],["2026-01-02",100,90,95,100,10]]);} catch (LiteMonFault $e) {$ok=$e->faultCode==="YAHOO_LATEST_BAR_INVALID";} if(!$ok) exit(1); echo "latest bad bar protection PASS\n";'
+          php -r 'require "mon.php"; $x=LiteYahoo::benchmarkCandidates("JP"); if ($x!==["^TOPX","1306.T","^N225"]) {var_export($x); exit(1);} echo "JP benchmark fallback policy PASS\n";'
           rm -rf mon_runtime
 
       - name: Persisted JSON object normalization
