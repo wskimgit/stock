@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r7'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r8'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -68,6 +68,9 @@ jobs:
           assert '유일한 실행 권위 지시문' in prompt
           assert '비권위 요약' in wiki
           assert 'mon_chatgpt_bridge.php' in prompt and '사용하지 않는다' in prompt
+          assert '최종 추천 권한은 ChatGPT decision에만 있다' in prompt
+          assert 'PHP/MON 참고순위나 참고 MS7을 ChatGPT 최종 결정으로 자동 승격' in prompt
+          assert 'ChatGPT final decision' in wiki
 
           data = json.loads((root/'mon_data.json').read_text(encoding='utf-8'))
           hand = json.loads((root/'mon_chatgpt_handoff.json').read_text(encoding='utf-8'))
@@ -125,6 +128,15 @@ jobs:
           php -r 'require "mon.php"; $a=["metrics"=>["RS20_pp"=>5,"last_close"=>110,"MA5"=>105,"MA20"=>100],"technical"=>["technical_qualified"=>true,"histogram"=>1]]; $m=LiteSwing::ms7FromAnalysis($a); if($m["code"]!=="M2") {var_export($m); exit(1);} echo "MS7 strong mapping PASS\n";'
           php -r 'require "mon.php"; $r=LiteMonitor::recommendThree([],[]); foreach(["KR","US","JP"] as $c){if(count($r[$c])!==3) exit(1); foreach($r[$c] as $x) if(($x["ms7"]["code"]??"")!=="W") exit(2);} echo "always-three fallback PASS\n";'
           php -r 'require "mon.php"; $rows=[["symbol_id"=>"KR|KOSPI|111111","country"=>"KR","name"=>"A","metrics"=>["RS20_pp"=>4,"R20"=>.1,"ADV20"=>100,"last_close"=>110,"MA5"=>105,"MA20"=>100],"technical"=>["technical_qualified"=>true,"histogram"=>1],"reason_codes"=>[]]]; $r=LiteMonitor::recommendThree($rows,["KR|KOSPI|111111","KR|KOSPI|222222","KR|KOSPI|333333"]); if(count($r["KR"])!==3||$r["KR"][0]["ms7"]["code"]!=="M2") exit(1); echo "evaluated plus pending fill PASS\n";'
+          rm -rf mon_runtime
+      - name: ChatGPT final authority contract
+        run: |
+          set -eu
+          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","M0"],["KR","KOSPI","105560","M1"],["KR","KOSPI","000660","W"],["US","NASDAQ","AAPL","M1"],["US","NASDAQ","NVDA","M2"],["US","NYSE","JPM","M0"],["JP","TSE","7203","M1"],["JP","TSE","6758","M0"],["JP","TSE","8306","W"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[2],"ms7"=>["code"=>$x[3]],"reason"=>"ChatGPT independent reason", "risk_note"=>"Independent risk"];} $out=LiteMonitor::normalizeChatgptDecision($sel); if(count($out)!==9) exit(1); if($out[4]["symbol_id"]!=="US|NASDAQ|NVDA"||$out[4]["ms7"]["code"]!=="M2"||$out[4]["ms7"]["confidence"]!=="CHATGPT_FINAL") exit(2); echo "ChatGPT MS7 preservation PASS\n";'
+          php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930"],["KR","KOSPI","105560"],["US","NASDAQ","AAPL"],["US","NASDAQ","NVDA"],["US","NYSE","JPM"],["JP","TSE","7203"],["JP","TSE","6758"],["JP","TSE","8306"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_REQUIRES_THREE_PER_COUNTRY";} if(!$ok) exit(1); echo "exact three per country PASS\n";'
+          grep -F "'authority'=>'chatgpt_final'" mon.php
+          grep -F "'analysis_reference'" mon.php
+          grep -F "DECISION_AUTHORITY_REQUIRED" mon.php
           rm -rf mon_runtime
       - name: Persisted JSON object normalization
         run: |
