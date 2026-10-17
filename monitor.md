@@ -56,9 +56,20 @@
 ## 6. 데이터와 계산
 주 원천은 Yahoo 완료 일봉이다. 정상 자료는 재사용하고, 중대한 중복구간 차이가 있는 종목만 220봉 전체 재수집한다.
 
-핵심 계산: MA5/10/20, MACD **12·26·9**, ATR14, R20 / RS20, ADV20, 지지 S / 저항 R, 눌림·돌파 참고구간.
+핵심 계산:
+- MA5/10/20
+- MACD **12·26·9**
+- ATR14
+- R20 / RS20
+- ADV20
+- 지지 S / 저항 R
+- 눌림·돌파 참고구간
 
-시장 기준: KOSPI `^KS11`, KOSDAQ `^KQ11`, 미국 `^GSPC`, 일본 `^TOPX`.
+시장 기준:
+- KOSPI `^KS11`
+- KOSDAQ `^KQ11`
+- 미국 `^GSPC`
+- 일본 `^TOPX`
 
 기본 자격은 **RS20 > 0 AND (MA5 재돌파 OR MACD GOLD/AFTER/BEFORE)** 이다. `rank_hint`는 RS20 → R20 → ADV20 순의 참고값이며 최종 선정 권한은 ChatGPT에 있다.
 
@@ -69,7 +80,7 @@
 {"contract":"MON-LITE-BRIDGE-1.0","policy":"MON-LITE-OPS-2.2.3","stage":"candidates","request_id":"고유 실행 ID","candidate_ids":["KR|KOSPI|005930","US|NASDAQ|NVDA","JP|TSE|6758"]}
 ```
 
-새 request SHA가 들어오면 기존 cache가 있더라도 해당 후보는 `CANDIDATE_REFRESH_REQUIRED`로 전환하여 최신 완료봉을 확인한 뒤 details를 만든다. 오래된 캐시를 새 판단 근거로 즉시 반환하지 않는다.
+새 request SHA가 들어오면 기존 cache가 있더라도 해당 후보는 `CANDIDATE_REFRESH_REQUIRED`로 전환하여 최신 완료봉을 확인한 뒤 details를 만든다. 따라서 오래된 캐시를 새 판단 근거로 즉시 반환하지 않는다.
 
 ## 8. 최종 재확인과 ChatGPT 판단
 - 적격 후보 중 국가별 상위 3개는 최종 짧은 구간 재확인을 수행한다.
@@ -97,10 +108,17 @@ GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.*
 - 로그는 `mon.log.php` / `mon.log.old.php`로 PHP guard를 붙여 직접 노출을 줄인다.
 
 ## 11. 통신 원칙
-GitHub ETag/304, 동일 회차 메모리 cache, gzip/deflate, cURL handle/keepalive 재사용을 적용한다. GET의 일시 오류만 제한 재시도하고 PUT은 자동 재시도하지 않는다. 동일 결과 fingerprint면 재게시하지 않으며 중요한 결과는 readback으로 검증한다.
+- GitHub ETag/304
+- 동일 회차 메모리 cache
+- gzip/deflate
+- cURL handle/keepalive 재사용
+- GET의 일시 오류만 제한 재시도
+- PUT 자동 재시도 금지
+- 동일 결과 fingerprint면 재게시 생략
+- 중요한 결과는 readback 검증
 
 ## 12. 상태·오류 분리
-운영 상태는 `IDLE / SCAN / WAIT / RESULT / ERROR` 중심으로 표시한다. Mailbox 오류와 결과 게시 오류는 각각 `last_mailbox_error`, `last_publication_error`로 분리해 시장 스캔 전체 오류로 확대하지 않는다.
+운영 상태는 `IDLE / SCAN / WAIT / RESULT / ERROR` 중심으로 표시한다. Mailbox 오류와 결과 게시 오류는 각각 `last_mailbox_error`, `last_publication_error`로 분리해 **시장 스캔 전체 오류로 확대하지 않는다.**
 
 ## 13. 금지사항
 자동 주문/자동매매, cron/부팅 자동시작, 과거 decision 재사용, 미확인 가격의 현재가 표시, 정상 PASS 자료 반복 재검증, 운영상 필요 없는 파일·통신 확대를 금지한다.
