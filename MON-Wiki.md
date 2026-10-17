@@ -1,10 +1,10 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r7` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r8` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
-`IDLE → candidates 접수 → 후보 최신화 → SCAN → 나라별 3종목+MS7 생성 → mon_result.md + mon_data.json → RESULT/WAIT`
+`IDLE → candidates 접수 → PHP 보조분석 3×3 → ChatGPT 독립 재분석 → ChatGPT 최종 3×3+MS7 → 저장 → RESULT/WAIT`
 
 후보가 없어도 내장 fallback으로 KR/US/JP 각 3개를 구성해 결과를 만든다. 새 후보 요청은 기존 활성 후보군을 교체하며 기존 cache가 있어도 최신 완료봉을 다시 확인한다.
 
@@ -17,14 +17,21 @@
 ## 결과 신뢰도
 - MA5/10/20, MACD(12,26,9), ATR14, R20, RS20, ADV20, S/R
 - 정밀 적격: `RS20 > 0` + 스윙 기술신호는 참고값일 뿐 추천 gate가 아님
-- **KR/US/JP 각 3종목을 항상 추천**
-- 모든 추천에 MS7 `M0/M1/M2/W/S1/S2/S3` 표시
-- 자료 부족 후보는 `W PROVISIONAL`로 포함 가능
-- 추천은 매수 강제가 아니라 모니터링 우선순위
+- PHP/MON은 KR/US/JP 각 3개의 **보조 참고후보**와 참고 MS7을 제공
+- 최종 추천은 ChatGPT가 최신 시장·업종·가격·뉴스·리스크를 독립 재분석해 KR/US/JP 각 3종목을 확정
+- ChatGPT는 PHP 후보군 밖 종목도 최종 선정 가능
+- 최종 MS7 `M0/M1/M2/W/S1/S2/S3`은 ChatGPT가 직접 결정하며 PHP가 덮어쓰지 않음
+- PHP 참고분석은 최종 추천 권한이 없음
+
+## 최종 권한
+- MON 시스템 내부 최종 추천 권한은 **ChatGPT final decision**에만 있다.
+- PHP/MON의 점수·순위·적격·참고 MS7은 보조증거다.
+- 최종 decision은 나라별 3종목, ChatGPT MS7, 선정 근거, 위험요인, 국가별 시장판단을 포함한다.
+- PHP는 형식·무결성만 확인하고 최종 종목·MS7을 재판정하지 않는다.
 
 ## 장애 시나리오
 - GitHub 결과 게시 실패: 시장 재스캔 없이 게시만 재시도
-- 후보 재확인 실패: 추천에서 배제하지 않고 경고만 표시; 자료 부족 시 W PROVISIONAL
+- 후보 재확인 실패: PHP 보조분석에 경고만 남기며 ChatGPT 최종 권한을 제한하지 않음
 - bad handoff/policy: mailbox 오류로 격리, 시장 스캔은 계속
 - 일본 benchmark: `^TOPX`가 불가하면 `1306.T`, 다시 불가하면 `^N225` 사용
 - Yahoo 과거 고립 OHLC 오류: 제한적으로 제외하되 최신 완료봉 오류는 차단
