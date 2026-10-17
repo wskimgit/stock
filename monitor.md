@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r8`**  
+> Build: **`MON-LITE-2.2.3-20261017-r9`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -92,7 +92,7 @@
 - ChatGPT는 최종 결정 전에 MON 자료와 별도로 최신 시장 레짐, 업종·테마 주도성, 현재 거래가능 가격, 추세·상대강도, 거래량, 과열·추격위험, 주요 뉴스·촉매, 하방위험을 독립적으로 확인한다.
 - ChatGPT는 필요하면 **PHP 후보군 밖 종목도 새로 발굴하여 선정**할 수 있다. PHP 후보 이력·적격·final_check는 최종 권한을 제한하지 않는다.
 - 최종 결과는 KR/US/JP 각각 **정확히 3종목**이다.
-- 각 최종 종목에는 ChatGPT가 직접 결정한 MS7, 선정 근거 `reason`, 위험요인 `risk_note`를 포함한다.
+- 각 최종 종목에는 **종목명 `name`과 종목코드 `symbol_id`를 모두 필수로 포함**하고, ChatGPT가 직접 결정한 MS7, 선정 근거 `reason`, 위험요인 `risk_note`를 포함한다.
 - **MS7 고정 체계:** `M0 관찰 → M1 매입 검토 → M2 분할매입 → W 대기 → S1 매도 준비 → S2 분할매도 → S3 대부분 매도`.
 - ChatGPT final MS7은 PHP 참고 MS7에 의해 자동 변경되거나 덮어써지지 않는다.
 - 최종 decision에는 `authority: chatgpt_final`, `independent_analysis: true`, KR/US/JP별 `market_view`가 필수다.
@@ -112,12 +112,12 @@
   "evaluation_id":"...",
   "market_view":{"KR":"...","US":"...","JP":"..."},
   "selected":[
-    {"symbol_id":"KR|KOSPI|005930","ms7":{"code":"M1"},"reason":"독립 분석 근거","risk_note":"핵심 위험"}
+    {"symbol_id":"KR|KOSPI|005930","name":"삼성전자","ms7":{"code":"M1"},"reason":"독립 분석 근거","risk_note":"핵심 위험"}
   ]
 }
 ```
 ## 9. 결과 저장과 게시 복구
-스캔 종료 시 PHP/MON은 `mon_data.json`과 `mon_result.md`에 **`analysis_reference` 3×3과 참고 MS7만 저장**하고 `decision_status=awaiting_chatgpt`로 표시한다. 이것은 최종 추천이 아니다. ChatGPT가 독립 final decision을 저장한 뒤에만 `recommendations`와 `mon_result.md`가 최종 결과로 갱신되며, 두 파일의 readback이 일치해야 `saved`로 처리한다.
+스캔 종료 시 PHP/MON은 `mon_data.json`과 `mon_result.md`에 **`analysis_reference` 3×3과 참고 MS7만 저장**하고 `decision_status=awaiting_chatgpt`로 표시한다. 이것은 최종 추천이 아니다. ChatGPT가 독립 final decision을 저장한 뒤에만 `recommendations`와 `mon_result.md`가 최종 결과로 갱신되며, **최종 결과 표시는 항상 `종목명 (종목코드)` 형식**으로 하고 JSON에도 `name`과 `symbol_id`를 모두 보존한다. 두 파일의 readback이 일치해야 `saved`로 처리한다.
 
 GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.** 로컬 `evidence.php`의 최신 scan summary와 cache watchlist로 결과 게시만 재시도한다. 저메모리 중간 배치는 로컬 체크포인트와 details 응답을 우선하고, 현재 pending 큐를 한 차례 모두 시도한 시점에 `mon_data.json`/`mon_result.md`를 게시해 통신을 줄인다. 정상 후보가 일부만 확인돼도 그 범위의 결과를 저장하고 미확인 범위를 명시한다.
 
