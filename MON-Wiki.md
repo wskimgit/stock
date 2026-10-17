@@ -55,3 +55,6 @@ Runtime은 최대 11개 파일, 64 MiB, 단일 16 MiB이며 로그도 PHP guard�
 4. `mon_data.json`, `mon_result.md`, handoff/response — 현재 실행 상태/결과
 
 버전 변경은 `mon.php + monitor.md + MON-Wiki.md + 활성 JSON policy`를 같은 변경 묶음에서 맞춘다.
+
+## 최종 결론 보존 (2026-10-17)
+새 스캔은 마지막 ChatGPT 최종 결론을 삭제하지 않습니다. 새 결정이 없으면 `previous_final_preserved`로 표시하며, 이는 **과거 판단의 보존**이지 현재 매입 추천이 아닙니다. 두 원격 결과 파일의 readback이 성공해야 저장 완료로 판단합니다. 자세한 규칙은 `monitor.md` 15절을 따릅니다.
