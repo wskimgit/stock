@@ -86,6 +86,10 @@ jobs:
           print('MON consistency PASS')
           PY
 
+      - name: Persisted JSON object normalization
+        run: |
+          php -r 'require "mon.php"; $x=json_decode("{\"results\":[{\"eligible\":true,\"metrics\":{\"RS20_pp\":10}}]}"); $a=lm_array($x); if (!is_array($a) || !is_array($a["results"][0]) || !is_array($a["results"][0]["metrics"])) exit(1); echo "persisted normalization PASS\\n";'
+
       - name: Low-load runtime invariants
         run: |
           set -eu
