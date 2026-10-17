@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r10` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r11` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
 `IDLE → candidates 접수 → PHP 보조분석 3×3 → ChatGPT 독립 재분석 → ChatGPT 최종 3×3+MS7 → 저장 → RESULT/WAIT`
@@ -61,3 +61,6 @@ Runtime은 최대 11개 파일, 64 MiB, 단일 16 MiB이며 로그도 PHP guard�
 
 ## r10 독립 결정 원칙
 과거 결정은 previous_chatgpt_final로만 보존하고 새 스캔의 활성 recommendations는 비운다. ChatGPT는 최신 외부 근거를 독립적으로 검증해 3개국 3종목씩 최종 결정한다. 새로운 판단 전에는 신규 추천이 확정된 것처럼 표시하지 않는다.
+
+## r11 결과 저장 안전성
+새 스캔 결과 게시 중 Markdown 결과를 GitHub에 쓰기 전에 로컬 evidence에 스캔 및 게시 스냅샷을 체크포인트한다. 기존 최종 결론을 임의로 신규 추천으로 재사용하지 않는다. GitHub 접근 실패·NAS 디스크 장애 등에서는 원격 저장 완료를 보장할 수 없으며 readback 성공 전에는 미완료로 표시한다.
