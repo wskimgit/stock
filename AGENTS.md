@@ -1,22 +1,26 @@
 # AGENTS.md
 
-These instructions apply to coding agents maintaining MON and Mgdaemon in this repository.
+These instructions apply to **MON only** in this repository.
+
+## Current authority
+- Runtime code: `mon.php`
+- Authoritative operating instruction: `monitor.md`
+- Non-authoritative summary: `MON-Wiki.md`
+- Current policy: `MON-LITE-OPS-2.2.3`
+- Manual NAS start only; no cron, autostart, auto-restart or orders.
 
 ## Mandatory change acceptance
-
-Read and follow `CHANGE_GATE.md` before editing and before reporting completion. Required evidence missing or failing means the claimed acceptance level is blocked. Inspect the exact current source and reconcile repository/deployed identity first; do not infer code from generated reports.
+Read and follow `CHANGE_GATE.md` before editing and before reporting completion. Inspect the exact current source first. Do not reconstruct current behavior from Git history or deleted legacy files.
 
 ## Operating boundaries
+- Preserve the selection/numerical contract unless the user explicitly requests a strategy change.
+- Keep PHP 7.4 compatibility and bounded CPU/memory/network usage.
+- Do not add automatic trading or broker order execution.
+- Do not mutate current market/result JSON during code maintenance unless the user explicitly requests initialization/reset or the runtime itself is performing its normal publication.
+- Keep credentials and private NAS/account data out of GitHub.
+- Treat Git publication, NAS deployment and live NAS verification as separate states.
 
-- Existing MON selection, numerical, completion and operating contracts in `monitor.md` remain unchanged.
-- Preserve no-orders behavior, manual NAS start and existing no-auto-start/no-auto-restart constraints.
-- Do not mutate operational data or generated market reports during a code-maintenance task.
-- Keep PHP 7.4 compatibility and bounded CPU/memory use.
-- No deployment, daemon control, secrets, permission changes or real orders are authorized by this file.
-- Keep public evidence synthetic/redacted; never commit private logs, account state or credentials.
+## Repository shape
+The current tree is intentionally minimal. Do not reintroduce old MON 1.x reports, archives, bridge code, legacy tests, generated market snapshots, ORDER data, STC14 output or Mgdaemon output unless the user explicitly restores those systems.
 
-## Source availability
-
-`mgdaemon.md` is generated output, not Mgdaemon source or a persistent developer instruction. Verify the actual Mgdaemon source location/version/hash before changing that component. If source is absent, report the source/provenance blocker and do not claim its code was checked or patched.
-
-For changes, use a reviewable branch/PR and include the concise evidence record required by `CHANGE_GATE.md`. Git publication, NAS deployment and live verification are separate states.
+Use a reviewable branch/PR for code or contract changes and bind verification to the exact final artifact.
