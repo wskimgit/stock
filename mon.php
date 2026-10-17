@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r6';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r7';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -332,7 +332,7 @@ final class LiteMonitor {
     private function loadRemoteWatchlist(bool $preferCache=false): array {
         if($preferCache){$cached=$this->cachedWatchlist();if($cached)return $cached;}
         $rows=[];$g=$this->http->githubGet('mon_data.json');if($g&&trim((string)$g['content'])!==''){try{$d=lm_decode($g['content']);if(lm_get($d,'contract')==='MON-LITE-DATA-2.2'&&lm_get($d,'policy')===MON_LITE_POLICY){$w=lm_get(lm_get($d,'watchlist'),'symbols',[]);if(is_array($w))foreach($w as $x){$sid=(string)lm_get($x,'symbol_id');$a=self::symbolFromId($sid,$x);if($a)$rows[$sid]=$a;}}}catch(LiteMonFault $ignore){}}
-        if(!$rows)foreach($this->cachedWatchlist() as $x)$rows[$x['symbol_id']]=$x;if(!$rows)foreach($this->handoffWatchlist() as $x)$rows[$x['symbol_id']]=$x;if(!$rows)throw new LiteMonFault('WATCHLIST_EMPTY_WAITING_FOR_CANDIDATES');return array_values($rows);
+        if(!$rows)foreach($this->cachedWatchlist() as $x)$rows[$x['symbol_id']]=$x;if(!$rows)foreach($this->handoffWatchlist() as $x)$rows[$x['symbol_id']]=$x;if(!$rows)foreach(self::fallbackCandidates() as $fallbacks)foreach($fallbacks as $f){$a=self::symbolFromId($f['symbol_id'],$f);if($a)$rows[$a['symbol_id']]=$a;}if(!$rows)throw new LiteMonFault('WATCHLIST_FALLBACK_UNAVAILABLE');return array_values($rows);
     }
     private function cacheObj(): stdClass {$c=LiteRuntime::read('cache');if(!in_array(lm_get($c,'contract'),['MON-LITE-CACHE-1.0','MON-LITE-CACHE-1.1','MON-LITE-CACHE-1.2'],true))$c=(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>[],'symbols'=>new stdClass(),'benchmarks'=>new stdClass(),'benchmark_meta'=>new stdClass(),'last_full_resync_at'=>null,'full_resync_pending'=>false,'updated_at'=>null];$c->contract='MON-LITE-CACHE-1.2';if(!property_exists($c,'symbols')||!is_object($c->symbols))$c->symbols=new stdClass();foreach(get_object_vars($c->symbols) as $sid=>$row)if($row instanceof stdClass&&lm_get($row,'analysis') instanceof stdClass)$row->analysis=lm_array($row->analysis);if(!property_exists($c,'benchmarks')||!is_object($c->benchmarks))$c->benchmarks=new stdClass();if(!property_exists($c,'last_full_resync_at'))$c->last_full_resync_at=null;if(!property_exists($c,'full_resync_pending'))$c->full_resync_pending=false;if(!property_exists($c,'benchmark_meta')||!is_object($c->benchmark_meta))$c->benchmark_meta=new stdClass();return $c;}
     private function networkStats(array $stats): array {return array_merge($stats,$this->http->stats(),$this->yahoo->stats());}

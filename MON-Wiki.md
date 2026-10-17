@@ -1,12 +1,12 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.  
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r6` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r7` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 정상 시나리오
 `IDLE → candidates 접수 → 후보 최신화 → SCAN → 나라별 3종목+MS7 생성 → mon_result.md + mon_data.json → RESULT/WAIT`
 
-후보가 없으면 `WAITING_FOR_CANDIDATES`로 대기한다. 새 후보 요청은 기존 활성 후보군을 교체하며 기존 cache가 있어도 최신 완료봉을 다시 확인한다.
+후보가 없어도 내장 fallback으로 KR/US/JP 각 3개를 구성해 결과를 만든다. 새 후보 요청은 기존 활성 후보군을 교체하며 기존 cache가 있어도 최신 완료봉을 다시 확인한다.
 
 ## 주기
 - Mailbox: 대기 상태 5분; 스캔 중이면 종료 직후

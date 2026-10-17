@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r6`**  
+> Build: **`MON-LITE-2.2.3-20261017-r7`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -15,7 +15,7 @@
 - NAS 로컬 MON 자료가 없어도 `/web/mon_runtime`을 자동 생성한다.
 - MON의 현재 코드·지시문·상태·결과는 `wskimgit/stock`만 사용한다. SIS에는 MON CURRENT 사본을 두지 않는다.
 - 활성 파일의 `policy`는 모두 `MON-LITE-OPS-2.2.3`이어야 한다.
-- 초기 handoff는 `stage=idle`이다. 후보가 없으면 오류가 아니라 `WAIT / waiting_for_candidates`로 대기한다.
+- 초기 handoff는 `stage=idle`이다. 후보가 없어도 대기만 하지 않고 내장 fallback 후보군(KR/US/JP 각 3개)으로 결과를 만든다.
 - 로컬 request 증명이 없는 과거 `decision`은 재실행하지 않는다.
 - 새 candidates 요청은 **현재 활성 후보군 전체를 교체**한다. 과거 강한 후보를 유지하려면 새 후보군에 다시 포함한다.
 
@@ -79,7 +79,7 @@
 `RS20 > 0 AND (MA5 재돌파 OR MACD GOLD/AFTER/BEFORE)`는 **정밀 적격 참고신호**로만 유지하며 추천의 필수조건으로 사용하지 않는다. 추천은 가능한 평가결과를 우선 사용하고, 자료가 부족해도 나라별 3종목을 채운다.
 
 ## 7. 후보 요청
-사용자가 `mon 지시문을 수행하라`고 하면 ChatGPT는 신규 후보·최근 MON 후보·과거 강한 후보를 넓게 섞어 후보군을 만든다. 기본은 나라별 약 10개, 총 30개 내외이며 **각 나라는 최소 3개 후보**를 넣는다. 후보가 부족하거나 수집이 실패해도 MON은 내장 fallback까지 사용해 나라별 3종목을 항상 출력한다.
+사용자가 `mon 지시문을 수행하라`고 하면 ChatGPT는 신규 후보·최근 MON 후보·과거 강한 후보를 넓게 섞어 후보군을 만든다. 기본은 나라별 약 10개, 총 30개 내외이며 **각 나라는 최소 3개 후보**를 넣는다. 후보가 부족하거나 수집이 실패해도 MON은 내장 fallback까지 사용해 나라별 3종목을 항상 출력한다. **후보 요청 자체가 없어도 동일하게 3×3을 출력한다.**
 
 ```json
 {"contract":"MON-LITE-BRIDGE-1.0","policy":"MON-LITE-OPS-2.2.3","stage":"candidates","request_id":"고유 실행 ID","candidate_ids":["KR|KOSPI|005930","US|NASDAQ|NVDA","JP|TSE|6758"]}
