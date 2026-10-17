@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**  
-> Build: **`MON-LITE-2.2.3-20261017-r3`**  
+> Build: **`MON-LITE-2.2.3-20261017-r4`**  
 > 단일 권위 저장소: **`wskimgit/stock`**  
 > 실행 권위 문서: **`monitor.md`**  
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.  
@@ -39,7 +39,9 @@
 - 새 candidates 요청은 **대기 상태에서는 최대 5분 안에** 접수한다. 정밀 스캔 중이면 현재 스캔 종료 직후 접수하고, 접수 후 약 30초 뒤 새 후보를 최신 완료봉으로 재확인한다.
 - 정상 운용은 최근 구간 증분수집을 우선한다.
 - **7일마다 220봉 전체 재동기화**한다.
-- 자원 압박 시 정밀 처리를 시작하지 않고 30분 뒤 재확인한다.
+- 메모리 압박 시 전체를 미루지 않는다. 구형 커널에서 `MemAvailable`이 없으면 reclaimable cache/buffer까지 포함해 가용 메모리를 추정한다.
+- 계산된 가용 메모리가 약 20 MiB 이상이면 **3/2/1종목 저메모리 배치**로 처리하고 매 종목 체크포인트 후 메모리를 정리한다. 미처리 후보가 있으면 **2분 후 다음 배치**를 이어간다.
+- 약 20 MiB 미만 또는 CPU load 압박처럼 실제 위험 구간에서만 정밀 처리를 30분 연기한다.
 - NAS 재부팅 후 자동 시작하지 않는다. 웹에서 다시 시작한다.
 
 ## 5. NAS 사전점검
@@ -54,7 +56,7 @@
 - CPU load / 가용 메모리
 - GitHub handoff 읽기와 Yahoo 소규모 read-only 통신 (`?view=health` deep 검사; 일시적 통신 실패는 warning)
 
-필수 BLOCKER가 있으면 `시작`을 거부한다. 메모리·load 압박은 시작 자체를 막기보다 경고로 표시하고 정밀 작업에서 감속/연기한다.
+필수 BLOCKER가 있으면 `시작`을 거부한다. 메모리 압박은 시작 자체를 막지 않고 적응형 소량 배치로 처리하며, 안전 하한 미만 또는 CPU load 압박일 때만 정밀 작업을 연기한다.
 
 ## 6. 데이터와 계산
 주 원천은 Yahoo 완료 일봉이다. 정상 자료는 재사용하고, 중대한 중복구간 차이가 있는 종목만 220봉 전체 재수집한다.
@@ -99,7 +101,7 @@ Decision은 동일 policy와 MON 응답의 `candidate_request_sha`, `details_rec
 ## 9. 결과 저장과 게시 복구
 정밀 스캔 종료 시 `mon_data.json`과 `mon_result.md`를 현재 스캔 내용으로 갱신한다. ChatGPT decision 뒤 두 파일을 저장하고 실제 readback이 일치해야 `saved`로 처리한다.
 
-GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.** 로컬 `evidence.php`의 최신 scan summary와 cache watchlist로 결과 게시만 재시도한다. 정상 후보가 일부만 확인돼도 그 범위의 결과를 저장하고 미확인 범위를 명시한다.
+GitHub 게시만 실패하면 **시장 전체를 다시 스캔하지 않는다.** 로컬 `evidence.php`의 최신 scan summary와 cache watchlist로 결과 게시만 재시도한다. 저메모리 중간 배치는 로컬 체크포인트와 details 응답을 우선하고, 현재 pending 큐를 한 차례 모두 시도한 시점에 `mon_data.json`/`mon_result.md`를 게시해 통신을 줄인다. 정상 후보가 일부만 확인돼도 그 범위의 결과를 저장하고 미확인 범위를 명시한다.
 
 ## 10. 파일 운영
 모든 로컬 부속파일은 `/web/mon_runtime` 안의 소수 고정파일만 사용한다.
