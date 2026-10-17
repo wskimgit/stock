@@ -7,7 +7,7 @@
 declare(strict_types=1);
 
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r11';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261017-r12';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -399,6 +399,16 @@ final class LiteMonitor {
         $s=$this->state();$s->last_mailbox_check=lm_iso();$s->next_mailbox_check=lm_iso(time()+self::MAILBOX_SECONDS);$s->last_mailbox_error=$error;$s->heartbeat_at=lm_iso();$this->saveState($s);
     }
     private function retryPublication(): void {
+        // Resume interrupted final-decision publication without repeating market analysis.
+        $pending=LiteRuntime::read('result');
+        if(lm_get($pending,'save_status')==='pending_remote'){
+            try{
+                $this->saveDecision((string)lm_get($pending,'request_id'),(array)lm_get($pending,'selected',[]),(array)lm_get($pending,'unresolved_ids',[]),(string)lm_get($pending,'evaluation_id'),(array)lm_get($pending,'market_view',[]),(string)lm_get($pending,'handoff_sha'));
+            }catch(Throwable $e){
+                $st=$this->state();$st->last_publication_error=$e instanceof LiteMonFault?$e->faultCode:'FINAL_DECISION_RETRY_FAILED';$this->saveState($st);
+                return;
+            }
+        }
         $s=$this->state();if(lm_get($s,'publication_pending')!==true)return;$e=LiteRuntime::read('evidence');$summary=lm_get($e,'latest_scan');if($summary instanceof stdClass)$summary=lm_array($summary);if(!is_array($summary)){$s->publication_pending=true;$s->last_publication_error='PUBLICATION_SUMMARY_MISSING';$this->saveState($s);return;}$watch=$this->cachedWatchlist();if(!$watch){$s->last_publication_error='PUBLICATION_WATCHLIST_MISSING';$this->saveState($s);return;}
         try{$ok=$this->publishData($summary,$watch);if($ok){$s=$this->state();$s->last_publish_fingerprint=(string)lm_get($s,'publication_fingerprint','');$s->publication_pending=false;$s->last_publication_error=null;$this->saveState($s);}}
         catch(Throwable $x){$s=$this->state();$s->publication_pending=true;$s->last_publication_error=$x instanceof LiteMonFault?$x->faultCode:'PUBLICATION_FAILED';$this->saveState($s);try{LiteRuntime::log('publication_retry_pending',['code'=>$s->last_publication_error]);}catch(Throwable $ignore){}}
@@ -484,6 +494,8 @@ final class LiteMonitor {
         $result=['contract'=>'MON-LITE-RESULT-2.1','policy'=>MON_LITE_POLICY,'authority'=>'chatgpt_final','independent_analysis'=>true,'request_id'=>$rid,'evaluation_id'=>$evaluationId,'handoff_sha'=>$handoffSha,'market_view'=>$marketView,'selected'=>$selected,'recommendations'=>$grouped,'unresolved_ids'=>$unresolved,'saved_at'=>$now,'save_status'=>'preparing'];
         $lines=["MON 2.2.3 Lite · ChatGPT 최종 결정 · ".$now,"",'- 최종 추천 권한: ChatGPT 독립 분석','- MON/PHP 분석은 보조 참고자료로만 사용',""];$heads=['KR'=>'한국','US'=>'미국','JP'=>'일본'];foreach(['KR','US','JP'] as $cc){$lines[]='## '.$heads[$cc].' · '.$marketView[$cc];foreach($grouped[$cc] as $x){$ms=$x['ms7'];$price=array_key_exists('reference_price',$x)&&$x['reference_price']!==null?' · 참고가 '.(string)$x['reference_price']:'';$lines[]='- '.$x['name'].' ('.$x['symbol_id'].') · MS7 '.$ms['code'].' '.$ms['label'].$price.' · '.$x['reason'].' · 위험: '.$x['risk_note'];}$lines[]='';}
         if($unresolved)$lines[]='- MON 미확인 자료 '.count($unresolved).'개는 보조자료 미확인으로만 기록되며 ChatGPT 최종 결정 권한을 제한하지 않습니다.';$md=implode("\n",$lines)."\n";
+        // Durable retry payload: persist the ChatGPT decision before any remote write.
+        LiteRuntime::write('result',(object)['save_status'=>'pending_remote','request_id'=>$rid,'selected'=>$selected,'unresolved_ids'=>$unresolved,'evaluation_id'=>$evaluationId,'market_view'=>$marketView,'handoff_sha'=>$handoffSha,'retry_at'=>$now]);
         $putR=$this->putVerified('mon_result.md',$md,'MON Lite: ChatGPT authoritative final decision',true);
         $remote=$this->http->githubGet('mon_data.json');$data=(object)['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'version'=>MON_LITE_VERSION,'build'=>MON_LITE_BUILD,'updated_at'=>$now,'watchlist'=>(object)['symbols'=>[]],'scan'=>(object)['state'=>'decision_only'],'results'=>[],'errors'=>[]];
         if($remote&&trim((string)$remote['content'])!==''){try{$candidate=lm_decode($remote['content']);if(lm_get($candidate,'contract')==='MON-LITE-DATA-2.2'&&lm_get($candidate,'policy')===MON_LITE_POLICY)$data=$candidate;}catch(LiteMonFault $ignore){}}
