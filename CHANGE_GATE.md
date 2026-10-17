@@ -20,6 +20,9 @@ This repository is a **clean-start MON-only repository**. The gate applies to ch
 - Candidate identity must not silently map across the wrong country/exchange.
 - Interrupted/restarted runtime must restore persisted JSON objects correctly.
 - GitHub publication must use readback for important results; publication-only failure must not force unnecessary market rescans.
+- A received ChatGPT decision is checkpointed locally before remote writes. Pending decision/receipt publication survives process restarts and takes priority over reference scan publication.
+- `saved` means the exact Markdown/JSON pair and matching receipt were read back successfully. Partial writes, timeouts and mismatched readback remain pending; retry the same decision bytes and identifiers.
+- Saving a conclusion does not require filling a country quota. A current, honest no-candidate or limited-evidence conclusion is valid; PHP reference rankings and historical decisions never become a new ChatGPT final automatically.
 
 ## Verification for code changes
 Run against the **exact final artifact**:
@@ -29,6 +32,7 @@ Run against the **exact final artifact**:
 - candidate identity validation and duplicate handling when those paths change.
 - CLI preflight behavior when NAS/start paths change.
 - relevant candidate → scan → details → decision → result persistence scenario when those paths change.
+- failure injection at result, data and receipt boundaries, restart recovery, unchanged-content readback, duplicate delivery and scan-overwrite prevention when persistence paths change.
 - calculation regression when numerical code changes.
 - repository minimal-file allowlist.
 
@@ -56,3 +60,4 @@ State separately:
 - remaining blocker or **none**.
 
 Do not claim LIVE_VERIFIED without live NAS evidence.
+
