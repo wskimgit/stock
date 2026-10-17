@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and '2.2.3' in build.group(1)
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r3'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -75,6 +75,7 @@ jobs:
 
           assert data['policy'] == 'MON-LITE-OPS-2.2.3'
           assert data['version'] == '2.2.3'
+          assert data['build'] == build.group(1)
           assert hand['policy'] == 'MON-LITE-OPS-2.2.3'
           assert resp['policy'] == 'MON-LITE-OPS-2.2.3'
           assert hand['contract'] == 'MON-LITE-BRIDGE-1.0'
@@ -83,8 +84,22 @@ jobs:
           assert not (root/'mon_chatgpt_bridge.php').exists()
           assert not (root/'mon_wiki.md').exists()
 
+          expected = {
+              '.github/workflows/mon_lite.yml','AGENTS.md','CHANGE_GATE.md','MON-Wiki.md','mon.php',
+              'mon_chatgpt_handoff.json','mon_chatgpt_response.json','mon_data.json','mon_result.md','monitor.md'
+          }
+          actual = {p.as_posix() for p in root.rglob('*') if p.is_file() and '.git' not in p.parts}
+          assert actual == expected, (sorted(actual-expected), sorted(expected-actual))
+
           print('MON consistency PASS')
           PY
+
+      - name: Candidate identity and CLI preflight
+        run: |
+          set -eu
+          php -r 'require "mon.php"; $r=new ReflectionClass("LiteMonitor"); $m=$r->getMethod("symbolFromId"); $m->setAccessible(true); if (!$m->invoke(null,"KR|KOSPI|005930")) exit(1); if ($m->invoke(null,"KR|NASDAQ|005930")!==null) exit(2); if (!$m->invoke(null,"US|NASDAQ|BRK.B")) exit(3); if (LiteYahoo::ticker(["country"=>"US","symbol"=>"BRK.B","exchange"=>"NYSE"])!=="BRK-B") exit(4); echo "candidate identity PASS\n";'
+          php -r 'require "mon.php"; $c=new LiteConfig(); $c->githubToken="synthetic-ci-token"; $h=LiteHealth::local($c,true); if (!is_array($h["cli_probe"]) || !$h["cli_probe"]["checked"] || !$h["cli_probe"]["ok"]) {fwrite(STDERR,json_encode($h)); exit(1);} echo "CLI preflight PASS\n";'
+          rm -rf mon_runtime
 
       - name: Persisted JSON object normalization
         run: |
