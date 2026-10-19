@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261020-r16` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261020-r17` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 최종 판단과 효율적인 실행
 
@@ -46,7 +46,7 @@
 - Mailbox: 대기 상태 5분, 스캔 중이면 종료 직후; 경량 30분, 정밀 평일 16:40 KST
 - 메모리: NAS 가용량과 PHP 한도 여유를 함께 확인, 낮은 한도를 올리지 않음; 1~3종목 배치와 `scan_queue` 체크포인트
 - 하한: NAS 약 20 MiB/PHP 여유 8 MiB 미만은 2분 대기
-- CPU: 정상 load 기준은 코어당 1.5 유지; 코어당 1.5 초과~3 미만은 90초 이내 busy 85% 이하 확인 시에만 1종목 배치; 코어당 3 이상·busy 95% 이상·높은 load에서 busy 미확인이면 대기
+- CPU: 측정 구간·측정 후 경과가 모두 1초 이하인 `CPU_BUSY`는 500ms 조용한 구간에서 한 번 확인하며 이미 100ms 초기 확인을 한 관측에는 중복 적용하지 않는다. 정상 load 1.5/코어, 제한 배치 3/코어 미만·유효 busy 85% 이하, 지속 busy 95% 이상·hard load·높은 load에서 busy 미확인 시 대기 기준은 유지한다.
 - 종목 사이에도 자원 재확인, 나머지 큐는 2분 후 계속; 무한 기다림·후보 삭제 없음
 - 대기 전 전체 캐시·임시 전송 본문 해제; GitHub 256 KiB/본문·512 KiB/총량·4파일, Yahoo 48종목×40봉 캐시
 - 수신은 압축 해제 후 24 MiB와 PHP 여유의 ¼ 중 작은 한도; 로컬 파일 검증은 스트림 해시
@@ -69,4 +69,4 @@
 
 Runtime은 최대 11파일·64 MiB·단일 16 MiB다. 별도 bridge·이벤트별 파일·cron·부팅 자동시작·자동주문·자동매매를 추가하지 않는다. NAS가 꺼지면 수동 시작 전까지 PHP 복구도 실행되지 않는다.
 
-운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`은 유지하며 r16 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.
+운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`은 유지하며 r17 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.
