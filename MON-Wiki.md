@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261017-r13` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261019-r14` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 최종 판단과 저장 책임
 
@@ -48,7 +48,7 @@ receipt는 `status=saved` 및 실제 두 결과의 commit/blob SHA와 결정 식
 - 과거 고립 OHLC 오류는 제한적으로 제외하되 최신 완료봉 오류는 경고 유지
 - 구형 NAS의 가용 메모리는 reclaimable cache/buffer 포함 추정
 - 약 20 MiB 이상 메모리 압박: 3/2/1종목 배치·종목별 체크포인트, 미처리 시 2분 후 계속
-- 메모리 안전 하한 미만/CPU load 압박: 정밀 작업 30분 연기
+- NAS 약 20 MiB/PHP 여유 8 MiB 안전 하한 미만 또는 CPU load 압박: 정밀 작업 2분 연기 후 재확인
 - 국가/거래소 ID 오류는 `rejected_ids`로 격리, 중복은 1회 처리, 빈 후보는 `ready_empty`
 
 ## NAS와 파일
@@ -64,4 +64,8 @@ Runtime은 최대 11개 파일·64 MiB·단일 16 MiB다. 로그도 PHP guard가
 3. `MON-Wiki.md`: 설명용 요약
 4. `mon_data.json`, `mon_result.md`, handoff/response: 현재 실행 상태·결과·저장 증명
 
-코드/문서 변경은 `CHANGE_GATE.md`를 적용한다. 정책은 `MON-LITE-OPS-2.2.3`을 유지한다. 코드/지시문 r13과 기존 시장 결과의 생성 당시 build(r10 등)는 구분한다. 코드 정비만으로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증, GitHub 반영, NAS 배포, NAS 실동작은 각각 보고하며 NAS evidence가 없으면 `LIVE_VERIFIED`라고 하지 않는다.
+코드/문서 변경은 `CHANGE_GATE.md`를 적용한다. 정책은 `MON-LITE-OPS-2.2.3`을 유지한다. 코드/지시문 r14와 기존 시장 결과의 생성 당시 build(r10 등)는 구분한다. 코드 정비만으로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증, GitHub 반영, NAS 배포, NAS 실동작은 각각 보고하며 NAS evidence가 없으면 `LIVE_VERIFIED`라고 하지 않는다.
+
+## r14 메모리 관리
+
+스캔 캐시·전송 본문을 대기 단계에 보존하지 않고 PHP 한도와 NAS 여유 메모리를 함께 반영한다. 큰 본문의 중복 복사와 캐시 중복 디코딩을 줄인다. 결과 저장·복구와 매매 판단 기준은 그대로 유지한다. 세부 한도·검증 기준은 `monitor.md`와 현행 코드가 우선한다. 배포 전후 성능 수치는 같은 입력·PHP 버전에서 비교하며 로컬 시뮬레이션을 NAS 실측으로 표시하지 않는다.

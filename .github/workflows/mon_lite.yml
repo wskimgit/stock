@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261017-r13'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261019-r14'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -92,7 +92,9 @@ jobs:
               'mon_chatgpt_handoff.json','mon_chatgpt_response.json','mon_data.json','mon_result.md','monitor.md'
           }
           actual = {p.as_posix() for p in root.rglob('*') if p.is_file() and '.git' not in p.parts}
-          assert actual == expected, (sorted(actual-expected), sorted(expected-actual))
+          # Other explicitly restored systems are outside MON maintenance scope.
+          optional_authorized = {'reporting.md', 'mgdaemon.md', 'STC14.json'}
+          assert expected <= actual and actual <= expected | optional_authorized, (sorted(actual-expected-optional_authorized), sorted(expected-actual))
 
           print('MON consistency PASS')
           PY
@@ -113,6 +115,103 @@ jobs:
           grep -F "WATCHLIST_FALLBACK_UNAVAILABLE" mon.php
           grep -F "full_resync_pending" mon.php
           rm -rf mon_runtime
+
+      - name: PHP headroom and bounded cycle memory
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/memory-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require getenv('MON_TEST_SOURCE');
+          function mem_assert(bool $ok,string $message): void {if(!$ok)throw new RuntimeException($message);}
+          function mem_prop($object,string $name,$value=null,bool $write=false) {$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($write){$p->setValue($object,$value);return null;}return $p->getValue($object);}
+          function mem_call($object,string $name,array $args=[]) {$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          function mem_end(LiteMonitor $monitor): void {mem_call($monitor,method_exists($monitor,'endTurn')?'endTurn':'releaseMemory');}
+          function mem_seed(LiteHttp $http,LiteYahoo $yahoo,int $cycle): void {
+              $known=[];foreach(['mon_data.json'=>3145728,'mon_chatgpt_response.json'=>2097152,'mon_result.md'=>1048576,'mon_chatgpt_handoff.json'=>4096] as $name=>$bytes)$known[$name]=['content'=>str_repeat(chr(65+$cycle%20),$bytes),'sha'=>sha1($name.$cycle),'etag'=>'ci-'.$name.'-'.$cycle,'commit_sha'=>null];
+              mem_prop($http,'githubKnown',$known,true);mem_prop($http,'githubTurn',$known,true);
+              $ranges=[];for($i=0;$i<150;$i++){$rows=[];for($j=0;$j<40;$j++)$rows[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$i+$j,102+$i+$j,99+$i+$j,101+$i+$j,1000+$j];$ranges['CI'.$i]=['p1'=>1600000000,'p2_day'=>'2026-10-19','rows'=>$rows];}mem_prop($yahoo,'rangeCache',$ranges,true);
+          }
+          $mode=getenv('MON_MEMORY_MODE')?:'retained';$expect=getenv('MON_EXPECT_R14')==='1';
+          if($mode==='retained'){
+              $config=new LiteConfig();$http=new LiteHttp($config);$yahoo=new LiteYahoo($http);$monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $name=>$value)mem_prop($monitor,$name,$value,true);
+              mem_end($monitor);$base=memory_get_usage(false);$idle=[];$active=[];
+              for($cycle=0;$cycle<12;$cycle++){mem_seed($http,$yahoo,$cycle);$active[]=memory_get_usage(false);mem_end($monitor);$idle[]=memory_get_usage(false);}
+              $bodyBytes=0;foreach((array)mem_prop($http,'githubKnown') as $entry)$bodyBytes+=strlen((string)($entry['content']??''));$ranges=count((array)mem_prop($yahoo,'rangeCache'));
+              $report=['scenario'=>'retained_cache_cycles','cycles'=>12,'baseline_bytes'=>$base,'active_max_bytes'=>max($active),'idle_first_bytes'=>$idle[0],'idle_last_bytes'=>end($idle),'retained_last_bytes'=>end($idle)-$base,'idle_growth_bytes'=>end($idle)-$idle[0],'retained_http_body_bytes'=>$bodyBytes,'retained_yahoo_entries'=>$ranges,'peak_allocated_bytes'=>memory_get_peak_usage(true),'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))];
+              if($expect){mem_assert($report['retained_last_bytes']<1048576,'cycle cleanup must release megabyte payloads');mem_assert($report['idle_growth_bytes']<262144,'repeated cycles must not accumulate retained payloads');mem_assert($bodyBytes<=262144,'retained HTTP body budget');mem_assert($ranges===0,'Yahoo payloads must be released before idle');}
+              echo lm_json($report)."\n";exit(0);
+          }
+          if($mode==='write'){
+              $payload=(object)['rows'=>str_repeat('A',6291456)];LiteRuntime::write('cache',$payload);$payload->rows=str_repeat('B',6291456);$before=memory_get_usage(false);LiteRuntime::write('cache',$payload);$saved=LiteRuntime::read('cache');mem_assert(strlen($saved->rows)===6291456&&$saved->rows[0]==='B','large replacement must preserve exact data');unset($saved);
+              if($expect)mem_assert(memory_get_peak_usage(true)<26*1048576,'6MiB replacement peak must remain below 26MiB');echo lm_json(['scenario'=>'six_mib_json_replacement','baseline_bytes'=>$before,'peak_allocated_bytes'=>memory_get_peak_usage(true),'peak_used_bytes'=>memory_get_peak_usage(false),'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+          }
+          if($mode==='headroom'){
+              foreach([['-1',null],['96M',100663296],['64m',67108864],['1G',1073741824],['52428800',52428800],['512K',524288],['bad-limit',null]] as $x)mem_assert(LiteResource::limitBytes($x[0])===$x[1],'PHP memory limit parsing: '.$x[0]);
+              foreach([[64,32,3],[64,20,3],[64,19,2],[64,12,2],[64,11,1],[64,8,1],[64,7,0],[26,32,2],[21,32,1],[19,32,0]] as $x){$resource=['memory_available_bytes'=>$x[0]*1048576,'php_memory_headroom_bytes'=>$x[1]*1048576];mem_assert(LiteMonitor::lowMemoryBatch($resource)===$x[2],'host/PHP batching: '.lm_json($x));}
+              $sample=LiteResource::sample();mem_assert($sample['php_memory_limit_bytes']===41943040,'40MiB configured limit reported');$held=str_repeat('H',25*1048576);$pressure=LiteResource::sample();
+              mem_assert($pressure['php_memory_headroom_bytes']<16*1048576,'actual allocation reduces headroom');mem_assert($pressure['heavy_allowed']===false,'low PHP headroom blocks heavy scan even with available host memory');mem_assert(LiteMonitor::lowMemoryBatch($pressure)<=2,'actual PHP pressure limits retry batch');mem_assert($pressure['effective_memory_available_bytes']<=$pressure['php_memory_headroom_bytes'],'effective memory respects PHP budget');
+              echo lm_json(['scenario'=>'actual_php_headroom','before'=>$sample,'under_pressure'=>$pressure,'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+          }
+          if($mode==='cache'){
+              $config=new LiteConfig();$config->githubToken='synthetic-ci-token';$http=new LiteHttp($config);
+              for($i=0;$i<8;$i++){$item=['content'=>str_repeat(chr(65+$i),170000),'sha'=>sha1('ci-'.$i),'etag'=>'ci-etag-'.$i,'commit_sha'=>null];mem_call($http,'remember',['ci-'.$i,$item]);$known=(array)mem_prop($http,'githubKnown');$bytes=0;foreach($known as $entry)if(is_array($entry))$bytes+=strlen($entry['content']);mem_assert(count($known)<=4&&$bytes<=524288,'HTTP cache enforces aggregate budget during requests');}
+              $latest=$http->githubGet('ci-7');mem_assert($latest['content']===str_repeat('H',170000)&&$http->stats()['github_body_cache_hits']===1,'small latest response remains a useful cache hit');mem_call($http,'remember',['oversize',['content'=>str_repeat('X',262145),'sha'=>'ci-large','etag'=>'ci-large']]);mem_assert(!array_key_exists('oversize',(array)mem_prop($http,'githubKnown'))&&!array_key_exists('oversize',(array)mem_prop($http,'githubTurn')),'large body is not retained');$http->releasePayloads();mem_assert((array)mem_prop($http,'githubTurn')===[],'cycle release clears request payload references');mem_assert(isset(mem_prop($http,'githubKnown')['ci-7']['etag']),'bounded small ETag remains reusable');
+              echo lm_json(['scenario'=>'bounded_http_cache','known_entries'=>count((array)mem_prop($http,'githubKnown')),'known_body_bytes'=>$bytes,'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+          }
+          if($mode==='yahoo'){
+              final class MemYahooTransport {public $calls=0;public function get(string $url,array $headers=[],int $timeout=8): string {$this->calls++;$t=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];for($i=0;$i<60;$i++){$t[]=1600000000+$i*86400;$q['open'][]=100+$i;$q['high'][]=102+$i;$q['low'][]=99+$i;$q['close'][]=101+$i;$q['volume'][]=1000+$i;}return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'USD'],'timestamp'=>$t,'indicators'=>['quote'=>[$q]]]]]]);}}
+              $transport=new MemYahooTransport();$yahoo=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();mem_prop($yahoo,'http',$transport,true);$yahoo->beginTurn();$symbols=[];
+              for($i=0;$i<300;$i++){$s=['symbol'=>'CI'.$i,'country'=>'US','exchange'=>'NASDAQ','currency'=>'USD'];$symbols[]=$s;$rows=$yahoo->daily($s,60);mem_assert(count($rows)===60&&$rows[59][4]===160.0,'bounded cache preserves complete provider output');mem_assert(count((array)mem_prop($yahoo,'rangeCache'))<=48,'Yahoo cache bounded during a long scan');if($i===34){$calls=$transport->calls;foreach($symbols as $recentSymbol)$yahoo->recent($recentSymbol,$rows[59][0],10);mem_assert($transport->calls===$calls,'35-symbol normal scan keeps cached rechecks');}}
+              $latest=$symbols[299];$calls=$transport->calls;$reuse=$yahoo->recent($latest,$rows[59][0],10);mem_assert($transport->calls===$calls&&count($reuse)>0,'recent recheck still reuses latest cached ticker');$yahoo->releasePayloads();mem_assert(count((array)mem_prop($yahoo,'rangeCache'))===0,'Yahoo explicit release clears rows');
+              echo lm_json(['scenario'=>'bounded_yahoo_cache','symbols'=>300,'network_calls'=>$transport->calls,'cache_hits'=>$yahoo->stats()['yahoo_range_cache_hits'],'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+          }
+          if($mode==='calculation'){
+              $benchmark=[];for($j=0;$j<220;$j++)$benchmark[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];$map=LiteSwing::benchmarkMap($benchmark);$hashes=[];
+              foreach([35,300] as $count){$analyses=[];$ids=[];for($i=0;$i<$count;$i++){$countries=[['KR','KOSPI','KRW'],['US','NASDAQ','USD'],['JP','TSE','JPY']];$cc=$countries[$i%3];$symbol=$cc[0]==='KR'?sprintf('%06d',100000+$i):($cc[0]==='JP'?(string)(1000+$i):'CI'.$i);$id=$cc[0].'|'.$cc[1].'|'.$symbol;$s=['symbol_id'=>$id,'symbol'=>$symbol,'country'=>$cc[0],'exchange'=>$cc[1],'currency'=>$cc[2],'name'=>'Fixture '.$i];$bars=[];for($j=0;$j<220;$j++){$open=1000+$i*10+$j*2+$j%7+($j>200?-6*($j-200):0)+($j>215?20*($j-215):0);$bars[]=[$benchmark[$j][0],$open,$open+5,$open-4,$open+1+$j%3,10000+$i*100+$j*20];}$analyses[]=LiteSwing::analyzeMapped($s,$bars,$map);$ids[]=$id;}$hashes[(string)$count]=lm_hash([$analyses,LiteMonitor::recommendThree($analyses,$ids)]);unset($analyses,$ids,$bars);}
+              if($expect)mem_assert($hashes===['35'=>'5bd8ec822790eac322067588e7a43b27c85a7c46051ac401225bdba1f65d5935','300'=>'44be8eddb74734a7c8f947af4b5bd31b47682003b7d28cac02479b7e0adcc635'],'35/300 numerical and reference selection outputs must match accepted r13 fixture');echo lm_json(['scenario'=>'35_300_calculation_regression','result_sha256'=>$hashes,'peak_allocated_bytes'=>memory_get_peak_usage(true),'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+          }
+          if($mode==='queue'){
+              final class MemQueueHttp {public function clearRequestCache(): void {}public function resetStats(): void {}public function stats(): array {return [];}public function githubGet(string $path,bool $force=false): ?array {return null;}public function releasePayloads(): void {}}
+              final class MemQueueYahoo {public $calls=[],$bars;public function __construct(array $bars){$this->bars=$bars;}public function beginTurn(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}public function recent(array $s,string $last,int $overlap=21): array {$this->calls[]=$s['symbol_id'];return $this->bars;}public function daily(array $s,int $days=220): array {$this->calls[]=$s['symbol_id'];return $this->bars;}public function benchmark(): array {return $this->bars;}}
+              $bars=[];for($j=0;$j<220;$j++)$bars[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];$map=LiteSwing::benchmarkMap($bars);$watch=[];$symbols=new stdClass();
+              for($i=0;$i<3;$i++){$id='US|NASDAQ|CI'.$i;$s=['symbol_id'=>$id,'symbol'=>'CI'.$i,'country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'Fixture '.$i];$watch[]=$s;$symbols->{$id}=(object)['status'=>'ok','symbol'=>(object)$s,'bars'=>$bars,'analysis'=>LiteSwing::analyzeMapped($s,$bars,$map),'checked_at'=>lm_iso(time()-3600)];}
+              $cache=(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>$watch,'symbols'=>$symbols,'benchmarks'=>(object)['US'=>$bars],'benchmark_meta'=>(object)['US'=>(object)['checked_at'=>lm_iso()]],'last_full_resync_at'=>lm_iso(),'full_resync_pending'=>false,'scan_queue'=>['US|NASDAQ|CI1','US|NASDAQ|CI2']];LiteRuntime::write('cache',$cache);unset($cache,$symbols,$map,$watch);
+              $config=new LiteConfig();$http=new MemQueueHttp();$yahoo=new MemQueueYahoo($bars);$monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $name=>$value)mem_prop($monitor,$name,$value,true);$state=LiteMonitor::defaultState();$state->last_full_scan=lm_iso();$monitor->saveState($state);$held=str_repeat('P',25*1048576);
+              $first=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');$remaining=(array)lm_get($cache,'scan_queue',[]);mem_assert($remaining===['US|NASDAQ|CI2'],'low-headroom cycle leaves exact unprocessed OK row in durable queue');mem_assert(mem_call($monitor,'pendingCount',[$cache])===1,'pending count includes queued rows with prior OK analysis');unset($cache);$second=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'next retry finishes durable continuation');mem_assert($yahoo->calls===['US|NASDAQ|CI1','US|NASDAQ|CI2'],'continuation does not skip or redo prior OK rows');
+              echo lm_json(['scenario'=>'low_headroom_durable_scan_queue','calls'=>$yahoo->calls,'first_queue_remaining'=>$first['network_stats']['queue_remaining'],'second_queue_remaining'=>$second['network_stats']['queue_remaining'],'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+          }
+          if($mode==='candidate_queue'){
+              final class MemCandidateHttp {public $files=[];public function seed(string $path,string $content): void {$this->files[$path]=['content'=>$content,'sha'=>lm_git_blob_sha($content),'commit_sha'=>null];}public function clearRequestCache(): void {}public function resetStats(): void {}public function stats(): array {return [];}public function githubGet(string $path,bool $force=false): ?array {return $this->files[$path]??null;}public function githubPut(string $path,string $content,string $message,?string $oldSha=null): array {mem_assert(($this->files[$path]['sha']??null)===$oldSha,'candidate queue fixture CAS');$this->seed($path,$content);return ['blob_sha'=>$this->files[$path]['sha'],'commit_sha'=>sha1('ci-'.$path),'unchanged'=>false];}public function releasePayloads(): void {}}
+              final class MemCandidateYahoo {public $calls=[],$bars;public function __construct(array $bars){$this->bars=$bars;}public function beginTurn(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}public function daily(array $s,int $days=220): array {$this->calls[]=$s['symbol_id'];return $this->bars;}public function recent(array $s,string $last,int $overlap=21): array {$this->calls[]=$s['symbol_id'];return $this->bars;}public function benchmark(): array {return $this->bars;}}
+              foreach(LiteRuntime::FILES as $key){$path=LiteRuntime::path($key.'.php');if(is_file($path))unlink($path);}$bars=[];for($j=0;$j<220;$j++)$bars[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];$old=['symbol_id'=>'US|NASDAQ|CIOLD','symbol'=>'CIOLD','country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'Previous fixture'];
+              $cache=(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>[$old],'symbols'=>(object)[$old['symbol_id']=>(object)['status'=>'ok','symbol'=>(object)$old]],'benchmarks'=>(object)['US'=>$bars],'benchmark_meta'=>(object)['US'=>(object)['checked_at'=>lm_iso()]],'last_full_resync_at'=>lm_iso(),'full_resync_pending'=>false,'scan_queue'=>[$old['symbol_id']]];LiteRuntime::write('cache',$cache);unset($cache);
+              $config=new LiteConfig();$config->githubToken='synthetic-ci-token';$http=new MemCandidateHttp();$http->seed('mon_data.json',lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'watchlist'=>['symbols'=>[]]]));$http->seed('mon_chatgpt_handoff.json',lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'candidates','request_id'=>'ci-new-watch','candidate_ids'=>['US|NASDAQ|CINEW']]));$yahoo=new MemCandidateYahoo($bars);$monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $name=>$value)mem_prop($monitor,$name,$value,true);$state=LiteMonitor::defaultState();$state->last_full_scan=lm_iso();$monitor->saveState($state);
+              mem_call($monitor,'processMailbox');$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'new candidate replacement must clear old continuation');mem_assert(isset($cache->symbols->{'US|NASDAQ|CINEW'})&&!isset($cache->symbols->{'US|NASDAQ|CIOLD'}),'new candidate set replaces old symbols');
+              $cache->scan_queue=['US|NASDAQ|CIOLD','KR|NASDAQ|005930'];LiteRuntime::write('cache',$cache);unset($cache);$held=str_repeat('R',25*1048576);$scan=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'orphan-only queue is discarded');mem_assert($yahoo->calls===['US|NASDAQ|CINEW']&&lm_get($cache->symbols->{'US|NASDAQ|CINEW'},'status')==='ok','orphan queue must not starve new pending candidate');
+              $cache->scan_queue=['US|NASDAQ|CIOLD'];LiteRuntime::write('cache',$cache);unset($cache);$idle=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[]&&mem_call($monitor,'pendingCount',[$cache])===0,'orphan queue is durably cleared when current watch is all OK');mem_assert($yahoo->calls===['US|NASDAQ|CINEW'],'all-OK cleanup must not repeat collection');
+              echo lm_json(['scenario'=>'candidate_replacement_orphan_queue','replacement_cleared'=>true,'new_pending_collected_once'=>true,'all_ok_orphan_cleaned'=>true,'calls'=>$yahoo->calls,'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+          }
+          if($mode==='http'){
+              if(!extension_loaded('curl')){echo lm_json(['scenario'=>'decoded_http_body_limit','status'=>'SKIPPED','reason'=>'cURL extension unavailable'])."\n";exit(0);}
+              $socket=stream_socket_server('tcp://127.0.0.1:0',$errno,$error);mem_assert(is_resource($socket),'loopback port available');$address=stream_socket_get_name($socket,false);fclose($socket);$router=tempnam(sys_get_temp_dir(),'mon-body-');
+              file_put_contents($router,'<?php header("Content-Length: 67108864"); header("Content-Type: application/octet-stream"); $chunk=str_repeat("X",16384); for($i=0;$i<4096;$i++){echo $chunk; if(connection_aborted())break;}');
+              $pipes=[];$process=proc_open([PHP_BINARY,'-S',$address,$router],[0=>['pipe','r'],1=>['file','/dev/null','a'],2=>['file','/dev/null','a']],$pipes);mem_assert(is_resource($process),'loopback server starts');if(isset($pipes[0]))fclose($pipes[0]);
+              try{$up=false;for($i=0;$i<40;$i++){$probe=@stream_socket_client('tcp://'.$address,$errno,$error,0.025);if($probe){fclose($probe);$up=true;break;}usleep(25000);}mem_assert($up,'loopback server ready');$http=new LiteHttp(new LiteConfig());$limited=false;$before=memory_get_usage(true);try{$http->get('http://'.$address.'/large',[],8);}catch(LiteMonFault $fault){$limited=$fault->faultCode==='HTTP_RESPONSE_TOO_LARGE';}mem_assert($limited,'large decoded body must stop at streaming limit');$stats=$http->stats();mem_assert($stats['http_retries']===0,'body-size limit must not retry the same large response');mem_assert(memory_get_peak_usage(true)-$before<32*1048576,'body must stop before 64MiB response is buffered');echo lm_json(['scenario'=>'decoded_http_body_limit','status'=>'PASS','http_stats'=>$stats,'peak_increment_bytes'=>memory_get_peak_usage(true)-$before,'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";
+              }finally{proc_terminate($process);proc_close($process);@unlink($router);}exit(0);
+          }
+          throw new RuntimeException('Unknown memory fixture mode');
+          PHP
+          for mode in retained write cache yahoo calculation; do
+            MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R14=1 MON_MEMORY_MODE="$mode" php -d memory_limit=96M "$test_dir/memory-fixture.php"
+          done
+          for mode in headroom queue candidate_queue http; do
+            MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R14=1 MON_MEMORY_MODE="$mode" php -d memory_limit=40M "$test_dir/memory-fixture.php"
+          done
 
       - name: Provider data recovery
         run: |
