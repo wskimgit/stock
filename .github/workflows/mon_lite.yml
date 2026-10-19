@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r16'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r17'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -1037,6 +1037,161 @@ jobs:
           $report=['source_sha256'=>$sourceSha,'instrumented_sha256'=>hash('sha256',$instrumented),'instrumentation'=>'Only LiteResource::sample() call sites receive deterministic normal/limited resource inputs. Production Yahoo parser, benchmark cache, scan and numerical logic remain unchanged. Offline chart transport embeds authentic 21-row tails plus 199 synthetic historical bars. Restored benchmark row is explicitly counterfactual.','resource_call_sites'=>$callSites,'baseline'=>$baseline,'assertions'=>$assertions,'scenarios'=>$results];file_put_contents($outDir.'/report.json',lm_json($report)."\n");echo lm_json($report)."\n";
           PHP
           MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R16=1 php -d memory_limit=96M "$test_dir/kr-benchmark-fixture.php"
+
+      - name: Quiet CPU resampling and cache-burst scan progress
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/quiet-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+
+          namespace MonQuietTest {
+              /* OS boundary substitutions apply only to an exact copied LiteResource class. */
+              final class CpuFixtureHost {
+                  public static $now=1792530000.0,$ticks=[100,0,0,1000,0,0,0,0],$load=0.3,$cores=1;
+                  public static $quietBusy=0.0,$quietReadValid=true,$quietCounterReset=false,$afterSleep=false;
+                  public static $available=134217728,$total=536870912,$limit='96M',$used=8388608,$own=0.0;
+                  public static $sleeps=[],$events=[],$reads=0,$onStatRead=null,$onSleep=null,$sleepSecondsOverride=null,$resourceDefaults=[];
+                  public static function reset(array $options=[]): void {
+                      self::$now=1792530000.0;self::$ticks=[100,0,0,1000,0,0,0,0];self::$load=0.3;self::$cores=1;
+                      self::$quietBusy=0.0;self::$quietReadValid=true;self::$quietCounterReset=false;self::$afterSleep=false;
+                      self::$available=128*1048576;self::$total=512*1048576;self::$limit='96M';self::$used=8*1048576;self::$own=0.0;
+                      self::$sleeps=[];self::$events=[];self::$reads=0;self::$onStatRead=null;self::$onSleep=null;self::$sleepSecondsOverride=null;
+                      foreach($options as $key=>$value){if(!property_exists(self::class,$key))throw new \RuntimeException('Unknown host setting '.$key);self::${$key}=$value;}
+                      if(class_exists(__NAMESPACE__.'\\LiteResource',false)){$r=new \ReflectionClass(__NAMESPACE__.'\\LiteResource');foreach($r->getProperties(\ReflectionProperty::IS_STATIC) as $p){$p->setAccessible(true);$p->setValue(null,self::$resourceDefaults[$p->getName()]);}}
+                  }
+                  public static function advance(float $seconds,float $busyPercent=100.0,float $ownPercent=0.0): void {
+                      self::$now+=$seconds;$total=max(1,(int)round($seconds*100));$busy=(int)round($total*$busyPercent/100);self::$ticks[0]+=$busy;self::$ticks[3]+=$total-$busy;self::$own+=$seconds*$ownPercent/100;
+                  }
+                  public static function stat() {
+                      self::$reads++;$quiet=self::$afterSleep;
+                      if(is_callable(self::$onStatRead))call_user_func(self::$onStatRead,self::$reads,$quiet);
+                      self::$events[]=['event'=>'stat','at'=>self::$now,'quiet'=>$quiet,'ticks'=>self::$ticks];
+                      self::$afterSleep=false;
+                      if($quiet&&!self::$quietReadValid)return false;
+                      if($quiet&&self::$quietCounterReset)return "cpu 1 0 0 1 0 0 0 0\ncpu0 1 0 0 1 0 0 0 0\n";
+                      $text='cpu '.implode(' ',self::$ticks)."\n";for($i=0;$i<self::$cores;$i++)$text.='cpu'.$i.' '.implode(' ',self::$ticks)."\n";return $text;
+                  }
+              }
+              function sys_getloadavg(){if(CpuFixtureHost::$load===null)return false;if(is_array(CpuFixtureHost::$load))return CpuFixtureHost::$load;return [CpuFixtureHost::$load,CpuFixtureHost::$load,CpuFixtureHost::$load];}
+              function file_get_contents($path,...$args){
+                  if($path==='/proc/stat')return CpuFixtureHost::stat();
+                  if($path==='/proc/meminfo')return 'MemTotal: '.(int)(CpuFixtureHost::$total/1024)." kB\nMemAvailable: ".(int)(CpuFixtureHost::$available/1024)." kB\n";
+                  if($path==='/proc/self/status')return "VmRSS: 8192 kB\n";
+                  throw new \RuntimeException('Unexpected OS fixture read '.(string)$path);
+              }
+              function microtime($asFloat=false){return $asFloat?CpuFixtureHost::$now:(string)CpuFixtureHost::$now;}
+              function usleep($microseconds): void {CpuFixtureHost::$sleeps[]=$microseconds;CpuFixtureHost::$events[]=['event'=>'sleep','microseconds'=>$microseconds,'at'=>CpuFixtureHost::$now];$seconds=CpuFixtureHost::$sleepSecondsOverride??($microseconds/1000000+0.0001);CpuFixtureHost::advance($seconds,CpuFixtureHost::$quietBusy,0.0);CpuFixtureHost::$afterSleep=true;if(is_callable(CpuFixtureHost::$onSleep))call_user_func(CpuFixtureHost::$onSleep,$microseconds);}
+              function getrusage($mode=0){$seconds=(int)CpuFixtureHost::$own;return ['ru_utime.tv_sec'=>$seconds,'ru_utime.tv_usec'=>(int)round((CpuFixtureHost::$own-$seconds)*1000000),'ru_stime.tv_sec'=>0,'ru_stime.tv_usec'=>0];}
+              function ini_get($name){if($name==='memory_limit')return CpuFixtureHost::$limit;return \ini_get($name);}
+              function memory_get_usage($real=false){return CpuFixtureHost::$used;}
+              function memory_get_peak_usage($real=false){return CpuFixtureHost::$used;}
+              function getmypid(){return 12345;}
+              function lm_iso(?int $time=null): string {return gmdate('Y-m-d\TH:i:s\Z',$time??(int)CpuFixtureHost::$now);}
+          }
+
+          namespace {
+              $quietSource=getenv('MON_TEST_SOURCE');if(!is_string($quietSource)||!is_file($quietSource))throw new RuntimeException('MON_TEST_SOURCE required');
+              $quietOriginal=file_get_contents($quietSource);$quietStart=strpos($quietOriginal,'final class LiteResource {');$quietEnd=strpos($quietOriginal,'final class LiteConfig {',$quietStart===false?0:$quietStart);
+              if($quietStart===false||$quietEnd===false)throw new RuntimeException('Exact resource class boundaries unavailable');
+              $quietClass=substr($quietOriginal,$quietStart,$quietEnd-$quietStart);
+              $quietDir=__DIR__.'/scratchreports/quiet-'.getmypid().'-'.bin2hex(random_bytes(5));if(!mkdir($quietDir,0700,true))throw new RuntimeException('Cannot create fixture directory');
+              $quietInstrumented="<?php\ndeclare(strict_types=1);\nnamespace MonQuietTest;\n".$quietClass;
+              $quietCopy=$quietDir.'/resource.php';if(file_put_contents($quietCopy,$quietInstrumented)!==strlen($quietInstrumented))throw new RuntimeException('Cannot write resource fixture');require $quietCopy;
+              \MonQuietTest\CpuFixtureHost::$resourceDefaults=(new ReflectionClass(\MonQuietTest\LiteResource::class))->getDefaultProperties();
+              $quietIdentity=['source_sha256'=>hash('sha256',$quietOriginal),'resource_class_sha256'=>hash('sha256',$quietClass),'instrumented_sha256'=>hash('sha256',$quietInstrumented),'fixture_sha256'=>hash_file('sha256',__FILE__),'instrumentation'=>'Exact LiteResource class copied unchanged into a test namespace; only OS access functions are substituted with deterministic counters, clock, load and memory readings'];
+              unset($quietOriginal,$quietClass,$quietInstrumented);
+              if(getenv('MON_QUIET_LIBRARY')==='1')return;
+
+              $quietExpected=getenv('MON_EXPECT_R17')==='1';$quietCases=[];$quietScenarios=[];
+              function quiet_check(bool $ok,string $case): void {global $quietCases;$quietCases[]=['case'=>$case,'status'=>$ok?'PASS':'FAIL'];if(!$ok)throw new RuntimeException('Quiet CPU fixture failed: '.$case);}
+              function quiet_burst(array $options=[]): array {
+                  \MonQuietTest\CpuFixtureHost::reset($options);$first=\MonQuietTest\LiteResource::sample();\MonQuietTest\CpuFixtureHost::advance(0.25,100.0,100.0);$second=\MonQuietTest\LiteResource::sample();return [$first,$second];
+              }
+              function quiet_record(string $name,array $before,array $after): void {global $quietScenarios;$quietScenarios[$name]=['before'=>$before,'after'=>$after,'sleeps'=>\MonQuietTest\CpuFixtureHost::$sleeps,'counter_reads'=>\MonQuietTest\CpuFixtureHost::$reads,'events'=>\MonQuietTest\CpuFixtureHost::$events];}
+
+              [$first,$second]=quiet_burst();quiet_record('single_core_self_cache_burst',$first,$second);
+              quiet_check($first['cpu_mode']==='normal'&&$first['heavy_allowed']===true,'quiet initial normal-load admission');
+              quiet_check($second['cpu_mode']===($quietExpected?'normal':'defer'),'short self-generated 100 percent burst '.($quietExpected?'remeasured before admission':'reproduces baseline self-throttle'));
+              if(!$quietExpected){quiet_check(\MonQuietTest\CpuFixtureHost::$sleeps===[],'baseline cache-burst refusal does not acquire a quiet CPU measurement');}
+              else {
+                  quiet_check(\MonQuietTest\CpuFixtureHost::$sleeps===[500000],'suspect short burst incurs exactly one 500ms quiet observation');
+                  quiet_check($second['heavy_allowed']===true&&$second['cpu_busy_pct']===0.0,'quiet idle counters permit normal progress');
+                  $confirmation=$second['cpu_confirmation']??null;quiet_check($first['cpu_confirmation']===null&&is_array($confirmation)&&$confirmation['valid']===true&&$confirmation['busy_before_pct']===100.0&&$confirmation['sample_before_seconds']===0.25&&$confirmation['seconds']>=0.45&&$confirmation['seconds']<=1&&$confirmation['own_cpu_seconds']===0,'telemetry distinguishes raw burst, bounded quiet measurement and its own CPU cost');
+                  [$first,$second]=quiet_burst(['load'=>2.0]);quiet_record('soft_load_quiet_low',$first,$second);quiet_check($second['cpu_mode']==='limited'&&$second['cpu_batch_limit']===1,'soft load quiet low CPU admits exactly one row');
+                  [$first,$second]=quiet_burst(['quietBusy'=>100.0]);quiet_record('true_external_busy',$first,$second);quiet_check($second['cpu_mode']==='defer'&&$second['cpu_reason']==='CPU_BUSY'&&$second['cpu_busy_pct']===100.0,'true external 100 percent CPU remains deferred after quiet observation');
+                  [$first,$second]=quiet_burst(['quietBusy'=>96.0]);quiet_record('true_external_96_percent',$first,$second);quiet_check($second['cpu_mode']==='defer'&&$second['cpu_busy_pct']>=95,'external CPU at or above 95 percent cannot be bypassed');
+                  [$first,$second]=quiet_burst(['load'=>3.0]);quiet_record('hard_load',$first,$second);quiet_check($second['cpu_mode']==='defer'&&$second['cpu_reason']==='CPU_HARD_LOAD'&&\MonQuietTest\CpuFixtureHost::$sleeps===[],'hard load never invokes or bypasses the quiet admission path');
+                  [$first,$second]=quiet_burst(['quietReadValid'=>false]);quiet_record('quiet_read_invalid',$first,$second);quiet_check($second['cpu_mode']==='defer'&&$second['heavy_allowed']===false,'invalid quiet counter read keeps suspect burst deferred');
+                  [$first,$second]=quiet_burst(['quietCounterReset'=>true]);quiet_record('quiet_counters_reset',$first,$second);quiet_check($second['cpu_mode']==='defer'&&$second['heavy_allowed']===false,'reset quiet counters cannot justify CPU admission');
+                  [$first,$second]=quiet_burst(['available'=>20*1048576]);quiet_record('host_memory_floor',$first,$second);quiet_check($second['cpu_mode']==='normal'&&$second['heavy_allowed']===false&&$second['reason']==='memory'&&$second['memory_floor_bytes']===32*1048576,'quiet CPU admission preserves host memory floor');
+                  [$first,$second]=quiet_burst(['used'=>80*1048576]);quiet_record('php_headroom_floor',$first,$second);quiet_check($second['cpu_mode']==='normal'&&$second['heavy_allowed']===false&&$second['reason']==='memory'&&$second['php_memory_headroom_bytes']===16*1048576,'quiet CPU admission preserves PHP memory headroom floor');
+                  \MonQuietTest\CpuFixtureHost::reset();$first=\MonQuietTest\LiteResource::sample();\MonQuietTest\CpuFixtureHost::advance(1.0,100,100);$second=\MonQuietTest\LiteResource::sample();quiet_record('short_window_upper_boundary',$first,$second);quiet_check($second['cpu_mode']==='normal'&&\MonQuietTest\CpuFixtureHost::$sleeps===[500000],'one-second burst boundary receives one quiet measurement');
+                  \MonQuietTest\CpuFixtureHost::reset();$first=\MonQuietTest\LiteResource::sample();\MonQuietTest\CpuFixtureHost::advance(1.01,100,100);$second=\MonQuietTest\LiteResource::sample();quiet_record('sustained_window_not_remeasured',$first,$second);quiet_check($second['cpu_mode']==='defer'&&\MonQuietTest\CpuFixtureHost::$sleeps===[],'sustained busy interval beyond one second is not relabeled as a short self burst');
+                  [$first,$second]=quiet_burst(['sleepSecondsOverride'=>0.25]);quiet_record('quiet_wait_too_short',$first,$second);quiet_check($second['cpu_mode']==='defer','shortened quiet wait cannot justify admission');
+                  [$first,$second]=quiet_burst(['sleepSecondsOverride'=>1.5]);quiet_record('quiet_wait_too_old',$first,$second);quiet_check($second['cpu_mode']==='defer','overslept quiet wait outside freshness bound cannot justify admission');
+                  [$first,$second]=quiet_burst(['onSleep'=>static function($microseconds){if($microseconds===500000)\MonQuietTest\CpuFixtureHost::$load=3.0;}]);quiet_record('load_escalates_during_quiet_wait',$first,$second);quiet_check($second['cpu_mode']==='defer'&&$second['cpu_reason']==='CPU_HARD_LOAD'&&$second['load1']===3.0,'quiet observation rereads load and preserves a newly reached hard-load block');
+                  foreach(['missing'=>null,'empty'=>[],'nonnumeric'=>'busy','nan'=>NAN,'infinite'=>INF,'negative'=>-1.0] as $label=>$badLoad){[$first,$second]=quiet_burst(['onSleep'=>static function($microseconds)use($badLoad){if($microseconds===500000)\MonQuietTest\CpuFixtureHost::$load=$badLoad;}]);quiet_record('postwait_load_'.$label,$first,$second);quiet_check($second['cpu_mode']==='defer'&&$second['heavy_allowed']===false&&$second['cpu_confirmation']['valid']===false,'invalid postwait load cannot be converted into quiet CPU admission: '.$label);}
+                  \MonQuietTest\CpuFixtureHost::reset();$first=\MonQuietTest\LiteResource::sample();\MonQuietTest\CpuFixtureHost::advance(1.01,100,100);$busy=\MonQuietTest\LiteResource::sample();\MonQuietTest\CpuFixtureHost::$load=2.0;\MonQuietTest\CpuFixtureHost::advance(91.0,50.0,0.0);$second=\MonQuietTest\LiteResource::sample();quiet_record('stale_busy_is_reobserved',$busy,$second);quiet_check($second['cpu_mode']==='limited'&&$second['cpu_busy_pct']===0.0&&\MonQuietTest\CpuFixtureHost::$sleeps===[100000],'stale busy evidence requires a fresh bounded prime and cannot trigger an additional quiet wait');
+              }
+              $quietReport=array_merge($quietIdentity,['scenario'=>'actual_resource_sampling_quiet_cpu_recheck','baseline'=>!$quietExpected,'status'=>'PASS','case_count'=>count($quietCases),'cases'=>$quietCases,'scenarios'=>$quietScenarios]);
+              echo json_encode($quietReport,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)."\n";
+          }
+          PHP
+          cat >"$test_dir/quiet-scan-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          /* Monitor control flow is retained. Resource sample call sites route to the exact
+           * extracted Resource class, whose OS inputs are deterministic in quiet-fixture. */
+          $scanSource=getenv('MON_TEST_SOURCE');$scanBytes=file_get_contents($scanSource);$scanSha=hash('sha256',$scanBytes);$scanBaseline=getenv('MON_EXPECT_R17')!=='1';
+          $scanTemp=__DIR__.'/scratchreports/quiet-scan-'.($scanBaseline?'before':'after').'-'.getmypid();if(!is_dir($scanTemp))mkdir($scanTemp,0700,true);
+          $scanCopy=str_replace('LiteResource::sample()','QuietScanResource::sample()',$scanBytes,$scanCallSites);if($scanCallSites<3)throw new RuntimeException('Resource sample anchors unavailable');file_put_contents($scanTemp.'/mon.php',$scanCopy);require $scanTemp.'/mon.php';putenv('MON_QUIET_LIBRARY=1');require __DIR__.'/quiet-fixture.php';
+          $scanCases=[];$scanScenarios=[];
+          function qs_check(bool $ok,string $message): void {global $scanCases;$scanCases[]=['case'=>$message,'status'=>$ok?'PASS':'FAIL'];if(!$ok){global $scanTemp,$scanScenarios;file_put_contents($scanTemp.'/failure.json',lm_json(['failed'=>$message,'scenarios'=>$scanScenarios])."\n");throw new RuntimeException($message);}}
+          function qs_prop($object,string $name,$value=null,bool $set=false){$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($set){$p->setValue($object,$value);return null;}return $p->getValue($object);}
+          function qs_call($object,string $name,array $args=[]){$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          final class QuietScanResource {
+              public static $calls=0,$burst=true,$results=[];
+              public static function sample(): array {self::$calls++;if(self::$burst&&self::$calls===2)\MonQuietTest\CpuFixtureHost::advance(0.2431,100.0,98.72);$r=\MonQuietTest\LiteResource::sample();self::$results[]=$r;return $r;}
+          }
+          final class QuietScanHttp {
+              public $files=[],$puts=[],$reads=[],$badReadAfterPut=false;
+              public function clearRequestCache(): void {}public function resetStats(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}
+              public function githubGet(string $path,bool $force=false): ?array {$this->reads[]=['path'=>$path,'force'=>$force,'after_put'=>in_array($path,$this->puts,true)];if($this->badReadAfterPut&&$force&&$path==='mon_result.md'&&in_array($path,$this->puts,true)){$this->badReadAfterPut=false;return ['content'=>'bad injected readback','sha'=>lm_git_blob_sha('bad injected readback'),'commit_sha'=>null];}return $this->files[$path]??null;}
+              public function githubPut(string $path,string $content,string $message,?string $oldSha=null): array {$current=$this->files[$path]??null;if(($current?$current['sha']:null)!==$oldSha)throw new RuntimeException('Fake GitHub CAS mismatch');$this->puts[]=$path;$this->files[$path]=['content'=>$content,'sha'=>lm_git_blob_sha($content),'commit_sha'=>sha1($path.$content)];return ['blob_sha'=>$this->files[$path]['sha'],'commit_sha'=>$this->files[$path]['commit_sha'],'unchanged'=>false];}
+          }
+          final class QuietScanYahoo {
+              public $calls=[],$bars;
+              public function __construct(array $bars){$this->bars=$bars;}public function beginTurn(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}
+              public function recent(array $symbol,string $lastDate,int $overlap=21): array {$this->calls[]=$symbol['symbol_id'];return $this->bars;}
+              public function daily(array $symbol,int $days=220): array {$this->calls[]=$symbol['symbol_id'];return $this->bars;}
+              public function benchmark(): array {throw new RuntimeException('Fresh complete benchmark cache must be reused');}
+          }
+          function qs_seed(array $host=[]): array {
+              foreach(LiteRuntime::FILES as $key){$p=LiteRuntime::path($key.'.php');if(is_file($p))unlink($p);}
+              \MonQuietTest\CpuFixtureHost::reset($host);QuietScanResource::$calls=0;QuietScanResource::$results=[];QuietScanResource::$burst=true;
+              $bars=[];for($j=0;$j<220;$j++)$bars[]=[gmdate('Y-m-d',1600000000+$j*86400),100.0,101.0,99.0,100.0,100000.0];$map=LiteSwing::benchmarkMap($bars);$fp=lm_hash(['^GSPC','YAHOO','^GSPC',$map]);$watch=[];$symbols=new stdClass();$ids=[];
+              for($i=0;$i<3;$i++){$id='US|NASDAQ|QUIET'.$i;$ids[]=$id;$symbol=['symbol_id'=>$id,'symbol'=>'QUIET'.$i,'country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'Offline quiet '.$i];$watch[]=$symbol;$symbols->{$id}=(object)['status'=>'ok','symbol'=>(object)$symbol,'bars'=>$bars,'analysis'=>LiteSwing::analyzeMapped($symbol,$bars,$map),'checked_at'=>lm_iso(time()-3600),'benchmark_source_ticker'=>'^GSPC','benchmark_fingerprint'=>$fp,'calculation_version'=>LiteMonitor::CALCULATION_VERSION];}
+              LiteRuntime::write('cache',(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>$watch,'symbols'=>$symbols,'benchmarks'=>(object)['US'=>$bars],'benchmark_meta'=>(object)['US'=>(object)['source_ticker'=>'^GSPC','source_provider'=>'YAHOO','provider_symbol'=>'^GSPC','coverage_version'=>LiteMonitor::BENCHMARK_COVERAGE_VERSION,'status'=>'ok','coverage_status'=>'complete','missing_dates'=>[],'last_date'=>end($bars)[0],'required_date'=>end($bars)[0],'required_dates'=>array_column(array_slice($bars,-21),0),'last_good_at'=>lm_iso(),'checked_at'=>lm_iso(),'map_fingerprint'=>$fp]],'last_full_resync_at'=>lm_iso(),'full_resync_pending'=>false,'scan_queue'=>$ids]);
+              $config=new LiteConfig();$config->githubToken='synthetic-ci-token';$http=new QuietScanHttp();$bytes=lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'watchlist'=>['symbols'=>$watch]]);$http->files['mon_data.json']=['content'=>$bytes,'sha'=>lm_git_blob_sha($bytes),'commit_sha'=>null];$yahoo=new QuietScanYahoo($bars);$monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $key=>$value)qs_prop($monitor,$key,$value,true);$state=LiteMonitor::defaultState();$state->last_full_scan=lm_iso();$state->next_full_scan=lm_iso(time()+86400);$monitor->saveState($state);return [$monitor,$http,$yahoo,$ids];
+          }
+          function qs_summary(array $scan,$monitor,$http,$yahoo): array {$s=$monitor->state();return ['done'=>$scan['done']??null,'pending'=>$scan['pending']??null,'queue_remaining'=>lm_get(lm_get($scan,'network_stats'),'queue_remaining'),'phase'=>$s->phase,'progress'=>lm_array($s->progress),'resource_wait'=>lm_array($s->resource_wait),'publication_pending'=>$s->publication_pending,'reference_publication_status'=>$s->reference_publication_status,'stock_requests'=>$yahoo->calls,'puts'=>$http->puts,'resources'=>QuietScanResource::$results,'sleeps'=>\MonQuietTest\CpuFixtureHost::$sleeps];}
+          [$monitor,$http,$yahoo,$ids]=qs_seed();$scan=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');$state=$monitor->state();$scanScenarios['cache_decode_burst']=qs_summary($scan,$monitor,$http,$yahoo);
+          if($scanBaseline){qs_check($scan['done']===0&&$scan['pending']===3&&$scan['network_stats']['queue_remaining']===3,'r16 cacheburst reproduces zero-progress scan with all queued rows pending');qs_check($yahoo->calls===[]&&$http->puts===[]&&(array)$cache->scan_queue===$ids,'r16 self-throttle performs no row work or publication and preserves exact queue');qs_check($state->phase==='WAIT'&&lm_get($state->progress,'next_retry_seconds')===120&&lm_get($state->resource_wait,'reason')==='CPU_BUSY','r16 self-throttle retains live WAIT/120-second retry shape');}
+          else{
+              qs_check($scan['done']===3&&$scan['pending']===0&&(array)$cache->scan_queue===[],'quiet resampling after cache decode finishes all three queued rows');qs_check($yahoo->calls===$ids,'cacheburst recovery evaluates every queued row once without skip or repeat');qs_check($http->puts===['mon_data.json','mon_result.md']&&$state->publication_pending===false&&$state->reference_publication_status==='published_readback','completed reference pair is published and acknowledged only after readback');$forced=[];foreach($http->reads as $read)if($read['force']&&$read['after_put'])$forced[$read['path']]=true;qs_check(isset($forced['mon_data.json'],$forced['mon_result.md']),'reference publication forces post-write readback of JSON and Markdown');$data=lm_decode($http->files['mon_data.json']['content']);qs_check(lm_get(lm_get($data,'scan'),'done')===3&&lm_get(lm_get($data,'scan'),'pending')===0&&lm_get(lm_get($data,'scan'),'decision_status')==='awaiting_chatgpt'&&$monitor->finalSaveStatus()['last_local_receipt_verified']===false,'reference completion does not manufacture a saved ChatGPT final receipt');
+              [$monitor,$http,$yahoo,$ids]=qs_seed(['quietBusy'=>97.0]);$scan=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');$scanScenarios['real_external_busy']=qs_summary($scan,$monitor,$http,$yahoo);qs_check($scan['done']===0&&$scan['pending']===3&&$yahoo->calls===[]&&$http->puts===[]&&(array)$cache->scan_queue===$ids,'genuine busy quiet interval still preserves zero-progress queue without network writes');qs_check(lm_get($monitor->state()->resource_wait,'reason')==='CPU_BUSY'&&lm_get($monitor->state()->progress,'next_retry_seconds')===120,'real external pressure remains a truthful paced retry');
+              [$monitor,$http,$yahoo,$ids]=qs_seed(['load'=>2.0]);$first=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');$scanScenarios['soft_quiet_one_row']=qs_summary($first,$monitor,$http,$yahoo);qs_check($first['done']===1&&$first['pending']===2&&(array)$cache->scan_queue===array_slice($ids,1)&&$http->puts===[],'soft quiet resources advance exactly one row and durably retain the remainder');qs_check(lm_get($monitor->state()->progress,'next_retry_seconds')===120,'bounded progress exposes the normal 120-second continuation schedule');\MonQuietTest\CpuFixtureHost::reset();QuietScanResource::$calls=0;QuietScanResource::$results=[];$next=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>qs_prop($monitor,'cfg'),'http'=>$http,'yahoo'=>$yahoo] as $key=>$value)qs_prop($next,$key,$value,true);$second=$next->fullScan(true);$scanScenarios['restart_only_remaining']=qs_summary($second,$next,$http,$yahoo);qs_check($second['done']===3&&$second['pending']===0&&$yahoo->calls===$ids,'restart after quiet bounded work processes only the exact two remaining rows');qs_check($next->state()->publication_pending===false&&$next->state()->reference_publication_status==='published_readback','restarted completion publishes verified reference data');
+              [$monitor,$http,$yahoo,$ids]=qs_seed();$http->badReadAfterPut=true;$scan=$monitor->fullScan(true);$scanScenarios['reference_readback_failure']=qs_summary($scan,$monitor,$http,$yahoo);qs_check($scan['done']===3&&$scan['pending']===0&&$monitor->state()->publication_pending===true&&$monitor->state()->last_publication_error==='GITHUB_READBACK_MISMATCH','reference readback mismatch remains publication pending despite completed calculations');$calls=$yahoo->calls;qs_call($monitor,'retryPublication');qs_check($yahoo->calls===$calls&&$monitor->state()->publication_pending===false&&$monitor->state()->reference_publication_status==='published_readback','publication-only retry verifies the completed reference without another market scan');
+          }
+          $scanReport=['source_sha256'=>$scanSha,'instrumented_sha256'=>hash('sha256',$scanCopy),'instrumentation'=>'Only monitor resource sample call sites route to the unchanged LiteResource class extracted from the same source. OS metrics and cache-decode CPU burst are deterministic; market/GitHub transport is offline.','resource_call_sites'=>$scanCallSites,'baseline'=>$scanBaseline,'case_count'=>count($scanCases),'cases'=>$scanCases,'scenarios'=>$scanScenarios];file_put_contents($scanTemp.'/report.json',lm_json($scanReport)."\n");echo lm_json($scanReport)."\n";
+          PHP
+          MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R17=1 php -d memory_limit=96M "$test_dir/quiet-fixture.php"
+          MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R17=1 php -d memory_limit=96M "$test_dir/quiet-scan-fixture.php"
 
       - name: Source identities
         run: sha256sum mon.php monitor.md MON-Wiki.md mon_data.json mon_result.md mon_chatgpt_handoff.json mon_chatgpt_response.json
