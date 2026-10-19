@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261019-r14'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r15'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -178,11 +178,11 @@ jobs:
           if($mode==='queue'){
               final class MemQueueHttp {public function clearRequestCache(): void {}public function resetStats(): void {}public function stats(): array {return [];}public function githubGet(string $path,bool $force=false): ?array {return null;}public function releasePayloads(): void {}}
               final class MemQueueYahoo {public $calls=[],$bars;public function __construct(array $bars){$this->bars=$bars;}public function beginTurn(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}public function recent(array $s,string $last,int $overlap=21): array {$this->calls[]=$s['symbol_id'];return $this->bars;}public function daily(array $s,int $days=220): array {$this->calls[]=$s['symbol_id'];return $this->bars;}public function benchmark(): array {return $this->bars;}}
-              $bars=[];for($j=0;$j<220;$j++)$bars[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];$map=LiteSwing::benchmarkMap($bars);$watch=[];$symbols=new stdClass();
-              for($i=0;$i<3;$i++){$id='US|NASDAQ|CI'.$i;$s=['symbol_id'=>$id,'symbol'=>'CI'.$i,'country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'Fixture '.$i];$watch[]=$s;$symbols->{$id}=(object)['status'=>'ok','symbol'=>(object)$s,'bars'=>$bars,'analysis'=>LiteSwing::analyzeMapped($s,$bars,$map),'checked_at'=>lm_iso(time()-3600)];}
-              $cache=(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>$watch,'symbols'=>$symbols,'benchmarks'=>(object)['US'=>$bars],'benchmark_meta'=>(object)['US'=>(object)['checked_at'=>lm_iso()]],'last_full_resync_at'=>lm_iso(),'full_resync_pending'=>false,'scan_queue'=>['US|NASDAQ|CI1','US|NASDAQ|CI2']];LiteRuntime::write('cache',$cache);unset($cache,$symbols,$map,$watch);
+              $bars=[];for($j=0;$j<220;$j++)$bars[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];$map=LiteSwing::benchmarkMap($bars);$fingerprint=lm_hash(['^GSPC',$map]);$watch=[];$symbols=new stdClass();
+              for($i=0;$i<3;$i++){$id='US|NASDAQ|CI'.$i;$s=['symbol_id'=>$id,'symbol'=>'CI'.$i,'country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'Fixture '.$i];$watch[]=$s;$symbols->{$id}=(object)['status'=>'ok','symbol'=>(object)$s,'bars'=>$bars,'analysis'=>LiteSwing::analyzeMapped($s,$bars,$map),'benchmark_fingerprint'=>$fingerprint,'calculation_version'=>LiteMonitor::CALCULATION_VERSION,'checked_at'=>lm_iso(time()-3600)];}
+              $cache=(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>$watch,'symbols'=>$symbols,'benchmarks'=>(object)['US'=>$bars],'benchmark_meta'=>(object)['US'=>(object)['checked_at'=>lm_iso(),'last_good_at'=>lm_iso(),'source_ticker'=>'^GSPC','map_fingerprint'=>$fingerprint,'status'=>'ok']],'last_full_resync_at'=>lm_iso(),'full_resync_pending'=>false,'scan_queue'=>['US|NASDAQ|CI1','US|NASDAQ|CI2']];LiteRuntime::write('cache',$cache);unset($cache,$symbols,$map,$watch);
               $config=new LiteConfig();$http=new MemQueueHttp();$yahoo=new MemQueueYahoo($bars);$monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $name=>$value)mem_prop($monitor,$name,$value,true);$state=LiteMonitor::defaultState();$state->last_full_scan=lm_iso();$monitor->saveState($state);$held=str_repeat('P',25*1048576);
-              $first=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');$remaining=(array)lm_get($cache,'scan_queue',[]);mem_assert($remaining===['US|NASDAQ|CI2'],'low-headroom cycle leaves exact unprocessed OK row in durable queue');mem_assert(mem_call($monitor,'pendingCount',[$cache])===1,'pending count includes queued rows with prior OK analysis');unset($cache);$second=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'next retry finishes durable continuation');mem_assert($yahoo->calls===['US|NASDAQ|CI1','US|NASDAQ|CI2'],'continuation does not skip or redo prior OK rows');
+              $first=$monitor->fullScan(true);$cache=mem_call($monitor,'cacheObj');$remaining=(array)lm_get($cache,'scan_queue',[]);mem_assert($remaining===['US|NASDAQ|CI2'],'low-headroom cycle leaves exact unprocessed OK row in durable queue');mem_assert(mem_call($monitor,'pendingCount',[$cache])===1,'pending count includes queued rows with prior OK analysis');unset($cache);$second=$monitor->fullScan(true);$cache=mem_call($monitor,'cacheObj');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'next retry finishes durable continuation');mem_assert($yahoo->calls===['US|NASDAQ|CI1','US|NASDAQ|CI2'],'continuation does not skip or redo prior OK rows');
               echo lm_json(['scenario'=>'low_headroom_durable_scan_queue','calls'=>$yahoo->calls,'first_queue_remaining'=>$first['network_stats']['queue_remaining'],'second_queue_remaining'=>$second['network_stats']['queue_remaining'],'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
           }
           if($mode==='candidate_queue'){
@@ -191,9 +191,9 @@ jobs:
               foreach(LiteRuntime::FILES as $key){$path=LiteRuntime::path($key.'.php');if(is_file($path))unlink($path);}$bars=[];for($j=0;$j<220;$j++)$bars[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];$old=['symbol_id'=>'US|NASDAQ|CIOLD','symbol'=>'CIOLD','country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'Previous fixture'];
               $cache=(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>[$old],'symbols'=>(object)[$old['symbol_id']=>(object)['status'=>'ok','symbol'=>(object)$old]],'benchmarks'=>(object)['US'=>$bars],'benchmark_meta'=>(object)['US'=>(object)['checked_at'=>lm_iso()]],'last_full_resync_at'=>lm_iso(),'full_resync_pending'=>false,'scan_queue'=>[$old['symbol_id']]];LiteRuntime::write('cache',$cache);unset($cache);
               $config=new LiteConfig();$config->githubToken='synthetic-ci-token';$http=new MemCandidateHttp();$http->seed('mon_data.json',lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'watchlist'=>['symbols'=>[]]]));$http->seed('mon_chatgpt_handoff.json',lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'candidates','request_id'=>'ci-new-watch','candidate_ids'=>['US|NASDAQ|CINEW']]));$yahoo=new MemCandidateYahoo($bars);$monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $name=>$value)mem_prop($monitor,$name,$value,true);$state=LiteMonitor::defaultState();$state->last_full_scan=lm_iso();$monitor->saveState($state);
-              mem_call($monitor,'processMailbox');$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'new candidate replacement must clear old continuation');mem_assert(isset($cache->symbols->{'US|NASDAQ|CINEW'})&&!isset($cache->symbols->{'US|NASDAQ|CIOLD'}),'new candidate set replaces old symbols');
-              $cache->scan_queue=['US|NASDAQ|CIOLD','KR|NASDAQ|005930'];LiteRuntime::write('cache',$cache);unset($cache);$held=str_repeat('R',25*1048576);$scan=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'orphan-only queue is discarded');mem_assert($yahoo->calls===['US|NASDAQ|CINEW']&&lm_get($cache->symbols->{'US|NASDAQ|CINEW'},'status')==='ok','orphan queue must not starve new pending candidate');
-              $cache->scan_queue=['US|NASDAQ|CIOLD'];LiteRuntime::write('cache',$cache);unset($cache);$idle=$monitor->fullScan(true);$cache=LiteRuntime::read('cache');mem_assert((array)lm_get($cache,'scan_queue',[])===[]&&mem_call($monitor,'pendingCount',[$cache])===0,'orphan queue is durably cleared when current watch is all OK');mem_assert($yahoo->calls===['US|NASDAQ|CINEW'],'all-OK cleanup must not repeat collection');
+              mem_call($monitor,'processMailbox');$cache=mem_call($monitor,'cacheObj');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'new candidate replacement must clear old continuation');mem_assert(isset($cache->symbols->{'US|NASDAQ|CINEW'})&&!isset($cache->symbols->{'US|NASDAQ|CIOLD'}),'new candidate set replaces old symbols');
+              $cache->scan_queue=['US|NASDAQ|CIOLD','KR|NASDAQ|005930'];LiteRuntime::write('cache',$cache);unset($cache);$held=str_repeat('R',25*1048576);$scan=$monitor->fullScan(true);$cache=mem_call($monitor,'cacheObj');mem_assert((array)lm_get($cache,'scan_queue',[])===[],'orphan-only queue is discarded');mem_assert($yahoo->calls===['US|NASDAQ|CINEW']&&lm_get($cache->symbols->{'US|NASDAQ|CINEW'},'status')==='ok','orphan queue must not starve new pending candidate');
+              $cache->scan_queue=['US|NASDAQ|CIOLD'];LiteRuntime::write('cache',$cache);unset($cache);$idle=$monitor->fullScan(true);$cache=mem_call($monitor,'cacheObj');mem_assert((array)lm_get($cache,'scan_queue',[])===[]&&mem_call($monitor,'pendingCount',[$cache])===0,'orphan queue is durably cleared when current watch is all OK');mem_assert($yahoo->calls===['US|NASDAQ|CINEW'],'all-OK cleanup must not repeat collection');
               echo lm_json(['scenario'=>'candidate_replacement_orphan_queue','replacement_cleared'=>true,'new_pending_collected_once'=>true,'all_ok_orphan_cleaned'=>true,'calls'=>$yahoo->calls,'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
           }
           if($mode==='http'){
@@ -414,6 +414,406 @@ jobs:
           grep -F "const MAILBOX_SECONDS=300;" mon.php
           grep -F "const FULL_RESYNC_SECONDS=604800;" mon.php
           grep -F "no cron / no orders" mon.php
+
+      - name: CPU accounting and bounded continuation
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/cpu-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+
+          /* Offline fixture. Pure tests require exact source bytes; full-scan tests replace
+           * only resource-sampling call sites in a disposable copy, never production code. */
+          $cpuSource=getenv('MON_TEST_SOURCE');
+          if(!is_string($cpuSource)||!is_file($cpuSource))throw new RuntimeException('MON_TEST_SOURCE must identify the source under test');
+          $cpuMode=getenv('MON_CPU_MODE')?:'pure';
+          $cpuOriginal=file_get_contents($cpuSource);
+          if(!is_string($cpuOriginal))throw new RuntimeException('Cannot read source under test');
+          $cpuIdentity=['source_sha256'=>hash('sha256',$cpuOriginal),'fixture_sha256'=>hash_file('sha256',__FILE__),'mode'=>$cpuMode];
+          if(in_array($cpuMode,['scan','baseline'],true)){
+              $cpuNeedle='LiteResource::sample()';$cpuReplacement='CpuFixtureResource::sample()';
+              $cpuInstrumented=str_replace($cpuNeedle,$cpuReplacement,$cpuOriginal,$cpuReplacements);
+              if($cpuReplacements<3)throw new RuntimeException('Expected resource call sites are unavailable');
+              $cpuScratch=__DIR__.'/scratchreports/cpu-'.getmypid().'-'.bin2hex(random_bytes(6));
+              if(!is_dir($cpuScratch)&&!mkdir($cpuScratch,0700,true))throw new RuntimeException('Cannot create isolated fixture directory');
+              $cpuCopy=$cpuScratch.'/mon.php';
+              if(file_put_contents($cpuCopy,$cpuInstrumented)!==strlen($cpuInstrumented))throw new RuntimeException('Cannot write isolated fixture source');
+              $cpuIdentity['instrumentation']=['classification'=>'deterministic resource injection','replacement_from'=>$cpuNeedle,'replacement_to'=>$cpuReplacement,'replacement_count'=>$cpuReplacements,'transformed_sha256'=>hash('sha256',$cpuInstrumented)];
+              require $cpuCopy;
+          }else require $cpuSource;
+          unset($cpuOriginal,$cpuInstrumented);
+
+          $cpuCases=[];
+          function cpu_check(bool $pass,string $case): void {
+              global $cpuCases;$cpuCases[]=['case'=>$case,'status'=>$pass?'PASS':'FAIL'];
+              if(!$pass)throw new RuntimeException('CPU fixture failed: '.$case);
+          }
+          function cpu_close($got,float $expected,string $case): void {cpu_check(is_numeric($got)&&abs((float)$got-$expected)<0.000001,$case);}
+          function cpu_prop($object,string $name,$value=null,bool $write=false) {
+              $p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);
+              if($write){$p->setValue($object,$value);return null;}return $p->getValue($object);
+          }
+          function cpu_call($object,string $name,array $args=[]) {$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          function cpu_report(array $extra=[]): void {
+              global $cpuCases,$cpuIdentity;
+              echo lm_json(array_merge($cpuIdentity,['status'=>'PASS','case_count'=>count($cpuCases),'cases'=>$cpuCases],$extra))."\n";
+          }
+
+          if($cpuMode==='pure'){
+              foreach(['cpuInfo','cpuDelta','cpuPolicy'] as $api)cpu_check(method_exists(LiteResource::class,$api),'required public resource API '.$api);
+              $before=LiteResource::cpuInfo("cpu 100 10 30 400 20 5 5 10 50 4\ncpu0 10 1 3 40 2 1 1 1\n");
+              $after=LiteResource::cpuInfo("cpu 128 12 40 450 50 7 9 12 80 6\ncpu0 13 1 4 45 5 1 1 1\n");
+              cpu_check(is_array($before)&&count($before['ticks'])===8,'aggregate CPU row parses exactly eight accounting counters');
+              cpu_close($before['total'],580.0,'guest counters are not counted twice');
+              cpu_close($before['idle'],400.0,'idle ticks remain separate');
+              cpu_close($before['iowait'],20.0,'I/O wait ticks remain separate');
+              $short=LiteResource::cpuInfo('cpu 10 2 3 40');
+              cpu_check(is_array($short)&&count($short['ticks'])===8,'older Linux four-counter aggregate is supported');
+              cpu_close($short['total'],55.0,'absent optional accounting counters are zero-filled');
+              $guest=LiteResource::cpuInfo('cpu 100 10 30 400 20 5 5 10 ignored-guest ignored-guest-nice');
+              cpu_check($guest===$before,'guest fields beyond the eight accounting counters are ignored');
+              $delta=LiteResource::cpuDelta($before,$after,1.0);
+              cpu_close($delta['cpu_busy_pct'],37.5,'busy percentage measures executed work rather than I/O wait');
+              cpu_check(is_numeric($delta['cpu_iowait_pct'])&&abs((float)$delta['cpu_iowait_pct']-23.4375)<0.01,'I/O wait percentage is independently visible');
+              cpu_close($delta['cpu_sample_seconds'],1.0,'elapsed sample interval is retained');
+              foreach(['cpu0 1 2 3 4 5 6 7 8',"intr 45\ncpu0 1 2 3 4 5 6 7 8",'cpu 1 2 -3 4 5 6 7 8','cpu 1 2 bad 4 5 6 7 8','cpu 1 2 3'] as $i=>$bad)
+                  cpu_check(LiteResource::cpuInfo($bad)===null,'invalid or absent aggregate row is unknown #'.$i);
+              foreach([0.0,-1.0,0.099,90.001] as $seconds){$d=LiteResource::cpuDelta($before,$after,$seconds);cpu_check($d['cpu_busy_pct']===null&&$d['cpu_iowait_pct']===null,'unusable CPU sampling interval stays unknown '.$seconds);}
+              foreach([0.1,90.0] as $seconds){$d=LiteResource::cpuDelta($before,$after,$seconds);cpu_close($d['cpu_busy_pct'],37.5,'valid sampling interval boundary '.$seconds);}
+              foreach([[null,$after],[$before,null],[$before,$before]] as $i=>$pair){$d=LiteResource::cpuDelta($pair[0],$pair[1],1.0);cpu_check($d['cpu_busy_pct']===null&&$d['cpu_iowait_pct']===null,'missing or stationary CPU accounting stays unknown #'.$i);}
+              $reset=LiteResource::cpuInfo('cpu 200 20 50 500 19 6 6 11');
+              $d=LiteResource::cpuDelta($before,$reset,1.0);
+              cpu_check($d['cpu_busy_pct']===null&&$d['cpu_iowait_pct']===null,'one counter reset invalidates delta even while total increases');
+              $allBusyBefore=LiteResource::cpuInfo('cpu 100 0 0 0 0 0 0 0');
+              $allBusyAfter=LiteResource::cpuInfo('cpu 200 0 0 0 0 0 0 0');
+              $d=LiteResource::cpuDelta($allBusyBefore,$allBusyAfter,1.0);cpu_close($d['cpu_busy_pct'],100.0,'fully busy accounting reaches 100 percent');
+              $ioAfter=LiteResource::cpuInfo('cpu 100 0 0 0 100 0 0 0');
+              $d=LiteResource::cpuDelta($allBusyBefore,$ioAfter,1.0);cpu_close($d['cpu_busy_pct'],0.0,'I/O wait alone does not claim CPU execution');cpu_close($d['cpu_iowait_pct'],100.0,'pure I/O wait remains measurable');
+
+              $policies=[
+                  [1.5,1,null,null,'normal','normal load boundary permits unknown CPU'],
+                  [3.0,2,94.999,1.0,'normal','load threshold scales with CPU cores'],
+                  [0.1,1,95.0,1.0,'defer','95 percent busy blocks even at low load'],
+                  [0.1,1,100.0,1.0,'defer','fully busy CPU blocks even at low load'],
+                  [1.500001,1,85.0,1.0,'limited','soft load accepts fresh 85 percent CPU in one-row batches'],
+                  [2.999999,1,0.0,1.0,'limited','soft load just below hard threshold can make bounded progress'],
+                  [1.500001,1,85.000001,1.0,'defer','soft load above CPU comfort boundary defers'],
+                  [2.0,1,null,null,'defer','soft load with unknown CPU cannot bypass pressure guard'],
+                  [2.0,1,20.0,null,'defer','soft load without sample age cannot bypass pressure guard'],
+                  [2.0,1,20.0,90.0,'limited','last fresh sample-age boundary is accepted'],
+                  [2.0,1,20.0,90.001,'defer','stale CPU evidence cannot justify soft load work'],
+                  [2.0,1,20.0,-0.1,'defer','future or invalid sample age cannot justify soft load work'],
+                  [2.0,1,20.0,0.0,'limited','newly observed valid CPU evidence may have zero age'],
+                  [3.0,1,0.0,1.0,'defer','hard load boundary always defers'],
+                  [6.0,2,0.0,1.0,'defer','hard load boundary scales with cores'],
+                  [null,2,null,null,'defer','unknown host load conservatively defers heavy work'],
+              ];
+              foreach($policies as $p){$got=LiteResource::cpuPolicy($p[0],$p[1],$p[2],$p[3]);cpu_check($got['cpu_mode']===$p[4],$p[5]);cpu_check($got['cpu_batch_limit']===($p[4]==='normal'?null:($p[4]==='limited'?1:0)),'batch limit matches admitted work: '.$p[5]);}
+              cpu_report(['scenario'=>'exact_source_cpu_accounting_and_admission']);exit(0);
+          }
+
+          if(!in_array($cpuMode,['scan','baseline'],true))throw new RuntimeException('Unknown MON_CPU_MODE');
+
+          final class CpuFixtureResource {
+              public static $profile='normal';public static $samples=0;public static $baseline=false;public static $switchAt=0;public static $switchTo='hard';
+              public static function sample(): array {
+                  self::$samples++;if(self::$switchAt>0&&self::$samples>=self::$switchAt)self::$profile=self::$switchTo;$load=0.5;$busy=10.0;$age=1.0;
+                  if(in_array(self::$profile,['soft','soft_hard_memory'],true)){$load=2.0;$busy=20.0;}
+                  if(self::$profile==='hard'){$load=3.0;$busy=0.0;}
+                  if(self::$profile==='unknown'){$load=2.0;$busy=null;$age=null;}
+                  if(self::$profile==='stale'){$load=2.0;$busy=20.0;$age=91.0;}
+                  if(self::$profile==='busy'){$load=0.5;$busy=95.0;}
+                  $policy=self::$baseline?['cpu_mode'=>$load<=1.5?'normal':'defer','cpu_batch_limit'=>$load<=1.5?null:0,'cpu_reason'=>$load<=1.5?null:'load']:LiteResource::cpuPolicy($load,1,$busy,$age);
+                  $res=['observed_at'=>lm_iso(),'process_sapi'=>PHP_SAPI,'cores'=>1,'load1'=>$load,'cpu_busy_pct'=>$busy,'cpu_iowait_pct'=>$load>1.5?70.0:0.0,'cpu_sample_seconds'=>$age,'cpu_sample_age_seconds'=>$age,'memory_available_bytes'=>256*1048576,'memory_available_source'=>'fixture','memory_floor_bytes'=>32*1048576,'php_memory_limit_bytes'=>96*1048576,'php_memory_used_bytes'=>8*1048576,'php_memory_usage_bytes'=>8*1048576,'php_memory_peak_bytes'=>8*1048576,'php_memory_headroom_bytes'=>88*1048576,'effective_memory_available_bytes'=>88*1048576,'memory_mode'=>'normal','heavy_allowed'=>$policy['cpu_mode']==='normal','reason'=>$policy['cpu_mode']!=='normal'?'load':null];
+                  if(in_array(self::$profile,['hard_memory','soft_hard_memory'],true)){$res['php_memory_headroom_bytes']=7*1048576;$res['effective_memory_available_bytes']=7*1048576;$res['memory_mode']='low';$res['heavy_allowed']=false;if($policy['cpu_mode']==='normal')$res['reason']='memory';}
+                  return array_merge($res,$policy);
+              }
+          }
+          final class CpuFixtureHttp {
+              public $calls=[];
+              public function clearRequestCache(): void {}
+              public function resetStats(): void {}
+              public function stats(): array {return [];}
+              public function githubGet(string $path,bool $force=false): ?array {$this->calls[]=$path;return null;}
+              public function githubPut(string $path,string $content,string $message,?string $oldSha=null): array {throw new RuntimeException('CPU fixture forbids remote writes');}
+              public function releasePayloads(): void {}
+          }
+          final class CpuFixtureYahoo {
+              public $calls=[];public $bars;public $pressureAfterFirst=false;
+              public function __construct(array $bars){$this->bars=$bars;}
+              public function beginTurn(): void {}
+              public function releasePayloads(): void {}
+              public function stats(): array {return [];}
+              private function fetched(array $s): array {$this->calls[]=$s['symbol_id'];if($this->pressureAfterFirst&&count($this->calls)===1)CpuFixtureResource::$profile='hard';return $this->bars;}
+              public function recent(array $s,string $last,int $overlap=21): array {return $this->fetched($s);}
+              public function daily(array $s,int $days=220): array {return $this->fetched($s);}
+              public function benchmark(): array {throw new RuntimeException('Fresh cached benchmark must be reused');}
+          }
+          function cpu_seed(): array {
+              foreach(LiteRuntime::FILES as $key){$p=LiteRuntime::path($key.'.php');if(is_file($p))unlink($p);}
+              $bars=[];for($j=0;$j<220;$j++)$bars[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];
+              $map=LiteSwing::benchmarkMap($bars);$watch=[];$symbols=new stdClass();$ids=[];
+              for($i=0;$i<3;$i++){$id='US|NASDAQ|CPU'.$i;$ids[]=$id;$sym=['symbol_id'=>$id,'symbol'=>'CPU'.$i,'country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'CPU fixture '.$i];$watch[]=$sym;$symbols->{$id}=(object)['status'=>'ok','symbol'=>(object)$sym,'bars'=>$bars,'analysis'=>LiteSwing::analyzeMapped($sym,$bars,$map),'checked_at'=>lm_iso(time()-3600),'benchmark_source_ticker'=>'^GSPC','benchmark_fingerprint'=>lm_hash(['^GSPC',$map]),'calculation_version'=>defined('LiteMonitor::CALCULATION_VERSION')?constant('LiteMonitor::CALCULATION_VERSION'):'fixture_baseline'];}
+              LiteRuntime::write('cache',(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>$watch,'symbols'=>$symbols,'benchmarks'=>(object)['US'=>$bars],'benchmark_meta'=>(object)['US'=>(object)['checked_at'=>lm_iso(),'last_good_at'=>lm_iso(),'source_ticker'=>'^GSPC','map_fingerprint'=>lm_hash(['^GSPC',$map]),'status'=>'ok','last_error'=>null]],'last_full_resync_at'=>lm_iso(),'full_resync_pending'=>false,'scan_queue'=>$ids]);
+              $config=new LiteConfig();$http=new CpuFixtureHttp();$yahoo=new CpuFixtureYahoo($bars);$mon=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $key=>$value)cpu_prop($mon,$key,$value,true);
+              $state=LiteMonitor::defaultState();$state->last_full_scan=lm_iso();$state->last_scan_mode='fixture_previous_complete';$state->next_light_check=lm_iso(time()+1800);$state->next_full_scan=lm_iso(time()+86400);$mon->saveState($state);
+              CpuFixtureResource::$samples=0;CpuFixtureResource::$switchAt=0;return [$mon,$http,$yahoo,$ids];
+          }
+          CpuFixtureResource::$baseline=$cpuMode==='baseline';
+          $cpuScenarios=[];
+          if($cpuMode==='baseline'){
+              [$mon,$http,$yahoo,$ids]=cpu_seed();CpuFixtureResource::$profile='soft';$before=hash_file('sha256',LiteRuntime::path('cache.php'));$got=$mon->fullScan(true);
+              cpu_check(($got['deferred']??false)===true,'r14 baseline reproduces load-only refusal despite mostly idle CPU');
+              cpu_check($http->calls===[]&&$yahoo->calls===[],'baseline refuses before market or GitHub requests');
+              cpu_check(hash_file('sha256',LiteRuntime::path('cache.php'))===$before,'baseline refusal preserves queued work');
+              cpu_report(['scenario'=>'known_load_only_deferral_reproduction','observed_resource'=>$got['resource']]);exit(0);
+          }
+
+          foreach(['hard','unknown','stale','busy','hard_memory','soft_hard_memory'] as $profile){
+              [$mon,$http,$yahoo,$ids]=cpu_seed();CpuFixtureResource::$profile=$profile;$before=hash_file('sha256',LiteRuntime::path('cache.php'));$got=$mon->fullScan(true);
+              cpu_check(($got['deferred']??false)===true,'initial '.$profile.' CPU pressure defers the scan');
+              cpu_check($http->calls===[]&&$yahoo->calls===[],'initial '.$profile.' pressure prevents network requests');
+              cpu_check(hash_file('sha256',LiteRuntime::path('cache.php'))===$before,'initial '.$profile.' pressure preserves exact durable queue');
+              $cpuScenarios[]=['profile'=>$profile,'deferred'=>true,'provider_calls'=>CpuFixtureResource::$samples];
+          }
+
+          foreach(['hard','hard_memory'] as $pressure){
+              [$mon,$http,$yahoo,$ids]=cpu_seed();CpuFixtureResource::$profile='normal';CpuFixtureResource::$switchAt=2;CpuFixtureResource::$switchTo=$pressure;$got=$mon->fullScan(true);$cache=LiteRuntime::read('cache');$state=$mon->state();
+              cpu_check($yahoo->calls===[],'pressure appearing after cache load prevents market download: '.$pressure);
+              cpu_check((array)$cache->scan_queue===$ids,'pressure after cache load preserves all queued rows: '.$pressure);
+              cpu_check(is_object($state->resource_wait)&&lm_get($state->resource_wait,'reason')===($pressure==='hard'?'CPU_HARD_LOAD':'MEMORY_HARD_FLOOR'),'pressure after cache load retains its current wait reason: '.$pressure);
+              cpu_check(($got['network_stats'][$pressure==='hard'?'cpu_early_stop':'memory_early_stop']??false)===true,'pressure after cache load is visible in scan evidence: '.$pressure);
+              $cpuScenarios[]=['profile'=>'loaded_'.$pressure,'calls'=>$yahoo->calls,'queue_remaining'=>$got['network_stats']['queue_remaining']];
+          }
+
+          [$mon,$http,$yahoo,$ids]=cpu_seed();CpuFixtureResource::$profile='soft';$first=$mon->fullScan(true);$cache=LiteRuntime::read('cache');
+          cpu_check($yahoo->calls===[$ids[0]],'soft load makes exactly one row of progress');
+          cpu_check((array)$cache->scan_queue===array_slice($ids,1),'soft-load remainder is checkpointed exactly');
+          cpu_check(cpu_call($mon,'pendingCount',[cpu_call($mon,'cacheObj')])===2,'queued prior-OK rows remain pending after soft-load yield');
+          CpuFixtureResource::$profile='normal';unset($mon,$cache);$config=new LiteConfig();$mon=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $key=>$value)cpu_prop($mon,$key,$value,true);$second=$mon->fullScan(true);$cache=LiteRuntime::read('cache');
+          cpu_check((array)$cache->scan_queue===[],'normal resources finish the restarted durable continuation');
+          cpu_check($yahoo->calls===$ids,'continuation processes only remaining rows with no skip or repeat');
+          $cpuScenarios[]=['profile'=>'soft_then_restart_normal','calls'=>$yahoo->calls,'first_queue_remaining'=>$first['network_stats']['queue_remaining'],'second_queue_remaining'=>$second['network_stats']['queue_remaining']];
+
+          [$mon,$http,$yahoo,$ids]=cpu_seed();CpuFixtureResource::$profile='normal';$yahoo->pressureAfterFirst=true;$first=$mon->fullScan(true);$cache=LiteRuntime::read('cache');
+          cpu_check($yahoo->calls===[$ids[0]],'CPU pressure rising during a scan yields before the second row');
+          cpu_check((array)$cache->scan_queue===array_slice($ids,1),'mid-scan pressure preserves the exact remaining queue');
+          cpu_check(lm_get($cache->symbols->{$ids[0]},'status')==='ok','row completed before pressure remains valid');
+          cpu_check(cpu_call($mon,'pendingCount',[cpu_call($mon,'cacheObj')])===2,'mid-scan pressure exposes remaining queued prior-OK work');
+          CpuFixtureResource::$profile='normal';$yahoo->pressureAfterFirst=false;$second=$mon->fullScan(true);$cache=LiteRuntime::read('cache');
+          cpu_check((array)$cache->scan_queue===[]&&$yahoo->calls===$ids,'pressure recovery resumes only the remaining rows');
+          $cpuScenarios[]=['profile'=>'normal_then_hard_then_normal','calls'=>$yahoo->calls,'first_queue_remaining'=>$first['network_stats']['queue_remaining'],'second_queue_remaining'=>$second['network_stats']['queue_remaining']];
+          cpu_report(['scenario'=>'durable_cpu_pressure_scan_admission_and_continuation','scenarios'=>$cpuScenarios]);
+          PHP
+          MON_TEST_SOURCE="$test_dir/mon.php" MON_CPU_MODE=pure php -d memory_limit=96M "$test_dir/cpu-fixture.php"
+          MON_TEST_SOURCE="$test_dir/mon.php" MON_CPU_MODE=scan php -d memory_limit=96M "$test_dir/cpu-fixture.php"
+
+      - name: Benchmark source cache and publication regressions
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/benchmark-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          $source=getenv('MON_TEST_SOURCE');$sourceSha=hash_file('sha256',$source);$sourceBytes=file_get_contents($source);$instrumentedCount=substr_count($sourceBytes,'LiteResource::sample()');
+          // Deterministic scheduling input only; the production benchmark/scan/decision code is retained.
+          final class BenchFixtureResource {public static $hard=false,$soft=false;public static function sample(): array {return ['observed_at'=>gmdate('Y-m-d\TH:i:s\Z'),'process_sapi'=>'cli','cores'=>1,'load1'=>self::$hard?4.0:(self::$soft?2.0:0.1),'cpu_busy_pct'=>self::$hard?99.0:10.0,'cpu_sample_age_seconds'=>0.1,'cpu_mode'=>self::$hard?'defer':(self::$soft?'limited':'normal'),'cpu_reason'=>self::$hard?'CPU_HARD_LOAD':(self::$soft?'CPU_SOFT_LOAD':null),'cpu_batch_limit'=>self::$soft?1:null,'memory_available_bytes'=>128*1048576,'memory_floor_bytes'=>32*1048576,'php_memory_headroom_bytes'=>64*1048576,'php_memory_limit_bytes'=>96*1048576,'effective_memory_available_bytes'=>64*1048576,'memory_mode'=>'normal','heavy_allowed'=>!self::$hard&&!self::$soft,'reason'=>self::$hard||self::$soft?'load':null];}}
+          $instrumented=str_replace('LiteResource::sample()','BenchFixtureResource::sample()',$sourceBytes);$instrumentedPath=dirname($source).'/benchmark_instrumented.php';file_put_contents($instrumentedPath,$instrumented);require $instrumentedPath;
+          function bench_assert(bool $value,string $message): void {if(!$value)throw new RuntimeException($message);}
+          function bench_prop($object,string $name,$value=null,bool $set=false){$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($set){$p->setValue($object,$value);return null;}return $p->getValue($object);}
+          function bench_call($object,string $name,array $args=[]){$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          final class BenchFixtureGithub {public $watch=[],$files=[],$puts=[],$raceData=null,$dataReads=0;public function githubGet(string $path,bool $force=false): ?array {if($path==='mon_data.json'&&++$this->dataReads===2&&$this->raceData!==null)$this->files[$path]=$this->raceData;if(isset($this->files[$path]))return $this->files[$path];if($path!=='mon_data.json')return null;$bytes=lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'watchlist'=>['symbols'=>$this->watch]]);return ['content'=>$bytes,'sha'=>lm_git_blob_sha($bytes),'commit_sha'=>null];}public function githubPut(string $path,string $content,string $message,?string $oldSha=null): array {$this->puts[]=$path;$this->files[$path]=['content'=>$content,'sha'=>lm_git_blob_sha($content),'commit_sha'=>sha1('ci-'.$path)];return ['blob_sha'=>$this->files[$path]['sha'],'commit_sha'=>$this->files[$path]['commit_sha'],'unchanged'=>false];}public function clearRequestCache(): void {}public function resetStats(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}}
+          final class BenchFixtureTransport {
+              public $mode='proxy',$calls=[],$advanceBenchmark=false,$advanceStock=false,$stockFail=false;
+              public function get(string $url,array $headers=[],int $timeout=8): string {
+                  preg_match('~/chart/([^?]+)~',$url,$m);$ticker=rawurldecode($m[1]);$this->calls[]=$ticker;
+                  $isBenchmark=in_array($ticker,['^TOPX','1306.T','^N225'],true);if(!$isBenchmark&&$this->stockFail)throw new LiteMonFault('HTTP_404');
+                  if(in_array($ticker,['^TOPX','1306.T','^N225'],true)&&($this->mode==='failed'||$ticker==='^TOPX'||($ticker==='1306.T'&&$this->mode==='nikkei')))throw new LiteMonFault('HTTP_404');
+                  $base=$ticker==='1306.T'?2000:($ticker==='^N225'?60000:4000);$timestamp=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];
+                  for($i=0;$i<220;$i++){$timestamp[]=1600000000+$i*86400+($isBenchmark&&$this->advanceBenchmark||!$isBenchmark&&$this->advanceStock?86400:0);$open=$base+$i;$q['open'][]=$open;$q['high'][]=$open+3;$q['low'][]=$open-1;$q['close'][]=$open+2;$q['volume'][]=100000+$i;}
+                  return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'JPY'],'timestamp'=>$timestamp,'indicators'=>['quote'=>[$q]]]]]]);
+              }
+          }
+          function bench_reset(): void {foreach(LiteRuntime::FILES as $key){$p=LiteRuntime::path($key.'.php');if(is_file($p))unlink($p);}}
+          function bench_monitor(BenchFixtureTransport $transport): LiteMonitor {
+              $config=new LiteConfig();$config->githubToken='';$http=new BenchFixtureGithub();$http->watch=[['symbol_id'=>'JP|TSE|6758','symbol'=>'6758','country'=>'JP','exchange'=>'TSE','name'=>'Sony fixture','currency'=>'JPY']];$yahoo=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();bench_prop($yahoo,'http',$transport,true);$yahoo->beginTurn();$monitor=(new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();foreach(['cfg'=>$config,'http'=>$http,'yahoo'=>$yahoo] as $name=>$value)bench_prop($monitor,$name,$value,true);$state=LiteMonitor::defaultState();$state->last_full_scan=lm_iso();$monitor->saveState($state);return $monitor;
+          }
+          $baseline=getenv('MON_EXPECT_R15')!=='1';$results=[];bench_reset();$transport=new BenchFixtureTransport();$monitor=bench_monitor($transport);
+          $cold=$monitor->fullScan(false);$coldCache=LiteRuntime::read('cache');$coldCalls=$transport->calls;
+          bench_assert($cold['done']===1,'cold JP fallback must collect stock');bench_assert(in_array('^TOPX',$coldCalls,true)&&in_array('1306.T',$coldCalls,true),'cold JP tries actual primary and proxy fallback');
+          $transport->calls=[];$warm=$monitor->fullScan(false);$warmCache=LiteRuntime::read('cache');$warmCalls=$transport->calls;
+          $results['cold']=['done'=>$cold['done'],'pending'=>$cold['pending'],'calls'=>$coldCalls,'source'=>lm_get(lm_get($coldCache->benchmark_meta,'JP'),'source_ticker')];$results['warm']=['done'=>$warm['done'],'pending'=>$warm['pending'],'calls'=>$warmCalls,'source'=>lm_get(lm_get($warmCache->benchmark_meta,'JP'),'source_ticker')];
+          if($baseline){$results['known_warm_fallback_bug_reproduced']=$warm['pending']===1&&in_array('^TOPX',$warmCalls,true)&&!in_array('1306.T',$warmCalls,true);$results['stock_download_after_common_benchmark_failure']=in_array('6758.T',$warmCalls,true);bench_assert($results['known_warm_fallback_bug_reproduced'],'baseline warm JP fallback bug reproduced');}
+          else{
+              bench_assert($warm['done']===1&&$warm['pending']===0,'warm JP must retain successful fallback route');bench_assert(lm_get(lm_get($warmCache->benchmark_meta,'JP'),'source_ticker')==='1306.T','chosen benchmark source survives persisted cache read');bench_assert(!in_array('^TOPX',$warmCalls,true)&&in_array('1306.T',$warmCalls,true),'warm route uses saved proxy rather than known failing index');
+              $normalized=bench_call($monitor,'cacheObj');$row=lm_get($normalized->symbols,'JP|TSE|6758');$fingerprint=(string)lm_get($row,'benchmark_fingerprint','');bench_assert($fingerprint!==''&&bench_call($monitor,'analysisReusable',[$row,$row->bars,$fingerprint])===true,'same stock and benchmark permit legitimate analysis reuse');bench_assert(bench_call($monitor,'analysisReusable',[$row,$row->bars,'different-benchmark-fingerprint'])===false,'changed benchmark invalidates cached analysis');$legacy=clone $row;unset($legacy->benchmark_fingerprint,$legacy->calculation_version);bench_assert(bench_call($monitor,'analysisReusable',[$legacy,$legacy->bars,$fingerprint])===false,'legacy analysis without provenance is recomputed');$results['analysis_fingerprint']=['present'=>true,'same_reused'=>true,'changed_rejected'=>true,'legacy_rejected'=>true];$last=end($row->bars);$row->analysis['eligible']=true;$row->analysis['rank_hint']=1;$row->final_check=(object)['status'=>'confirmed','date'=>$last[0],'close'=>$last[4],'checked_at'=>lm_iso()];LiteRuntime::write('cache',$normalized);unset($normalized,$row,$legacy);
+              $cachedFinal=$monitor->fullScan(false);$results['confirmed_final_check_reuse']=['cache_hits'=>$cachedFinal['network_stats']['final_recheck_cache_hits'],'rechecks'=>$cachedFinal['network_stats']['final_rechecks']];bench_assert($cachedFinal['network_stats']['final_recheck_cache_hits']===1&&$cachedFinal['network_stats']['final_rechecks']===0,'unchanged bars preserve the confirmed final-check cache across row replacement');
+              $partialCache=bench_call($monitor,'cacheObj');$firstWatch=bench_prop(bench_prop($monitor,'http'),'watch');$second=$firstWatch[0];$second['symbol_id']='JP|TSE|6501';$second['symbol']='6501';$second['name']='Hitachi fixture';$partialWatch=[$firstWatch[0],$second];$partialCache->watchlist=$partialWatch;$partialCache->symbols->{'JP|TSE|6501'}=(object)['status'=>'pending','symbol'=>(object)$second,'last_error'=>'PENDING','checked_at'=>lm_iso(time()-20000)];$partialCache->benchmark_meta->JP->checked_at=lm_iso(time()-20000);$partialCache->benchmark_meta->JP->last_good_at=lm_iso(time()-20000);$partialCache->scan_queue=[];LiteRuntime::write('cache',$partialCache);unset($partialCache);$http=bench_prop($monitor,'http');$http->watch=$partialWatch;$transport->mode='nikkei';$transport->calls=[];BenchFixtureResource::$soft=true;$partial=$monitor->fullScan(true);$partialCache=bench_call($monitor,'cacheObj');$currentIds=array_column($partial['results'],'symbol_id');bench_assert($partial['done']===1&&$partial['pending']===1&&$currentIds===['JP|TSE|6501'],'source change invalidates old OK rows outside one-row retry target');bench_assert(!in_array('6758.T',$transport->calls,true),'bounded first retry does not redo out-of-target row');
+              $config=bench_prop($monitor,'cfg');$config->githubToken='synthetic-ci-token';$packet=lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'candidates','request_id'=>'ci-map-change','candidate_ids'=>array_column($partialWatch,'symbol_id')]);$packetSha=lm_git_blob_sha($packet);$http->files['mon_chatgpt_handoff.json']=['content'=>$packet,'sha'=>$packetSha,'commit_sha'=>null];LiteRuntime::write('request',(object)['request_id'=>'ci-map-change','stage'=>'details','candidate_request_sha'=>$packetSha]);bench_call($monitor,'processMailbox');$details=lm_decode($http->files['mon_chatgpt_response.json']['content']);bench_assert(lm_get($details,'evaluated_ids')===['JP|TSE|6501']&&lm_get($details,'unresolved_ids')===['JP|TSE|6758'],'details excludes stale benchmark analysis outside partial targets');$config->githubToken='';unset($http->files['mon_chatgpt_handoff.json']);$transport->calls=[];$finished=$monitor->fullScan(true);$finishedCache=bench_call($monitor,'cacheObj');bench_assert($finished['done']===2&&$finished['pending']===0&&$finished['network_stats']['analysis_recomputed']===1&&!in_array('6501.T',$transport->calls,true)&&lm_get($finishedCache->symbols->{'JP|TSE|6758'},'benchmark_fingerprint')===lm_get($finishedCache->benchmark_meta->JP,'map_fingerprint'),'remaining retry recomputes only invalidated old row, reusing cached stock bars when safe');$results['outside_target_source_invalidation']=['first_done'=>$partial['done'],'first_pending'=>$partial['pending'],'details_evaluated'=>lm_get($details,'evaluated_ids'),'remaining_calls'=>$transport->calls,'final_done'=>$finished['done']];BenchFixtureResource::$soft=false;$http->watch=$firstWatch;LiteRuntime::write('cache',$warmCache);unset($partialCache,$partialWatch,$second,$details);
+              $priorAnalysis=lm_array(lm_get($warmCache->symbols,'JP|TSE|6758')->analysis);$transport->mode='nikkei';$transport->calls=[];$switched=$monitor->fullScan(false);$switchCache=LiteRuntime::read('cache');$switchRows=lm_get($switchCache->benchmarks,'JP');$switchCalls=$transport->calls;
+              bench_assert($switched['done']===1&&$switched['pending']===0,'failed saved proxy falls back to alternative benchmark');bench_assert(lm_get(lm_get($switchCache->benchmark_meta,'JP'),'source_ticker')==='^N225','replacement source recorded');bench_assert(count($switchRows)===220&&min(array_column($switchRows,4))>=60000,'source switch replaces complete series without merging ETF/index price levels');bench_assert($switched['network_stats']['analysis_recomputed']===1&&$switched['network_stats']['analysis_reused']===0,'same stock bars reanalyzed after benchmark fingerprint change');
+              $results['source_switch']=['done'=>$switched['done'],'calls'=>$switchCalls,'source'=>'^N225','min_close'=>min(array_column($switchRows,4)),'analysis_recomputed'=>$switched['network_stats']['analysis_recomputed']];
+              $dateCache=bench_call($monitor,'cacheObj');$dateRow=$dateCache->symbols->{'JP|TSE|6758'};$dateRow->status='pending';$dateRow->recalculate_only=true;$dateCache->benchmark_meta->JP->checked_at=lm_iso(time()-20000);$dateCache->benchmark_meta->JP->last_good_at=lm_iso(time()-20000);$dateCache->scan_queue=[];LiteRuntime::write('cache',$dateCache);$transport->advanceBenchmark=true;$transport->stockFail=true;$transport->calls=[];$dateFailure=$monitor->fullScan(true);$dateCache=bench_call($monitor,'cacheObj');bench_assert(in_array('6758.T',$transport->calls,true)&&$dateFailure['done']===0&&$dateFailure['pending']===1&&lm_get($dateCache->symbols->{'JP|TSE|6758'},'status')==='pending','new benchmark session requires stock download and provider failure cannot promote cached older stock');$transport->stockFail=false;$transport->advanceStock=true;$transport->calls=[];$dateSuccess=$monitor->fullScan(true);$dateCache=bench_call($monitor,'cacheObj');$newStockLast=end($dateCache->symbols->{'JP|TSE|6758'}->bars);$newBenchLast=end($dateCache->benchmarks->JP);bench_assert(in_array('6758.T',$transport->calls,true)&&$dateSuccess['done']===1&&$dateSuccess['pending']===0&&$newStockLast[0]===$newBenchLast[0],'remaining stock refresh catches up to new completed benchmark session');$results['benchmark_advanced_date_requires_stock_refresh']=['failed_provider_stays_pending'=>true,'retry_downloaded'=>true,'stock_date'=>$newStockLast[0],'benchmark_date'=>$newBenchLast[0]];$transport->advanceBenchmark=false;$transport->advanceStock=false;
+              $transport->mode='failed';$transport->calls=[];$failed=$monitor->fullScan(false);$results['common_failure']=['done'=>$failed['done'],'pending'=>$failed['pending'],'calls'=>$transport->calls];bench_assert(!in_array('6758.T',$transport->calls,true),'common benchmark failure must block pointless stock downloads');bench_assert($failed['pending']===1,'benchmark failure remains honestly pending');
+          }
+          $coverageCache=bench_call($monitor,'cacheObj');$coverageCache->benchmark_meta->JP->status='ok';$coverageCache->benchmark_meta->JP->last_error=null;$coverageRow=lm_get($coverageCache->symbols,'JP|TSE|6758');$coverageRow->status='ok';$coverageRow->analysis=lm_array($coverageRow->analysis);$coverageRow->analysis['selection_ready']=false;$coverageRow->final_check=(object)['status'=>'needs_review','checked_at'=>lm_iso()];$coverageCache->scan_queue=[];$watch=bench_prop(bench_prop($monitor,'http'),'watch');$coverage=bench_call($monitor,'buildCurrentResults',[$coverageCache,$watch]);$results['final_check_preserved']=$coverage[0][0]['selection_ready']===false;
+          if(!$baseline)bench_assert($results['final_check_preserved'],'needs_review final check must not be promoted by result assembly');
+          $coverageCache->scan_queue=['JP|TSE|6758'];$queued=bench_call($monitor,'buildCurrentResults',[$coverageCache,$watch]);$results['queued_old_ok_coverage']=['done'=>$queued[2],'pending'=>$queued[3],'result_count'=>count($queued[0])];if(!$baseline)bench_assert($queued[2]===0&&$queued[3]===1,'unprocessed queued old-OK analysis cannot count as current completed coverage');
+          LiteRuntime::write('cache',$coverageCache);$config=bench_prop($monitor,'cfg');$config->githubToken='synthetic-ci-token';$http=bench_prop($monitor,'http');$handoff=lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'candidates','request_id'=>'ci-queued-proof','candidate_ids'=>['JP|TSE|6758']]);$sha=lm_git_blob_sha($handoff);$http->files['mon_chatgpt_handoff.json']=['content'=>$handoff,'sha'=>$sha,'commit_sha'=>null];LiteRuntime::write('request',(object)['request_id'=>'ci-queued-proof','stage'=>'details','candidate_request_sha'=>$sha]);bench_call($monitor,'processMailbox');$detail=lm_decode($http->files['mon_chatgpt_response.json']['content']);$results['queued_old_ok_details']=['evaluated_ids'=>lm_get($detail,'evaluated_ids'),'unresolved_ids'=>lm_get($detail,'unresolved_ids')];if(!$baseline)bench_assert(lm_get($detail,'evaluated_ids')===[]&&lm_get($detail,'unresolved_ids')===['JP|TSE|6758'],'queued old analysis must not be promoted into fresh details proof');
+          $oldState=LiteMonitor::defaultState();$oldState->build='MON-LITE-2.2.3-PERSISTED-OLD';$oldState->running=true;$oldState->heartbeat_at=lm_iso();LiteRuntime::write('state',$oldState);$read=$monitor->state();$results['state_identity']=['persisted_build'=>$oldState->build,'returned_build'=>$read->build,'running'=>$read->running];
+          if($baseline)$results['known_web_build_spoof_reproduced']=$read->build!==$oldState->build;else bench_assert($read->build===$oldState->build,'web state reads must not relabel an old daemon as installed build');
+          $preserve=$monitor->state();$preserve->last_full_scan=lm_iso();$preserve->publication_pending=true;$monitor->saveState($preserve);LiteRuntime::write('evidence',(object)['latest_scan'=>(object)['scan_id'=>'ci-last-complete','results'=>[]],'publication_snapshot'=>(object)['marker'=>'keep-publication-payload']]);BenchFixtureResource::$hard=true;$transport->calls=[];$deferred=$monitor->fullScan(false);$kept=LiteRuntime::read('evidence');$results['deferred_evidence_preserved']=lm_get(lm_get($kept,'latest_scan'),'scan_id')==='ci-last-complete'&&lm_get(lm_get($kept,'publication_snapshot'),'marker')==='keep-publication-payload';$results['hard_initial_no_provider_calls']=$transport->calls===[];if(!$baseline){bench_assert($results['deferred_evidence_preserved'],'resource deferral must not discard pending publication evidence');bench_assert($results['hard_initial_no_provider_calls'],'hard resource block must precede provider requests');}BenchFixtureResource::$hard=false;
+          $http->dataReads=0;$http->puts=[];$previous=lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'chatgpt_final'=>['authority'=>'chatgpt_final','decision_id'=>'old-final','analysis_at'=>lm_iso(time()-3600),'recommendations'=>[]]]);$latest=lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'chatgpt_final'=>['authority'=>'chatgpt_final','decision_id'=>'new-concurrent-final','analysis_at'=>lm_iso(),'recommendations'=>[]]]);$http->files['mon_data.json']=['content'=>$previous,'sha'=>lm_git_blob_sha($previous),'commit_sha'=>null];$http->raceData=['content'=>$latest,'sha'=>lm_git_blob_sha($latest),'commit_sha'=>null];$summary=['scan_id'=>'ci-reference-race','at'=>lm_iso(),'done'=>0,'pending'=>1,'candidate_count'=>1,'eligible_count'=>0,'results'=>[],'errors'=>[]];$raceThrown=false;try{bench_call($monitor,'publishData',[$summary,$watch]);}catch(LiteMonFault $e){$raceThrown=true;}$raceSafe=$http->files['mon_data.json']['content']===$latest&&$http->puts===[];$results['reference_publish_race']=['blocked'=>$raceThrown,'new_final_preserved'=>$raceSafe,'puts'=>$http->puts];if(!$baseline)bench_assert($raceSafe,'reference publication must not overwrite a concurrently saved final');
+          if(!$baseline){$http->raceData=null;foreach([0,60] as $age){$at=lm_iso();$summary['at']=lm_iso(time()-$age);$current=lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'chatgpt_final'=>['authority'=>'chatgpt_final','decision_id'=>'fresh-final-'.$age,'analysis_at'=>$at,'recommendations'=>[]]]);$http->files['mon_data.json']=['content'=>$current,'sha'=>lm_git_blob_sha($current),'commit_sha'=>null];$http->puts=[];bench_call($monitor,'publishData',[$summary,$watch]);bench_assert($http->files['mon_data.json']['content']===$current&&$http->puts===[],'older/equal-time reference retry must preserve newer final');}$results['older_equal_time_reference_keeps_final']=true;}
+          if(!$baseline){$publication=$monitor->state();$publication->publication_pending=true;$publication->publication_fingerprint='ci-complete-F1';$publication->last_publish_fingerprint=null;$monitor->saveState($publication);$partialSummary=$summary;$partialSummary['scan_id']='ci-partial-F2';$partialSummary['network_stats']=['queue_remaining'=>1];LiteRuntime::write('evidence',(object)['latest_scan'=>$partialSummary]);$http->puts=[];bench_call($monitor,'retryPublication');$publication=$monitor->state();bench_assert($http->puts===[]&&$publication->publication_pending===true&&$publication->last_publish_fingerprint===null,'pending complete-publication fingerprint cannot acknowledge or publish a newer partial queue snapshot');$results['partial_retry_not_mislabeled_complete_fingerprint']=true;}
+          echo lm_json(['source_sha256'=>$sourceSha,'instrumented_sha256'=>hash('sha256',$instrumented),'instrumentation'=>'Only LiteResource::sample() call sites replaced with deterministic normal scheduling input in scratch copy','resource_call_sites'=>$instrumentedCount,'baseline'=>$baseline,'scenarios'=>$results])."\n";
+          PHP
+          MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R15=1 php -d memory_limit=96M "$test_dir/benchmark-fixture.php"
+
+      - name: Daemon identity and final save status
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/status-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require getenv('MON_TEST_SOURCE');
+          function status_assert(bool $value,string $message): void {if(!$value)throw new RuntimeException($message);}
+          function status_call($object,string $name,array $args=[]){$method=new ReflectionMethod(get_class($object),$name);$method->setAccessible(true);return $method->invokeArgs($object,$args);}
+          foreach(LiteRuntime::FILES as $key){$p=LiteRuntime::path($key.'.php');if(is_file($p))unlink($p);}
+          $sourceSha=hash_file('sha256',getenv('MON_TEST_SOURCE'));$monitor=new LiteMonitor();$identity=LiteMonitor::installedIdentity();status_assert($identity['source_sha256']===$sourceSha&&$identity['build']===MON_LITE_BUILD,'installed identity reports exact loaded source');
+          $old=LiteMonitor::defaultState();$old->build='MON-LITE-PREVIOUS-DAEMON';$old->running=true;$old->phase='ERROR';$old->heartbeat_at=lm_iso(time()-7200);$old->last_error='OLD_RESOURCE_FAILURE';$old->run_identity=(object)['build'=>$old->build,'source_sha256'=>str_repeat('a',64),'pid'=>12345,'started_at'=>lm_iso(time()-7200),'sapi'=>'cli'];LiteRuntime::write('state',$old);
+          $_GET=['view'=>'status'];$_SERVER['REQUEST_METHOD']='GET';ob_start();lm_web();$view=lm_array(lm_decode(ob_get_clean()));status_assert($view['installed_identity']['source_sha256']===$sourceSha&&$view['daemon_identity']['source_sha256']===str_repeat('a',64)&&$view['state']['build']==='MON-LITE-PREVIOUS-DAEMON','web status cannot relabel prior daemon build or source identity');
+          $started=status_call($monitor,'startState');status_assert($started->running===true&&$started->phase==='WAIT'&&strtotime($started->heartbeat_at)>=time()-5,'new daemon starts in WAIT with fresh heartbeat');status_assert(lm_get($started->run_identity,'source_sha256')===$sourceSha&&lm_get($started->run_identity,'pid')===getmypid()&&lm_get($started->run_identity,'sapi')==='cli','new daemon records actual source PID and SAPI');status_assert($started->last_error===null&&lm_get($started->historical_error,'code')==='OLD_RESOURCE_FAILURE','prior error retained as history rather than current warning');
+          $started->heartbeat_at=lm_iso(time()-90);$started->phase='PARTIAL';$monitor->saveState($started);status_call($monitor,'idleHeartbeat');$fresh=$monitor->state();status_assert(strtotime($fresh->heartbeat_at)>=time()-5&&$fresh->phase==='WAIT'&&$fresh->running===true,'idle transition refreshes heartbeat from partial work');
+          $fresh->heartbeat_at=lm_iso(time()-90);$fresh->phase='SAVE_PENDING';$monitor->saveState($fresh);status_call($monitor,'idleHeartbeat');status_assert($monitor->state()->phase==='SAVE_PENDING','heartbeat must preserve active save-pending status');
+          $truth=[];foreach([['pending_remote',false,false,false],['pending_receipt',true,false,false],['saved',true,false,false],['saved',true,true,true],['superseded',true,true,false]] as $case){LiteRuntime::write('result',(object)['save_status'=>$case[0],'pair_readback_verified'=>$case[1],'receipt_readback_verified'=>$case[2],'decision_id'=>'ci-final','request_id'=>'ci-request','saved_at'=>lm_iso(),'receipt_blob_sha'=>'ci-blob']);$status=$monitor->finalSaveStatus();status_assert($status['status']===$case[0]&&$status['last_local_receipt_verified']===$case[3]&&$status['scope']==='last_local_receipt','save indication requires exact pair and receipt completion: '.$case[0]);$truth[]=$status;}
+          echo lm_json(['source_sha256'=>$sourceSha,'installed_identity'=>$identity,'prior_daemon_preserved'=>true,'start_wait_identity'=>true,'heartbeat_transition'=>true,'save_truth_cases'=>$truth])."\n";
+          PHP
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/status-fixture.php"
+
+      - name: Bounded US daily envelope recovery
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/envelope-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+
+          /* Exact-source, offline provider-response tests. No production source rewriting. */
+          $envelopeSource=getenv('MON_TEST_SOURCE');
+          if(!is_string($envelopeSource)||!is_file($envelopeSource))throw new RuntimeException('MON_TEST_SOURCE must identify source under test');
+          require $envelopeSource;
+          $envelopeCases=[];
+          function env_check(bool $pass,string $case): void {global $envelopeCases;$envelopeCases[]=['case'=>$case,'status'=>$pass?'PASS':'FAIL'];if(!$pass)throw new RuntimeException('Envelope fixture failed: '.$case);}
+          function env_prop($object,string $name,$value): void {$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);$p->setValue($object,$value);}
+          function env_stamp(string $date,string $clock): int {return (new DateTimeImmutable($date.' '.$clock,new DateTimeZone('America/New_York')))->getTimestamp();}
+          function env_chart(array $timestamps,array $quote,string $currency='USD'): string {
+              $start=env_stamp('2026-10-16','09:30:00');
+              return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>$currency,'exchangeTimezoneName'=>'America/New_York','timezone'=>'EDT','gmtoffset'=>-14400,'currentTradingPeriod'=>['regular'=>['timezone'=>'EDT','start'=>$start,'end'=>$start+23400,'gmtoffset'=>-14400]]],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$quote]]]],'error'=>null]]);
+          }
+          function env_daily(bool $valid=false,string $currency='USD',string $mode='complete'): string {
+              $timestamps=[];$quote=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];$end=env_stamp('2026-10-16','09:30:00');
+              for($i=0;$i<60;$i++){$timestamps[]=$end-(59-$i)*86400;$quote['open'][]=100.0;$quote['high'][]=$i===59&&$mode==='close_mismatch'?102.5:($i===59&&!$valid?100.99:101.01);$quote['low'][]=$i===59&&$mode==='close_mismatch'?100.01:($i===59&&$mode==='open_mismatch'?99.0:99.99);$quote['close'][]=101.0;$quote['volume'][]=123456789.0;}
+              return env_chart($timestamps,$quote,$currency);
+          }
+          function env_intraday(string $mode): string {
+              $timestamps=[];$quote=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];$start=env_stamp('2026-10-16','09:30:00');
+              for($i=0;$i<78;$i++){
+                  if($mode==='incomplete'&&$i===40)continue;
+                  $ts=$start+300*$i;if($mode==='misaligned'&&$i===40)$ts+=60;if($mode==='wrong_date')$ts-=86400;
+                  $open=100+$i/78;$close=100+($i+1)/78;$high=max($open,$close)+0.005;$low=min($open,$close)-0.005;
+                  if($mode==='large_correction'&&$i===40)$high=110.0;
+                  if($mode==='close_mismatch'&&$i===40)$high=102.5;
+                  if($mode==='close_mismatch'&&$i===77){$close=102.0;$high=102.005;}
+                  if($mode==='open_mismatch'&&$i===0){$open=99.5;$low=99.495;}
+                  if($mode==='open_mismatch'&&$i===40)$low=99.0;
+                  $timestamps[]=$ts;$quote['open'][]=$open;$quote['high'][]=$high;$quote['low'][]=$low;$quote['close'][]=$close;$quote['volume'][]=1000.0;
+              }
+              return env_chart($timestamps,$quote,$mode==='currency_mismatch'?'JPY':'USD');
+          }
+          final class EnvelopeFixtureTransport {
+              public $calls=[];public $mode;public $valid;public $currency;public $actualDaily;public $actualIntraday;
+              public function __construct(string $mode,bool $valid=false,string $currency='USD'){$this->mode=$mode;$this->valid=$valid;$this->currency=$currency;if($mode==='actual'){$dir=getenv('MON_ENVELOPE_PROVIDER_FIXTURE_DIR')?:__DIR__.'/root_provider_probe';$this->actualDaily=file_get_contents($dir.'/daily.json');$this->actualIntraday=file_get_contents($dir.'/intraday.json');if(!is_string($this->actualDaily)||!is_string($this->actualIntraday))throw new RuntimeException('Actual provider fixture unavailable');}}
+              public function get(string $url,array $headers=[],int $timeout=8): string {
+                  $query=[];parse_str((string)parse_url($url,PHP_URL_QUERY),$query);$this->calls[]=['interval'=>$query['interval']??null,'period1'=>$query['period1']??null,'period2'=>$query['period2']??null,'timeout'=>$timeout,'url'=>$url];
+                  if($this->mode==='actual'&&($query['interval']??null)==='1d')return $this->actualDaily;
+                  if($this->mode==='actual'&&($query['interval']??null)==='5m')return $this->actualIntraday;
+                  if(($query['interval']??null)==='1d')return env_daily($this->valid,$this->currency,$this->mode);
+                  if(($query['interval']??null)==='5m')return env_intraday($this->mode);
+                  throw new RuntimeException('Unexpected provider request in offline envelope fixture');
+              }
+          }
+          function env_provider(string $mode,bool $valid=false,string $currency='USD'): array {
+              $transport=new EnvelopeFixtureTransport($mode,$valid,$currency);$yahoo=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();env_prop($yahoo,'http',$transport);$yahoo->beginTurn();return [$yahoo,$transport];
+          }
+          $symbol=['symbol_id'=>'US|NASDAQ|CPUENV','symbol'=>'CPUENV','country'=>'US','exchange'=>'NASDAQ','currency'=>'USD','name'=>'Envelope fixture'];
+          $envelopeScenarios=[];
+
+          [$yahoo,$http]=env_provider('complete');$rows=$yahoo->daily($symbol,60);$last=$rows[count($rows)-1]??null;
+          env_check(count($rows)===60&&is_array($last)&&$last[0]==='2026-10-16','complete regular-session evidence preserves the daily history and latest date');
+          env_check($last[1]===100.0&&$last[4]===101.0&&$last[5]===123456789.0,'recovery preserves exact daily open, close and volume');
+          env_check($last[2]>=101.0&&$last[2]<=101.006&&$last[3]<=100.0&&$last[3]>=99.99,'recovery uses a bounded intraday price envelope');
+          env_check(abs($last[2]-101.005)<1e-8&&$last[3]===99.99,'recovery uses observed regular-session high and preserves an already valid daily low');
+          env_check(array_column($http->calls,'interval')===['1d','5m'],'one invalid latest row incurs one bounded intraday request');
+          env_check($http->calls[1]['period2']-$http->calls[1]['period1']<=86400,'intraday recovery requests at most one session date');
+          $stats=$yahoo->stats();$recovery=$yahoo->recoveryFor($symbol['symbol_id']);
+          env_check(($stats['yahoo_envelope_recovery_requests']??null)===1&&($stats['yahoo_envelope_recoveries']??null)===1,'successful recovery reports both request cost and accepted count');
+          env_check(($recovery['method']??null)==='completed_regular_5m_envelope'&&($recovery['date']??null)==='2026-10-16'&&($recovery['regular_bar_count']??null)===78&&($recovery['daily_open_close_volume_preserved']??null)===true,'accepted recovery exposes dated complete-session provenance');
+          $provenanceQuery=[];parse_str((string)parse_url((string)($recovery['source_url']??''),PHP_URL_QUERY),$provenanceQuery);
+          env_check(($provenanceQuery['interval']??null)==='5m'&&basename((string)parse_url((string)($recovery['source_url']??''),PHP_URL_PATH))==='CPUENV','recovery provenance identifies the exact ticker and intraday source');
+          $envelopeScenarios[]=['profile'=>'complete_78_regular_bars','latest_row'=>$last,'stats'=>$yahoo->stats(),'calls'=>$http->calls];
+
+          foreach(['incomplete','misaligned','large_correction','close_mismatch','open_mismatch','wrong_date','currency_mismatch'] as $mode){
+              [$yahoo,$http]=env_provider($mode);$fault=null;try{$yahoo->daily($symbol,60);}catch(LiteMonFault $e){$fault=$e->faultCode;}
+              env_check($fault!==null,'unsafe intraday evidence cannot repair the latest daily bar: '.$mode);
+              env_check(array_column($http->calls,'interval')===['1d','5m'],'rejected recovery is bounded to one extra request: '.$mode);
+              $stats=$yahoo->stats();env_check(($stats['yahoo_envelope_recovery_requests']??null)===1&&($stats['yahoo_envelope_recoveries']??null)===0&&$yahoo->recoveryFor($symbol['symbol_id'])===null,'rejected evidence cannot publish successful recovery provenance: '.$mode);
+              $envelopeScenarios[]=['profile'=>$mode,'rejected_with'=>$fault,'stats'=>$yahoo->stats(),'calls'=>$http->calls];
+          }
+
+          [$yahoo,$http]=env_provider('complete',true);$rows=$yahoo->daily($symbol,60);
+          env_check(count($rows)===60&&array_column($http->calls,'interval')===['1d'],'valid daily history makes no intraday recovery request');
+          $envelopeScenarios[]=['profile'=>'valid_daily_no_recovery','stats'=>$yahoo->stats(),'calls'=>$http->calls];
+
+          foreach([['KR','KOSPI','005930','KRW'],['JP','TSE','7203','JPY']] as $cc){
+              $foreign=['symbol_id'=>$cc[0].'|'.$cc[1].'|'.$cc[2],'symbol'=>$cc[2],'country'=>$cc[0],'exchange'=>$cc[1],'currency'=>$cc[3],'name'=>'Non-US fixture'];
+              [$yahoo,$http]=env_provider('complete',false,$cc[3]);$fault=null;try{$yahoo->daily($foreign,60);}catch(LiteMonFault $e){$fault=$e->faultCode;}
+              env_check($fault!==null&&array_column($http->calls,'interval')===['1d'],'US recovery does not cross country or exchange identity: '.$cc[0]);
+              $envelopeScenarios[]=['profile'=>'non_us_'.$cc[0],'rejected_with'=>$fault,'calls'=>$http->calls];
+          }
+
+          $probeDir=getenv('MON_ENVELOPE_PROVIDER_FIXTURE_DIR')?:__DIR__.'/root_provider_probe';
+          if(is_file($probeDir.'/daily.json')&&is_file($probeDir.'/intraday.json')){
+              $actual=['symbol_id'=>'US|NYSE|KO','symbol'=>'KO','country'=>'US','exchange'=>'NYSE','currency'=>'USD','name'=>'Coca-Cola'];
+              [$yahoo,$http]=env_provider('actual');$daily=lm_array(lm_decode($http->actualDaily));$intraday=lm_array(lm_decode($http->actualIntraday));$day=$daily['chart']['result'][0];$intra=$intraday['chart']['result'][0];$q=$day['indicators']['quote'][0];$lastIndex=count($day['timestamp'])-1;$date=gmdate('Y-m-d',$day['timestamp'][$lastIndex]);$start=env_stamp($date,'09:30:00');$end=$start+23400;$regular=[];foreach($intra['timestamp'] as $i=>$t)if($t>=$start&&$t<$end)$regular[]=$i;
+              env_check(count($intra['timestamp'])===79&&count($regular)===78,'recorded KO evidence contains 78 regular bars and one closing-marker extra');
+              $rows=$yahoo->daily($actual,60);$last=$rows[count($rows)-1];
+              env_check(count($rows)===count($day['timestamp'])&&$last[0]===$date,'recorded provider replay retains all completed daily rows');
+              env_check($last[1]===(float)$q['open'][$lastIndex]&&$last[2]===(float)$q['high'][$lastIndex]&&$last[4]===(float)$q['close'][$lastIndex]&&$last[5]===(float)$q['volume'][$lastIndex],'recorded provider repair preserves daily open, valid high, close and volume');
+              $iq=$intra['indicators']['quote'][0];$regularLow=INF;foreach($regular as $i)$regularLow=min($regularLow,(float)$iq['low'][$i]);
+              env_check($last[3]===$regularLow&&$last[3]<=(float)$q['open'][$lastIndex],'recorded provider invalid daily low is repaired from complete regular-session evidence');
+              $recovery=$yahoo->recoveryFor($actual['symbol_id']);env_check(($recovery['regular_bar_count']??null)===78&&($recovery['date']??null)===$date,'recorded provider replay publishes exact-session provenance');
+              env_check(array_column($http->calls,'interval')===['1d','5m'],'recorded provider repair also uses only one extra request');
+              $envelopeScenarios[]=['profile'=>'actual_KO_recorded_provider_replay','status'=>'PASS','input_sha256'=>['daily'=>hash('sha256',$http->actualDaily),'intraday'=>hash('sha256',$http->actualIntraday)],'raw_intraday_timestamps'=>count($intra['timestamp']),'regular_intraday_timestamps'=>count($regular),'latest_row'=>$last,'stats'=>$yahoo->stats(),'recovery'=>$recovery];
+          }else $envelopeScenarios[]=['profile'=>'actual_KO_recorded_provider_replay','status'=>'SKIPPED','reason'=>'Supplementary recorded provider inputs not supplied'];
+
+          echo lm_json(['scenario'=>'exact_source_bounded_us_intraday_envelope','status'=>'PASS','source_sha256'=>hash_file('sha256',$envelopeSource),'fixture_sha256'=>hash_file('sha256',__FILE__),'case_count'=>count($envelopeCases),'cases'=>$envelopeCases,'scenarios'=>$envelopeScenarios])."\n";
+          PHP
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/envelope-fixture.php"
 
       - name: Source identities
         run: sha256sum mon.php monitor.md MON-Wiki.md mon_data.json mon_result.md mon_chatgpt_handoff.json mon_chatgpt_response.json
