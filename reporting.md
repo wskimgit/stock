@@ -2,39 +2,94 @@
 
 <!-- REPORT_ONE:STC14:BEGIN -->
 ## STC14
-<!-- STC14_META status=DONE updated_at=2026-10-17T19:26:12+09:00 fingerprint=347b821ac6b169d3 swing_fingerprint=- -->
+<!-- STC14_META status=DONE updated_at=2026-10-20T19:25:19+09:00 fingerprint=9a45f82e167a4e91 swing_fingerprint=- -->
 
-- 기준일: KR `2026-10-16` · US `2026-10-16` · JP `2026-10-16`
-- 결과: `DONE` · 품질 `LIMITED` · 후보 **27** · 처리 350/351 (99.72%) · 오류 1
+- 기준일: KR `2026-10-20` · US `2026-10-19` · JP `2026-10-20`
+- 결과: `DONE` · 품질 `LIMITED` · 후보 **81** · 처리 350/351 (99.72%) · 오류 1
 
 | 시장 | 종목 | 코드 | 상태 | D1 K/D | H60 K/D | MS7 |
 |---|---|---|---|---:|---:|---|
-| US | Supermicro | `SMCI` | CROSS | 7.70/8.18 | 4.07/3.60 CROSS | M0 · 관찰 |
-| US | Monolithic Power | `MPWR` | CROSS | 9.01/10.72 | 13.33/12.97 CROSS | W · 대기 |
-| US | Sandisk | `SNDK` | CROSS | 9.19/10.65 | 4.81/3.80 CROSS | M1 · 매입 검토 |
-| US | Micron | `MU` | CROSS | 12.65/11.43 | 5.58/4.10 CROSS | W · 대기 |
-| US | ASML | `ASML` | CROSS | 13.41/14.43 | 8.07/7.90 CROSS | W · 대기 |
-| KR | 강원랜드 | `035250` | CROSS | 37.04/41.89 | 10.48/10.16 CROSS | W · 대기 |
-| US | Marathon | `MARA` | MATCH | 5.66/4.43 | 13.60/14.28 PRE_CROSS | M2 · 분할매입 |
-| US | Lam Research | `LRCX` | MATCH | 5.74/10.03 | 9.36/9.87 PRE_CROSS | W · 대기 |
-| KR | 신한지주 | `055550` | MATCH | 6.14/8.98 | 17.61/20.13 PRE_CROSS | W · 대기 |
-| US | 3X Semiconductor | `SOXL` | MATCH | 6.36/9.61 | 6.01/4.75 POST_CROSS | W · 대기 |
-| JP | 무라타제작소 | `6981` | MATCH | 6.55/10.92 | 28.12/27.08 POST_CROSS | W · 대기 |
-| US | Arm Holdings | `ARM` | MATCH | 7.27/8.19 | 3.71/5.22 PRE_CROSS | W · 대기 |
-| US | iShares Semi | `SOXX` | MATCH | 7.27/10.75 | 5.04/4.43 POST_CROSS | W · 대기 |
-| US | Riot | `RIOT` | MATCH | 8.23/8.37 | 5.79/7.10 PRE_CROSS | W · 대기 |
-| US | TSMC (ADR) | `TSM` | MATCH | 9.64/10.34 | 14.64/16.10 PRE_CROSS | M1 · 매입 검토 |
-| US | Vertiv | `VRT` | MATCH | 10.01/13.43 | 3.74/3.94 PRE_CROSS | W · 대기 |
-| KR | GS | `078930` | MATCH | 10.17/12.43 | 11.81/13.65 PRE_CROSS | W · 대기 |
-| US | AMD | `AMD` | MATCH | 10.22/17.13 | 4.37/4.39 PRE_CROSS | M1 · 매입 검토 |
-| US | Red Cat Holdings | `RCAT` | MATCH | 11.88/7.18 | 13.68/15.34 PRE_CROSS | M1 · 매입 검토 |
-| US | CoreWeave | `CRWV` | MATCH | 13.51/12.09 | 14.23/15.70 PRE_CROSS | W · 대기 |
-| US | ARK ETF | `ARKK` | MATCH | 13.73/12.81 | 8.65/11.30 PRE_CROSS | W · 대기 |
-| US | Russell2000 | `IWM` | MATCH | 14.69/18.17 | 3.78/6.21 PRE_CROSS | M2 · 분할매입 |
-| US | Robinhood | `HOOD` | MATCH | 16.83/18.49 | 14.19/17.06 PRE_CROSS | M0 · 관찰 |
-| KR | SK이터닉스 | `475150` | MATCH | 16.93/16.06 | 29.40/29.31 POST_CROSS | M2 · 분할매입 |
-| US | Qualcomm | `QCOM` | MATCH | 17.19/15.07 | 9.28/9.01 POST_CROSS | M2 · 분할매입 |
-| US | Coinbase | `COIN` | MATCH | 26.18/25.89 | 28.80/29.69 PRE_CROSS | M2 · 분할매입 |
-| US | Schwab | `SCHW` | MATCH | 26.30/29.26 | 9.99/11.58 PRE_CROSS | M1 · 매입 검토 |
+| KR | HD한국조선해양 | `009540` | CROSS | 9.87/10.90 | 6.65/6.50 CROSS | W · 대기 |
+| KR | 세아베스틸지주 | `001430` | CROSS | 11.89/11.99 | 3.84/2.44 CROSS | W · 대기 |
+| KR | LG디스플레이 | `034220` | CROSS | 12.75/14.11 | 21.01/18.95 CROSS | W · 대기 |
+| US | Eaton | `ETN` | CROSS | 13.74/16.68 | 12.49/12.27 CROSS | W · 대기 |
+| KR | 씨에스윈드 | `112610` | CROSS | 28.39/30.50 | 3.50/3.24 CROSS | W · 대기 |
+| US | Applied Materials | `AMAT` | MATCH | 4.92/5.41 | 13.34/14.50 PRE_CROSS | W · 대기 |
+| JP | 후지쿠라 | `5803` | MATCH | 5.04/6.71 | 5.94/7.24 PRE_CROSS | M2 · 분할매입 |
+| JP | 후루카와전기 | `5801` | MATCH | 5.27/5.84 | 6.74/7.59 PRE_CROSS | M2 · 분할매입 |
+| KR | DL이앤씨 | `375500` | MATCH | 6.22/6.48 | 12.55/14.98 PRE_CROSS | M0 · 관찰 |
+| KR | HD현대중공업 | `329180` | MATCH | 6.25/8.83 | 2.05/3.84 PRE_CROSS | W · 대기 |
+| US | KLA | `KLAC` | MATCH | 6.33/8.19 | 15.49/16.61 PRE_CROSS | W · 대기 |
+| JP | 소프트뱅크그룹 | `9984` | MATCH | 6.50/6.20 | 6.23/7.75 PRE_CROSS | S1 · 신규매입 금지·매도 준비 |
+| KR | 대한전선 | `001440` | MATCH | 6.61/7.04 | 22.62/23.39 PRE_CROSS | M2 · 분할매입 |
+| KR | 일진전기 | `103590` | MATCH | 6.94/9.27 | 8.12/11.11 PRE_CROSS | W · 대기 |
+| KR | 삼표시멘트 | `038500` | MATCH | 7.56/9.43 | 16.67/17.75 PRE_CROSS | M2 · 분할매입 |
+| US | Arm Holdings | `ARM` | MATCH | 7.63/8.83 | 9.74/10.24 PRE_CROSS | W · 대기 |
+| US | Riot | `RIOT` | MATCH | 8.61/9.44 | 14.56/17.15 PRE_CROSS | W · 대기 |
+| KR | 현대건설 | `000720` | MATCH | 10.21/10.02 | 9.52/11.72 PRE_CROSS | W · 대기 |
+| KR | 태웅 | `044490` | MATCH | 10.55/9.91 | 2.90/3.39 PRE_CROSS | M0 · 관찰 |
+| KR | LS ELECTRIC | `010120` | MATCH | 10.60/9.59 | 21.48/23.83 PRE_CROSS | W · 대기 |
+| KR | 한화오션 | `042660` | MATCH | 11.03/12.90 | 2.47/2.98 PRE_CROSS | W · 대기 |
+| KR | KODEX 200 | `069500` | MATCH | 11.33/10.23 | 16.93/19.21 PRE_CROSS | W · 대기 |
+| KR | 서울반도체 | `046890` | MATCH | 11.38/9.96 | 9.62/10.65 PRE_CROSS | M0 · 관찰 |
+| KR | 우리기술투자 | `041190` | MATCH | 11.60/11.41 | 5.04/6.32 PRE_CROSS | M1 · 매입 검토 |
+| KR | 한화생명 | `088350` | MATCH | 11.68/10.91 | 8.19/6.54 POST_CROSS | M0 · 관찰 |
+| KR | 두산 | `000150` | MATCH | 11.84/10.27 | 13.76/16.51 PRE_CROSS | W · 대기 |
+| KR | 산일전기 | `062040` | MATCH | 12.14/13.79 | 6.66/8.92 PRE_CROSS | W · 대기 |
+| KR | 쎄트렉아이 | `099320` | MATCH | 12.29/10.47 | 13.61/16.33 PRE_CROSS | M2 · 분할매입 |
+| KR | 삼성전자 | `005930` | MATCH | 12.30/11.25 | 9.80/12.74 PRE_CROSS | W · 대기 |
+| KR | 두산밥캣 | `241560` | MATCH | 12.37/12.72 | 22.22/22.22 PRE_CROSS | W · 대기 |
+| KR | 두산에너빌리티 | `034020` | MATCH | 12.39/12.04 | 6.90/9.58 PRE_CROSS | W · 대기 |
+| KR | SK | `034730` | MATCH | 13.62/13.35 | 12.05/12.45 PRE_CROSS | W · 대기 |
+| KR | SK텔레콤 | `017670` | MATCH | 13.95/16.27 | 14.63/16.80 PRE_CROSS | W · 대기 |
+| KR | LIG넥스원 | `079550` | MATCH | 13.96/13.44 | 6.43/8.19 PRE_CROSS | W · 대기 |
+| KR | HD현대일렉트릭 | `267260` | MATCH | 14.14/12.71 | 16.35/19.12 PRE_CROSS | W · 대기 |
+| US | Red Cat Holdings | `RCAT` | MATCH | 15.57/11.90 | 5.74/8.53 PRE_CROSS | M1 · 매입 검토 |
+| KR | 로보스타 | `090360` | MATCH | 15.59/13.48 | 5.39/8.01 PRE_CROSS | M2 · 분할매입 |
+| KR | 네패스 | `033640` | MATCH | 16.00/19.18 | 1.15/3.61 PRE_CROSS | M0 · 관찰 |
+| KR | 미래에셋증권 | `006800` | MATCH | 16.22/14.01 | 3.68/4.00 PRE_CROSS | W · 대기 |
+| JP | 미즈호파이낸셜그룹 | `8411` | MATCH | 16.57/14.63 | 3.55/4.15 PRE_CROSS | W · 대기 |
+| KR | HPSP | `403870` | MATCH | 16.74/17.82 | 13.49/16.00 PRE_CROSS | W · 대기 |
+| US | Robinhood | `HOOD` | MATCH | 18.20/18.88 | 3.19/5.34 PRE_CROSS | M0 · 관찰 |
+| KR | 한화비전 | `489790` | MATCH | 18.31/15.25 | 16.00/17.93 PRE_CROSS | W · 대기 |
+| KR | 제이티 | `089790` | MATCH | 18.55/18.27 | 13.36/13.38 PRE_CROSS | W · 대기 |
+| KR | 에스앤에스텍 | `101490` | MATCH | 18.82/19.73 | 3.36/4.78 PRE_CROSS | M2 · 분할매입 |
+| JP | 교세라 | `6971` | MATCH | 19.01/23.44 | 16.30/18.84 PRE_CROSS | W · 대기 |
+| KR | 아이티센글로벌 | `124500` | MATCH | 19.43/16.13 | 7.72/8.41 PRE_CROSS | M1 · 매입 검토 |
+| JP | 고마쓰 | `6301` | MATCH | 19.43/22.33 | 6.58/7.04 PRE_CROSS | W · 대기 |
+| JP | 미쓰비시UFJ파이낸셜그룹 | `8306` | MATCH | 19.44/18.06 | 3.75/6.19 PRE_CROSS | M2 · 분할매입 |
+| US | ASML | `ASML` | MATCH | 19.56/15.64 | 22.59/17.98 POST_CROSS | W · 대기 |
+| KR | 삼성물산 | `028260` | MATCH | 19.67/16.04 | 19.51/20.60 PRE_CROSS | W · 대기 |
+| KR | 한미반도체 | `042700` | MATCH | 19.93/16.62 | 2.90/5.74 PRE_CROSS | W · 대기 |
+| KR | 현대로템 | `064350` | MATCH | 20.38/19.36 | 0.84/1.43 PRE_CROSS | W · 대기 |
+| KR | 에스피지 | `058610` | MATCH | 20.45/15.20 | 3.45/5.21 PRE_CROSS | M2 · 분할매입 |
+| KR | 신세계 | `004170` | MATCH | 20.51/15.87 | 4.85/4.85 PRE_CROSS | W · 대기 |
+| KR | 고려아연 | `010130` | MATCH | 20.55/19.20 | 3.97/3.57 POST_CROSS | W · 대기 |
+| KR | 한화에어로스페이스 | `012450` | MATCH | 20.55/19.51 | 3.84/5.45 PRE_CROSS | W · 대기 |
+| KR | 에코프로비엠 | `247540` | MATCH | 23.66/24.22 | 4.96/6.34 PRE_CROSS | W · 대기 |
+| KR | 한국금융지주 | `071050` | MATCH | 24.25/18.20 | 16.67/17.78 PRE_CROSS | W · 대기 |
+| KR | 한국전력 | `015760` | MATCH | 24.26/27.05 | 13.58/14.24 PRE_CROSS | M2 · 분할매입 |
+| KR | 삼성증권 | `016360` | MATCH | 24.65/19.71 | 5.43/7.50 PRE_CROSS | W · 대기 |
+| KR | 하나금융지주 | `086790` | MATCH | 24.66/23.10 | 20.14/16.20 POST_CROSS | W · 대기 |
+| KR | 한국항공우주 | `047810` | MATCH | 24.86/19.14 | 3.30/3.70 PRE_CROSS | W · 대기 |
+| US | GE Vernova | `GEV` | MATCH | 26.17/28.86 | 11.98/10.78 POST_CROSS | W · 대기 |
+| KR | 현대무벡스 | `319400` | MATCH | 26.78/23.79 | 9.24/10.56 PRE_CROSS | M1 · 매입 검토 |
+| KR | 현대해상 | `001450` | MATCH | 27.99/24.04 | 11.52/11.92 PRE_CROSS | M1 · 매입 검토 |
+| KR | 파마리서치 | `214450` | MATCH | 28.00/23.91 | 4.17/5.90 PRE_CROSS | W · 대기 |
+| US | Deere | `DE` | MATCH | 29.19/36.14 | 2.30/3.68 PRE_CROSS | M2 · 분할매입 |
+| KR | 카카오페이 | `377300` | MATCH | 29.47/22.60 | 6.48/8.33 PRE_CROSS | W · 대기 |
+| KR | 키움증권 | `039490` | MATCH | 30.01/23.16 | 11.11/11.93 PRE_CROSS | W · 대기 |
+| KR | CJ | `001040` | MATCH | 30.73/31.22 | 6.19/7.47 PRE_CROSS | W · 대기 |
+| KR | 현대백화점 | `069960` | MATCH | 30.82/22.77 | 6.77/6.84 PRE_CROSS | M1 · 매입 검토 |
+| US | Kratos Defense | `KTOS` | MATCH | 32.39/24.81 | 7.93/8.42 PRE_CROSS | W · 대기 |
+| KR | 에이비엘바이오 | `298380` | MATCH | 34.00/24.27 | 28.16/27.42 POST_CROSS | W · 대기 |
+| KR | 롯데쇼핑 | `023530` | MATCH | 34.55/24.06 | 20.05/18.42 POST_CROSS | M1 · 매입 검토 |
+| KR | 대한유화 | `006650` | MATCH | 35.27/28.51 | 10.94/13.19 PRE_CROSS | M0 · 관찰 |
+| KR | 현대모비스 | `012330` | MATCH | 39.22/34.11 | 9.80/11.98 PRE_CROSS | W · 대기 |
+| KR | 케어젠 | `214370` | MATCH | 40.72/31.18 | 24.82/26.95 PRE_CROSS | W · 대기 |
+| JP | 가와사키중공업 | `7012` | MATCH | 40.77/30.82 | 4.71/6.78 PRE_CROSS | W · 대기 |
+| KR | 알테오젠 | `196170` | MATCH | 41.53/32.14 | 22.62/25.40 PRE_CROSS | W · 대기 |
+| KR | 한국단자 | `025540` | MATCH | 41.83/32.26 | 10.56/11.23 PRE_CROSS | W · 대기 |
 
 <!-- REPORT_ONE:STC14:END -->
+
