@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r18'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r19'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -1595,6 +1595,193 @@ jobs:
           echo lm_json(['scenario'=>'service_dag_and_scheduler_lifecycle_parity','status'=>'PASS','source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE')),'fixture_sha256'=>hash_file('sha256',__FILE__),'case_count'=>count($archCases),'cases'=>$archCases,'scheduler_scenarios'=>$archScenarios])."\n";
           PHP
           MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/architecture-fixture.php"
+
+      - name: Actual manual control process locking and browser continuation
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/control-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          /* Test namespace substitutes external HTTP/cURL presence only. Production
+           * Health/Controller/ManualControl/StateStore/Runtime/Monitor bodies are exact.
+           * PHP subprocesses, CLI probe invocation, wall clock, flock and writes are real. */
+          $source=getenv('MON_TEST_SOURCE');if(!$source||!is_file($source))throw new RuntimeException('MON_TEST_SOURCE required');
+          $php=PHP_BINARY;$original=file_get_contents($source);$root=__DIR__.'/scratchreports/control-'.getmypid().'-'.bin2hex(random_bytes(5));mkdir($root,0700,true);
+          function ct_bounds(string $source,string $name):array{
+              $tokens=token_get_all($source);$positions=[];$offset=0;foreach($tokens as $token){$positions[]=$offset;$offset+=strlen(is_array($token)?$token[1]:$token);}
+              for($i=0;$i<count($tokens);$i++){if(!is_array($tokens[$i])||$tokens[$i][0]!==T_CLASS)continue;$j=$i+1;while(isset($tokens[$j])&&is_array($tokens[$j])&&in_array($tokens[$j][0],[T_WHITESPACE,T_COMMENT,T_DOC_COMMENT],true))$j++;if(!isset($tokens[$j])||!is_array($tokens[$j])||$tokens[$j][1]!==$name)continue;$start=$positions[$i];$prev=$i-1;while($prev>=0&&is_array($tokens[$prev])&&in_array($tokens[$prev][0],[T_WHITESPACE,T_COMMENT,T_DOC_COMMENT],true))$prev--;if($prev>=0&&is_array($tokens[$prev])&&in_array($tokens[$prev][0],[T_FINAL,T_ABSTRACT],true))$start=$positions[$prev];while($tokens[$j]!=='{')$j++;$depth=0;for(;$j<count($tokens);$j++){if($tokens[$j]==='{')$depth++;elseif(is_array($tokens[$j])&&in_array($tokens[$j][0],[T_CURLY_OPEN,T_DOLLAR_OPEN_CURLY_BRACES],true))$depth++;elseif($tokens[$j]==='}'&&--$depth===0)return[$start,$positions[$j]+1];}}
+              throw new RuntimeException('class missing '.$name);
+          }
+          [$a,$b]=ct_bounds($original,'LiteHttp');
+          $http=<<<'PHP'
+          final class LiteHttp {
+              public function __construct($cfg){}public function clearRequestCache():void{}public function resetStats():void{}public function releasePayloads():void{}public function stats():array{return[];}
+              public function githubGet(...$args){FixtureOS::$networkCalls++;throw new RuntimeException('forbidden GitHub read');}
+              public function get(...$args){FixtureOS::$networkCalls++;throw new RuntimeException('forbidden Yahoo read');}
+              public function githubPut(...$args){throw new RuntimeException('forbidden publication');}
+          }
+          PHP;
+          $copy=substr($original,0,$a).$http.substr($original,$b);$copy=substr($copy,strpos($copy,';',strpos($copy,'<?php'))+1);
+          $prefix=<<<'PHP'
+          <?php
+          declare(strict_types=1);
+          namespace MonControlTest;
+          use \stdClass;use \Throwable;use \RuntimeException;use \DateTimeZone;use \DateTimeImmutable;use \Exception;
+          final class FixtureOS {public static $networkCalls=0,$execCalls=[],$failLaunch=false,$stopDuringProbe=false,$headers=[];}
+          function extension_loaded($name){return $name==='curl'?true:\extension_loaded($name);}
+          function header($value,$replace=true,$code=0):void{FixtureOS::$headers[]=$value;}
+          function exec($command,&$output=null,&$code=null){
+              FixtureOS::$execCalls[]=$command;if(FixtureOS::$failLaunch&&strpos($command,'--run')!==false){$output=[];$code=127;return'';}
+              $result=\exec($command,$output,$code);
+              if(FixtureOS::$stopDuringProbe&&strpos($command,' -r ')!==false){FixtureOS::$stopDuringProbe=false;LiteStateStore::requestAction('stop');}
+              return$result;
+          }
+          PHP;
+          $instrumented=$prefix."\n".$copy;$module=$root.'/mon.php';file_put_contents($module,$instrumented);
+          $bodyHashes=[];foreach(['LiteHealth','LiteWebController','LiteManualControl','LiteStateStore','LiteRuntime','LiteMonitor']as$class){[$a,$b]=ct_bounds($original,$class);[$c,$d]=ct_bounds($instrumented,$class);$before=substr($original,$a,$b-$a);$after=substr($instrumented,$c,$d-$c);if($before!==$after)throw new RuntimeException('class changed '.$class);$bodyHashes[$class]=hash('sha256',$before);}
+          $daemon=<<<'PHP'
+          <?php
+          declare(strict_types=1);
+          $root=__DIR__;require $argv[1];$mode=trim((string)@file_get_contents($root.'/mode'));$id=null;$seq=null;foreach($argv as$arg){if(strpos($arg,'--control-id=')===0)$id=substr($arg,13);if(strpos($arg,'--control-seq=')===0)$seq=(int)substr($arg,14);}
+          file_put_contents($root.'/launches',json_encode(['pid'=>getmypid(),'id'=>$id,'seq'=>$seq,'mode'=>$mode,'at'=>microtime(true)])."\n",FILE_APPEND|LOCK_EX);
+          if($mode==='die')exit(0);
+          if($mode==='normal'||$mode==='delay'){if($mode==='delay')usleep(300000);exit(\MonControlTest\LiteEntrypoint::run($argv));}
+          $lock=\MonControlTest\LiteRuntime::lock();try{
+              if($mode==='before_start'){file_put_contents($root.'/barrier','ready');$until=microtime(true)+5;while(!is_file($root.'/release')&&microtime(true)<$until)usleep(10000);}
+              $s=\MonControlTest\LiteStateStore::startState($id,$seq);
+              if($mode==='wrong_source')$s->run_identity->source_sha256=str_repeat('a',64);
+              if($mode==='wrong_id')$s->run_identity->control_id=str_repeat('b',32);
+              if($mode==='wrong_seq')$s->run_identity->control_seq=(int)$s->run_identity->control_seq+1;
+              if($mode==='old_time')$s->run_identity->started_unix=1.0;
+              if($mode==='stale')$s->heartbeat_at=\MonControlTest\lm_iso(time()-300);
+              \MonControlTest\LiteStateStore::saveState($s);file_put_contents($root.'/barrier','ready');$until=microtime(true)+8;while(($mode==='stuck'?!is_file($root.'/release'):!\MonControlTest\LiteStateStore::stopRequested())&&microtime(true)<$until)usleep(10000);
+          }catch(Throwable$error){file_put_contents($root.'/child_error',$error instanceof \MonControlTest\LiteMonFault?$error->faultCode:get_class($error));}finally{$s=\MonControlTest\LiteStateStore::state();$s->running=false;$s->phase='IDLE';\MonControlTest\LiteStateStore::saveState($s);flock($lock,LOCK_UN);fclose($lock);}
+          PHP;
+          file_put_contents($root.'/daemon.php',$daemon);
+          $request=<<<'PHP'
+          <?php
+          require __DIR__.'/mon.php';
+          $_SERVER['REQUEST_METHOD']='POST';$_GET=['view'=>'control'];$_POST=['action'=>'continue','operation_id'=>$argv[1],'operation_seq'=>(int)$argv[2]];
+          exit(\MonControlTest\LiteWebController::run());
+          PHP;
+          file_put_contents($root.'/request.php',$request);
+          file_put_contents($root.'/probe.php','<?php if(trim((string)@file_get_contents(__DIR__."/mode"))==="probe_fail")exit(2);echo PHP_VERSION_ID,"|1|cli";');
+          $cli=$root.'/php-cli';file_put_contents($cli,"#!/bin/sh\nif [ \"\$1\" = \"-r\" ]; then exec ".escapeshellarg($php).' '.escapeshellarg($root.'/probe.php')."; fi\nexec ".escapeshellarg($php).' '.escapeshellarg($root.'/daemon.php').' "$@"'."\n");chmod($cli,0700);
+          require $module;$cases=[];$scenarios=[];
+          function ct_check(bool$ok,string$message):void{global$cases,$root;$cases[]=['case'=>$message,'status'=>$ok?'PASS':'FAIL'];if(!$ok){file_put_contents($root.'/failure.json',json_encode(['message'=>$message,'cases'=>$cases])."\n");throw new RuntimeException($message);}}
+          function ct_request(string$method,array$fields=[]):array{$_SERVER['REQUEST_METHOD']=$method;$_GET=$method==='GET'?array_merge(['view'=>'control'],$fields):['view'=>'control'];$_POST=$method==='POST'?$fields:[];ob_start();$code=\MonControlTest\LiteWebController::run();$raw=ob_get_clean();$body=json_decode($raw,true);if(!is_array($body))throw new RuntimeException('JSON expected: '.$raw);return['code'=>$code,'body'=>$body,'control'=>$body['control']??null];}
+          function ct_state(){return\MonControlTest\LiteStateStore::state();}
+          function ct_ticket():array{return(array)\MonControlTest\lm_get(ct_state(),'manual_control');}
+          function ct_fields(array$t):array{return['operation_id'=>$t['id'],'operation_seq'=>$t['seq']];}
+          function ct_status(array$t):array{return ct_request('GET',ct_fields($t))['control'];}
+          function ct_launches():int{global$root;return is_file($root.'/launches')?count(file($root.'/launches',FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES)):0;}
+          function ct_wait(callable$test,float$seconds=3):bool{$end=microtime(true)+$seconds;do{if($test())return true;usleep(10000);}while(microtime(true)<$end);return false;}
+          function ct_stop():void{global$root;\MonControlTest\LiteStateStore::requestAction('stop');file_put_contents($root.'/release','go');if(!ct_wait(static function(){return!\MonControlTest\LiteRuntime::lockHeld();}))throw new RuntimeException('fixture child failed to stop');foreach(['barrier','release','child_error']as$n)@unlink($root.'/'.$n);}
+          function ct_seed(string$mode='normal'):void{global$root,$cli;ct_stop();file_put_contents($root.'/mode',$mode);$s=\MonControlTest\LiteStateStore::defaultState();$s->last_full_scan=\MonControlTest\lm_iso();$s->next_full_scan=\MonControlTest\lm_iso(time()+3600);$s->next_light_check=\MonControlTest\lm_iso(time()+3600);$s->next_mailbox_check=\MonControlTest\lm_iso(time()+3600);\MonControlTest\LiteStateStore::saveState($s,true);\MonControlTest\LiteRuntime::write('settings',(object)['github_token'=>'synthetic-ci-token','php_cli'=>$cli]);}
+          function ct_confirm(array$t):bool{return ct_wait(static function()use($t){return(ct_status($t)['phase']??null)==='confirmed';});}
+          function ct_parallel_continue(array$t):void{global$root,$php;$processes=[];for($i=0;$i<2;$i++){$pipes=[];$process=proc_open([$php,$root.'/request.php',$t['id'],(string)$t['seq']],[0=>['file','/dev/null','r'],1=>['file',$root.'/reply-'.$i.'.json','w'],2=>['file',$root.'/reply-'.$i.'.err','w']],$pipes);if(!is_resource($process))throw new RuntimeException('cannot launch controller request');$processes[]=$process;}foreach($processes as$process)if(proc_close($process)!==0)throw new RuntimeException('controller subprocess failed');for($i=0;$i<2;$i++){$reply=json_decode(file_get_contents($root.'/reply-'.$i.'.json'),true);if(!is_array($reply)||($reply['ok']??false)!==true)throw new RuntimeException('concurrent controller request failed');}}
+          function ct_guards():array{$out=[];foreach(['result','cache','request']as$key)$out[$key]=hash_file('sha256',\MonControlTest\LiteRuntime::path($key.'.php'));return$out;}
+          \MonControlTest\LiteRuntime::write('result',(object)['contract'=>'MON-LITE-RESULT-2.1','authority'=>'chatgpt_final','save_status'=>'pending_remote','request_id'=>'ci-control-outbox','outbox'=>(object)['markdown'=>'Frozen conclusion','data_json'=>'{"decision":"frozen"}','response_json'=>'{"status":"saved"}']]);
+          \MonControlTest\LiteRuntime::write('cache',(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>[],'symbols'=>new stdClass(),'benchmarks'=>new stdClass(),'scan_queue'=>['US|NASDAQ|QUEUED']]);\MonControlTest\LiteRuntime::write('request',(object)['request_id'=>'ci-control-outbox','stage'=>'details','evaluation_id'=>'ci-eval']);$guards=ct_guards();
+          try{
+              ct_seed('delay');$at=microtime(true);$reply=ct_request('POST',['action'=>'start']);$ticket=ct_ticket();ct_check(microtime(true)-$at<2&&is_array($reply['control']),'public start returns an accepted operation without awaiting daemon');ct_check(ct_confirm($ticket),'real child confirms held lock, fresh identity, exact source and operation');$first=ct_state()->run_identity;$count=ct_launches();$reply=ct_request('POST',['action'=>'start']);ct_check(ct_launches()===$count&&($reply['body']['ok']??null)===false,'start with active lock cannot spawn a duplicate child');ct_check(ct_guards()===$guards,'start preserves pending outbox, queue and request');
+              ct_request('POST',['action'=>'restart']);$restart=ct_ticket();ct_check($restart['id']!==$ticket['id']&&ct_state()->stop_requested===true,'restart records new ticket and cooperative stop');ct_check(ct_wait(static function(){return!\MonControlTest\LiteRuntime::lockHeld();}),'actual loop stops under one-second idle polling');$count=ct_launches();$hash=hash_file('sha256',\MonControlTest\LiteRuntime::path('state.php'));$status=ct_status($restart);usleep(100000);ct_check($status['phase']==='ready'&&ct_launches()===$count&&hash_file('sha256',\MonControlTest\LiteRuntime::path('state.php'))===$hash,'GET readiness is read-only and never launches after browser closes');ct_parallel_continue($restart);ct_request('POST',array_merge(['action'=>'continue'],ct_fields($restart)));ct_check(ct_confirm($restart)&&ct_launches()===$count+1,'concurrent duplicate continue requests claim only one real process launch');$second=ct_state()->run_identity;ct_check($second->pid!==$first->pid&&$second->started_unix>$first->started_unix&&$second->control_id===$restart['id']&&$second->source_sha256===MON_LITE_SOURCE_SHA256,'restart confirms new PID and start time with exact source/ticket');$scenarios['restart']=['old_pid'=>$first->pid,'new_pid'=>$second->pid,'operation'=>$restart['id']];
+              ct_seed('before_start');ct_request('POST',['action'=>'start']);$ticket=ct_ticket();ct_check(ct_wait(static function()use($root){return is_file($root.'/barrier');}),'claimed child reaches real-flock barrier before atomic startup');$old=ct_state();$seq=$old->control_seq;ct_request('POST',['action'=>'stop']);$old->heartbeat_at=\MonControlTest\lm_iso();\MonControlTest\LiteStateStore::saveState($old);file_put_contents($root.'/release','go');ct_check(ct_wait(static function(){return!\MonControlTest\LiteRuntime::lockHeld();}),'cancelled child releases lock');ct_check(ct_state()->stop_requested===true&&ct_state()->control_seq===$seq+1&&ct_state()->manual_control===null&&ct_status($ticket)['phase']==='cancelled','new STOP survives stale heartbeat and cancels claimed ticket');ct_check(trim((string)file_get_contents($root.'/child_error'))==='CONTROL_REQUEST_CANCELLED','child checks current control atomically before clearing stop');
+              ct_seed();$before=ct_state();$count=ct_launches();\MonControlTest\FixtureOS::$stopDuringProbe=true;$reply=ct_request('POST',['action'=>'restart']);ct_check(($reply['body']['ok']??null)===false&&ct_state()->control_seq===$before->control_seq+1&&ct_state()->stop_requested===true&&ct_state()->manual_control===null&&ct_launches()===$count,'STOP during real CLI preflight cancels the older begin request');
+              ct_seed();$ticket=\MonControlTest\LiteStateStore::requestControl('start');$s=ct_state();$s->manual_control->deadline_unix=microtime(true)-1;\MonControlTest\LiteRuntime::write('state',$s);$hash=hash_file('sha256',\MonControlTest\LiteRuntime::path('state.php'));$count=ct_launches();ct_check(ct_status($ticket)['phase']==='expired'&&hash_file('sha256',\MonControlTest\LiteRuntime::path('state.php'))===$hash,'expired control status is read-only');ct_request('POST',array_merge(['action'=>'continue'],ct_fields($ticket)));ct_check(ct_launches()===$count,'expired operation cannot launch');
+              ct_seed('stuck');ct_request('POST',['action'=>'start']);$held=ct_ticket();ct_check(ct_confirm($held),'timeout fixture begins with a real confirmed lock holder');ct_request('POST',['action'=>'restart']);$timed=ct_ticket();$count=ct_launches();ct_check(ct_status($timed)['phase']==='stopping'&&\MonControlTest\LiteRuntime::lockHeld(),'restart waits while old daemon still holds the actual lock');$s=ct_state();$s->manual_control->deadline_unix=microtime(true)-1;\MonControlTest\LiteRuntime::write('state',$s);ct_check(ct_status($timed)['phase']==='expired'&&\MonControlTest\LiteRuntime::lockHeld(),'restart timeout reports expired without killing the existing holder');ct_request('POST',array_merge(['action'=>'continue'],ct_fields($timed)));ct_check(ct_launches()===$count&&\MonControlTest\LiteRuntime::lockHeld(),'timed-out continuation cannot launch a replacement before old lock release');file_put_contents($root.'/release','go');
+              ct_seed();\MonControlTest\FixtureOS::$failLaunch=true;$reply=ct_request('POST',['action'=>'start']);\MonControlTest\FixtureOS::$failLaunch=false;ct_check(($reply['control']['phase']??null)==='failed'&&($reply['control']['error']??null)==='WEB_PROCESS_LAUNCH_FAILED','public controller exposes OS launch failure');
+              ct_seed('probe_fail');$before=ct_state();$reply=ct_request('POST',['action'=>'restart']);ct_check(($reply['body']['ok']??null)===false&&ct_state()->control_seq===$before->control_seq&&ct_state()->stop_requested===$before->stop_requested,'failed CLI preflight does not request restart stop');
+              foreach(['wrong_source','wrong_id','wrong_seq','old_time','stale']as$mode){ct_seed($mode);ct_request('POST',['action'=>'start']);$ticket=ct_ticket();ct_check(ct_wait(static function()use($root){return is_file($root.'/barrier');}),'adversarial child holds actual lock '.$mode);$status=ct_status($ticket);ct_check($status['phase']!=='confirmed'&&$status['error']===($mode==='stale'?'DAEMON_HEARTBEAT_STALE':'DAEMON_IDENTITY_MISMATCH'),'held lock cannot confirm mismatched/stale identity '.$mode);$scenarios[$mode]=$status;}
+              ct_seed('die');$count=ct_launches();ct_request('POST',['action'=>'start']);$ticket=ct_ticket();ct_check(ct_wait(static function()use($count){return ct_launches()===$count+1;}),'failed child was actually invoked');usleep(100000);ct_check(ct_status($ticket)['phase']!=='confirmed'&&!\MonControlTest\LiteRuntime::lockHeld(),'immediate child exit never appears confirmed');
+              ct_seed();$ticket=\MonControlTest\LiteStateStore::requestControl('start');\MonControlTest\LiteStateStore::claimControl($ticket['id'],$ticket['seq']);\MonControlTest\LiteStateStore::startState($ticket['id'],$ticket['seq']);$status=ct_status($ticket);ct_check($status['phase']==='failed'&&$status['error']==='DAEMON_EXITED','started state with no actual lock reports exited');
+              ct_check(ct_guards()===$guards,'all control paths preserve exact pending outbox/cache/request bytes');ct_check(\MonControlTest\FixtureOS::$networkCalls===0,'startup and control status never perform external health/provider requests');ct_check(count(array_filter(\MonControlTest\FixtureOS::$execCalls,static function($s){return strpos($s,' -r ')!==false;}))>0,'actual executable CLI preflight subprocess ran');
+              $report=['scenario'=>'actual_public_controller_process_and_flock','status'=>'PASS','source_sha256'=>hash('sha256',$original),'instrumented_sha256'=>hash('sha256',$instrumented),'class_body_sha256'=>$bodyHashes,'fixture_sha256'=>hash_file('sha256',__FILE__),'instrumentation'=>'Full source test namespace; unchanged Health/Controller/ManualControl/StateStore/Runtime/Monitor bodies. External LiteHttp and cURL presence substituted; executable CLI probe reports synthetic cURL=1. Real PHP child processes, actual loop, wall time, flock and atomic writes. No NAS/external network.','case_count'=>count($cases),'cases'=>$cases,'scenarios'=>$scenarios,'launches'=>ct_launches(),'network_calls'=>\MonControlTest\FixtureOS::$networkCalls,'guard_sha256'=>$guards];file_put_contents($root.'/report.json',json_encode($report,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)."\n");echo json_encode($report,JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)."\n";
+          }finally{ct_stop();}
+          PHP
+          cat >"$test_dir/ui-render.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require getenv('MON_TEST_SOURCE');
+          $_SERVER['REQUEST_METHOD']='GET';$_GET=[];$_POST=[];
+          ob_start();LiteWebController::run();$normal=ob_get_clean();
+          $record=LiteStateStore::requestControl('start');
+          $_GET=['operation_id'=>$record['id'],'operation_seq'=>$record['seq']];
+          ob_start();LiteWebController::run();$reload=ob_get_clean();
+          if(strpos($normal,'value="restart"')===false||strpos($normal,'id="mon-controls"')===false)throw new RuntimeException('manual restart form missing');
+          if(LiteRuntime::lockHeld())throw new RuntimeException('rendering or refreshing an operation must not launch a daemon');
+          file_put_contents($argv[1],$normal);file_put_contents($argv[2],$reload);
+          echo lm_json(['scenario'=>'actual_manual_control_HTML_render','status'=>'PASS','source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE')),'normal_html_sha256'=>hash('sha256',$normal),'reload_html_sha256'=>hash('sha256',$reload),'operation_id'=>$record['id'],'operation_seq'=>$record['seq'],'get_did_not_launch'=>true])."\n";
+          PHP
+          cat >"$test_dir/ui-fixture.mjs" <<'JS'
+          import fs from 'node:fs';
+          import vm from 'node:vm';
+          import crypto from 'node:crypto';
+          import {fileURLToPath} from 'node:url';
+          const [normalPath,reloadPath]=process.argv.slice(2);
+          const html=fs.readFileSync(normalPath,'utf8'),reloadHtml=fs.readFileSync(reloadPath,'utf8');
+          const scripts=h=>[...h.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map(m=>m[1]).join('\n');
+          const code=scripts(html),reloadCode=scripts(reloadHtml),cases=[];
+          const check=(ok,name)=>{cases.push({case:name,status:ok?'PASS':'FAIL'});if(!ok)throw Error(name);};
+          check(code.length>0&&reloadCode===code,'normal and manual-refresh views render the same control JavaScript');
+          new vm.Script(code,{filename:'actual-rendered-control.js'});
+          check(['start','restart','stop','scan'].every(v=>html.includes(`value="${v}"`)),'actual rendered form exposes all four manual actions');
+          const op='a'.repeat(32),seq=7;
+          function browser(handler,script=code,operation=null){
+            let now=0,nextTimer=1;const timers=[],calls=[],listeners={},errors=[];
+            const buttons=['start','restart','stop','scan'].map(value=>({value,disabled:false}));
+            const form={querySelectorAll:()=>buttons,addEventListener:(name,fn)=>{listeners[name]=fn;}};
+            const progress={textContent:''};
+            const document={activeElement:null,getElementById:id=>id==='mon-controls'?form:(id==='control-progress'?progress:(id==='control-operation'?operation:null))};
+            const fetch=async(url,options={})=>{const request={url:String(url),method:options.method||'GET',data:Object.fromEntries(new URLSearchParams(options.body||'')),credentials:options.credentials,cache:options.cache};calls.push(request);const result=await handler(request,calls.length);return{ok:true,json:async()=>({ok:!['failed','expired','cancelled'].includes(result.phase),control:result})};};
+            const context=vm.createContext({document,window:{location:{href:'http://localhost/mon.php'},fetch},fetch,URL,URLSearchParams,Date:{now:()=>now},setTimeout:(fn,ms)=>{const id=nextTimer++;timers.push({id,fn,ms});return id;},clearTimeout:id=>{const i=timers.findIndex(t=>t.id===id);if(i>=0)timers.splice(i,1);},console});
+            vm.runInContext(script,context);
+            const flush=async()=>{await new Promise(resolve=>setImmediate(resolve));};
+            return {calls,buttons,progress,timers,errors,flush,
+              submit(action){const button=buttons.find(b=>b.value===action);const result=listeners.submit({submitter:button,preventDefault(){}});if(result&&result.catch)result.catch(e=>errors.push(String(e)));return result;},
+              async tick(){const timer=timers.shift();if(!timer)return false;now+=timer.ms;timer.fn();await flush();return true;},
+              async drain(max=100){await flush();for(let i=0;i<max&&timers.length;i++)await this.tick();await flush();}
+            };
+          }
+          let b=browser(()=>{throw Error('ordinary render must not fetch');});await b.flush();check(b.calls.length===0,'ordinary page load never submits or resumes a command');
+          let polls=0;
+          b=browser(r=>r.method==='POST'?(r.data.action==='restart'?{phase:'stopping',operation_id:op,operation_seq:seq,message:'정지 대기'}:{phase:'starting',operation_id:op,operation_seq:seq,message:'새 실행 대기'}):(++polls===1?{phase:'stopping',message:'정지 대기'}:polls===2?{phase:'ready',message:'시작 준비'}:{phase:'confirmed',message:'새 실행 확인'}));
+          b.submit('restart');b.submit('start');await b.flush();
+          check(b.calls.filter(r=>r.method==='POST').length===1,'duplicate clicks cannot create another operation while a command is pending');
+          check(b.buttons.find(x=>x.value==='stop').disabled===false&&b.buttons.filter(x=>x.value!=='stop').every(x=>x.disabled),'stop remains available while other command buttons are disabled');
+          await b.drain();
+          check(JSON.stringify(b.calls.filter(r=>r.method==='POST').map(r=>r.data.action))===JSON.stringify(['restart','continue']),'ready response causes exactly one explicit continuation POST in the active operation');
+          check(b.calls.filter(r=>r.method==='GET').every(r=>{const u=new URL(r.url);return u.searchParams.get('operation_id')===op&&u.searchParams.get('operation_seq')===String(seq);}), 'polling preserves the operation ID and sequence');
+          check(b.calls.every(r=>r.credentials==='same-origin'&&r.cache==='no-store'),'control requests use same-origin credentials and avoid cached status');
+          check(b.progress.textContent==='새 실행 확인'&&b.buttons.every(x=>!x.disabled),'confirmed run is visible and restores command availability');
+          b=browser(r=>r.method==='POST'?(r.data.action==='stop'?{phase:'stopping',message:'중지 요청'}:{phase:'stopping',operation_id:op,operation_seq:seq,message:'정지 대기'}):(new URL(r.url).searchParams.has('operation_id')?{phase:'stopping',message:'정지 대기'}:{phase:'stopped',message:'중지 완료'}));
+          b.submit('restart');await b.flush();b.submit('stop');await b.drain();
+          check(JSON.stringify(b.calls.filter(r=>r.method==='POST').map(r=>r.data.action))===JSON.stringify(['restart','stop']),'new stop cancels the old polling generation before it can continue');
+          check(b.progress.textContent==='중지 완료'&&b.buttons.every(x=>!x.disabled),'stop completion remains visible after stale polling callbacks');
+          let resolveOld;
+          b=browser(r=>r.method==='POST'&&r.data.action==='restart'?new Promise(resolve=>{resolveOld=resolve;}):{phase:'stopped',message:'중지 완료'});
+          b.submit('restart');await b.flush();b.submit('stop');await b.flush();resolveOld({phase:'ready',operation_id:op,operation_seq:seq,message:'늦은 시작 응답'});await b.drain();
+          check(!b.calls.some(r=>r.data.action==='continue')&&b.calls.every(r=>r.method==='POST'),'a late begin response after stop cannot launch or begin polling');
+          check(b.progress.textContent==='중지 완료','cancelled operation cannot replace the newer stop message');
+          b=browser(()=>({phase:'failed',error:'CLI_PHP_PROBE_FAILED',message:'CLI 시작 실패'}));b.submit('start');await b.drain();
+          check(b.calls.length===1&&b.progress.textContent==='CLI 시작 실패'&&b.buttons.every(x=>!x.disabled),'failed start is shown without unbounded polling or disabled controls');
+          b=browser(()=>({phase:'stopping',operation_id:op,operation_seq:seq,message:'정지 대기'}));b.submit('restart');await b.drain(100);
+          check(b.progress.textContent.includes('시간')&&b.timers.length===0&&b.calls.length<=92,'polling stops at the bounded 180-second deadline with a visible timeout');
+          check(!b.calls.some(r=>r.data.action==='continue'),'timeout cannot invent a continuation or successful restart');
+          b=browser(()=>({phase:'ready',operation_id:op,operation_seq:seq,message:'준비'}),reloadCode,{dataset:{id:op,seq:String(seq)}});await b.drain(3);
+          check(!b.calls.some(r=>r.method==='POST'),'reloading an existing operation cannot submit a continuation without a new user action');
+          b=browser(()=>{throw Error('injected network failure');});b.submit('restart');await b.drain();
+          check(b.progress.textContent.includes('확인하지 못')&&b.buttons.every(x=>!x.disabled),'network failure leaves an honest visible message and usable controls');
+          check(cases.length>=18,'all asynchronous manual control browser scenarios executed');
+          console.log(JSON.stringify({scenario:'actual_rendered_control_browser_behavior',status:'PASS',source_sha256:crypto.createHash('sha256').update(fs.readFileSync(process.env.MON_TEST_SOURCE)).digest('hex'),script_sha256:crypto.createHash('sha256').update(code).digest('hex'),fixture_sha256:crypto.createHash('sha256').update(fs.readFileSync(fileURLToPath(import.meta.url))).digest('hex'),case_count:cases.length,cases}));
+          JS
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/control-fixture.php"
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/ui-render.php" "$test_dir/normal.html" "$test_dir/reload.html"
+          MON_TEST_SOURCE="$test_dir/mon.php" node "$test_dir/ui-fixture.mjs" "$test_dir/normal.html" "$test_dir/reload.html"
 
       - name: Source identities
         run: sha256sum mon.php monitor.md MON-Wiki.md mon_data.json mon_result.md mon_chatgpt_handoff.json mon_chatgpt_response.json

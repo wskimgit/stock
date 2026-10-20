@@ -6,7 +6,7 @@
  */
 declare(strict_types = 1);
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261020-r18';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261020-r19';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -695,7 +695,7 @@ final class LiteHealth {
         return $r;
     }
 
-    public static function local(LiteConfig $cfg, bool $deep = false): array {
+    public static function local(LiteConfig $cfg, bool $deep = false, bool $checkNetwork = true): array {
         $blockers = [];
         $warnings = [];
         $execOk = self::execUsable();
@@ -719,7 +719,7 @@ final class LiteHealth {
             if (!$cli['ok']) $blockers[] = $cli['error'];
         }
         $network = ['checked' => false, 'github_read' => null, 'yahoo_read' => null, 'errors' => []];
-        if ($deep && $cfg->githubToken !== '' && extension_loaded('curl')) {
+        if ($deep && $checkNetwork && $cfg->githubToken !== '' && extension_loaded('curl')) {
             $network = self::networkProbe($cfg);
             foreach ($network['errors'] as $e) $warnings[] = 'NETWORK_' . $e;
         }
@@ -1809,18 +1809,23 @@ final class LiteStateStore {
             'run_identity' => null,
             'scan_request_seq' => 0,
             'scan_handled_seq' => 0,
+            'control_seq' => 0,
+            'manual_control' => null,
             'resource_wait' => null,
             'historical_error' => null
         ];
     }
 
-    public static function state(): stdClass {
-        $s = LiteRuntime::read('state');
+    private static function canonicalState($s): stdClass {
         $d = self::defaultState();
         if (lm_get($s, 'contract') !== 'MON-LITE-STATE-1.0' || lm_get($s, 'policy') !== MON_LITE_POLICY) return $d;
         foreach (get_object_vars($d) as $k => $v) if (!property_exists($s, $k)) $s->$k = $v;
         if ($s->historical_error === null && is_string($s->last_error) && $s->last_error !== '') $s->historical_error = (object) ['code' => $s->last_error, 'at' => $s->heartbeat_at, 'phase' => $s->phase, 'legacy' => true];
         return $s;
+    }
+
+    public static function state(): stdClass {
+        return self::canonicalState(LiteRuntime::read('state'));
     }
 
     public static function installedIdentity(): array {
@@ -1832,7 +1837,7 @@ final class LiteStateStore {
         ];
     }
 
-    public static function startState(): stdClass {
+    public static function startState(?string $controlId = null, ?int $controlSeq = null): stdClass {
         $s = self::state();
         $s->version = MON_LITE_VERSION;
         $s->build = MON_LITE_BUILD;
@@ -1852,7 +1857,7 @@ final class LiteStateStore {
                 'sapi' => PHP_SAPI
             ]
         );
-        self::saveState($s, true);
+        self::saveState($s, true, $controlId, $controlSeq);
         return $s;
     }
 
@@ -1886,11 +1891,23 @@ final class LiteStateStore {
         ];
     }
 
-    public static function saveState($s, bool $allowStopReset = false): void {
+    public static function saveState($s, bool $allowStopReset = false, ?string $controlId = null, ?int $controlSeq = null): void {
         LiteRuntime::write(
             'state',
             $s,
-            static function ($disk, $next) use($allowStopReset) {
+            static function ($disk, $next) use($allowStopReset, $controlId, $controlSeq) {
+                // Lifecycle commands belong to the latest disk generation, never a daemon snapshot.
+                $next->control_seq = (int) lm_get($disk, 'control_seq', 0);
+                $next->manual_control = lm_get($disk, 'manual_control');
+                if ($allowStopReset && ($controlId !== null || $controlSeq !== null)) {
+                    $record = self::currentControl($disk, $controlId, $controlSeq);
+                    if ($record['phase'] !== 'launching') throw new LiteMonFault('CONTROL_REQUEST_NOT_LAUNCHING');
+                    $record['phase'] = 'started';
+                    $next->manual_control = (object) $record;
+                    if (!is_object(lm_get($next, 'run_identity'))) throw new LiteMonFault('CONTROL_REQUEST_INVALID');
+                    $next->run_identity->control_id = $controlId;
+                    $next->run_identity->control_seq = $controlSeq;
+                }
                 if (!$allowStopReset && lm_get($disk, 'stop_requested') === true) $next->stop_requested = true;
                 $next->scan_request_seq = max((int) lm_get($disk, 'scan_request_seq', 0), (int) lm_get($next, 'scan_request_seq', 0));
                 $next->scan_handled_seq = max((int) lm_get($disk, 'scan_handled_seq', 0), (int) lm_get($next, 'scan_handled_seq', 0));
@@ -1911,13 +1928,95 @@ final class LiteStateStore {
             'state',
             new stdClass(),
             static function ($disk) use($action) {
-                $s = lm_get($disk, 'contract') === 'MON-LITE-STATE-1.0' && lm_get($disk, 'policy') === MON_LITE_POLICY ? $disk : self::defaultState();
-                if ($action === 'stop') $s->stop_requested = true;
-                else {
+                $s = self::canonicalState($disk);
+                if ($action === 'stop') {
+                    $s->stop_requested = true;
+                    $s->control_seq = (int) $s->control_seq + 1;
+                    $s->manual_control = null;
+                } else {
                     $s->scan_request_seq = (int) lm_get($s, 'scan_request_seq', 0) + 1;
                     $s->next_full_scan = lm_iso(time() - 1);
                 }
                 return $s;
+            }
+        );
+    }
+
+    private static function currentControl($disk, ?string $id, ?int $seq): array {
+        if ($id === null || !preg_match('/^[a-f0-9]{32}$/D', $id) || $seq === null || $seq < 1) throw new LiteMonFault('CONTROL_REQUEST_INVALID');
+        $record = lm_array(lm_get($disk, 'manual_control'));
+        if (!is_array($record) || lm_get($record, 'id') !== $id || lm_get($record, 'seq') !== $seq || (int) lm_get($disk, 'control_seq', 0) !== $seq) throw new LiteMonFault('CONTROL_REQUEST_CANCELLED');
+        if (lm_get($record, 'source_sha256') !== MON_LITE_SOURCE_SHA256) throw new LiteMonFault('CONTROL_SOURCE_MISMATCH');
+        $deadline = lm_num(lm_get($record, 'deadline_unix'));
+        if ($deadline === null || microtime(true) >= $deadline) throw new LiteMonFault('CONTROL_REQUEST_EXPIRED');
+        return $record;
+    }
+
+    public static function requestControl(string $action, ?int $expectedSeq = null): array {
+        if (!in_array($action, ['start', 'restart'], true)) throw new LiteMonFault('WEB_ACTION_INVALID');
+        $record = [];
+        LiteRuntime::write(
+            'state',
+            new stdClass(),
+            static function ($disk) use($action, $expectedSeq, & $record) {
+                $state = self::canonicalState($disk);
+                if ($expectedSeq !== null && (int) $state->control_seq !== $expectedSeq) throw new LiteMonFault('CONTROL_REQUEST_CANCELLED');
+                $now = microtime(true);
+                $state->control_seq = (int) $state->control_seq + 1;
+                $record = [
+                    'id' => bin2hex(random_bytes(16)),
+                    'seq' => $state->control_seq,
+                    'action' => $action,
+                    'phase' => $action === 'restart' ? 'stopping' : 'waiting',
+                    'requested_at' => lm_iso(),
+                    'requested_unix' => $now,
+                    'deadline_unix' => $now + 180,
+                    'source_sha256' => MON_LITE_SOURCE_SHA256,
+                    'launch_unix' => null,
+                    'error' => null
+                ];
+                $state->manual_control = (object) $record;
+                if ($action === 'restart') $state->stop_requested = true;
+                return $state;
+            }
+        );
+        return $record;
+    }
+
+    public static function claimControl(string $id, int $seq): array {
+        $answer = ['record' => [], 'claimed' => false];
+        LiteRuntime::write(
+            'state',
+            new stdClass(),
+            static function ($disk) use($id, $seq, & $answer) {
+                $state = self::canonicalState($disk);
+                $record = self::currentControl($state, $id, $seq);
+                $answer['record'] = $record;
+                if (in_array($record['phase'], ['launching', 'started'], true)) return $state;
+                if (!in_array($record['phase'], ['waiting', 'stopping'], true)) throw new LiteMonFault('CONTROL_REQUEST_INVALID');
+                if (LiteRuntime::lockHeld()) return $state;
+                $record['phase'] = 'launching';
+                $record['launch_unix'] = microtime(true);
+                $state->manual_control = (object) $record;
+                $answer = ['record' => $record, 'claimed' => true];
+                return $state;
+            }
+        );
+        return $answer;
+    }
+
+    public static function failControl(string $id, int $seq, string $code): void {
+        LiteRuntime::write(
+            'state',
+            new stdClass(),
+            static function ($disk) use($id, $seq, $code) {
+                $state = self::canonicalState($disk);
+                $record = lm_array($state->manual_control);
+                if (!is_array($record) || lm_get($record, 'id') !== $id || lm_get($record, 'seq') !== $seq || (int) $state->control_seq !== $seq) return $state;
+                $record['phase'] = 'failed';
+                $record['error'] = $code;
+                $state->manual_control = (object) $record;
+                return $state;
             }
         );
     }
@@ -1955,7 +2054,7 @@ final class LiteStateStore {
         LiteRuntime::write('evidence', $e);
     }
 }
-// Per-turn transport and memory lifetime
+
 final class LiteTurn {
     private $http;
     private $yahoo;
@@ -4259,10 +4358,10 @@ final class LiteMonitor {
         return $this->services()->scanner->lightCheck();
     }
 
-    public function loop(): void {
+    public function loop(?string $controlId = null, ?int $controlSeq = null): void {
         $lock = LiteRuntime::lock();
         try {
-            LiteStateStore::startState();
+            LiteStateStore::startState($controlId, $controlSeq);
             while (true) {
                 $state = LiteStateStore::state();
                 if ($state->stop_requested) break;
@@ -4337,11 +4436,12 @@ final class LiteMonitor {
     }
 
     private function waitForNextDue(): bool {
-        for ($i = 1; $i <= 60; $i++) {
-            sleep(30);
-            LiteStateStore::idleHeartbeat();
+        for ($i = 1; $i <= 1800; $i++) {
+            sleep(1);
             $state = LiteStateStore::state();
             if ($state->stop_requested) return false;
+            if ($i % 30 !== 0) continue;
+            LiteStateStore::idleHeartbeat();
             $full = is_string($state->next_full_scan) ? strtotime($state->next_full_scan): false;
             $light = is_string($state->next_light_check) ? strtotime($state->next_light_check): false;
             $mailbox = is_string($state->next_mailbox_check) ? strtotime($state->next_mailbox_check): false;
@@ -4352,70 +4452,219 @@ final class LiteMonitor {
     }
 }
 // Status views and manual web commands
+/** A browser-requested start or restart; status reads never launch a process. */
+final class LiteManualControl {
+    private $cfg;
+
+    public function __construct(LiteConfig $cfg) {
+        $this->cfg = $cfg;
+    }
+
+    public function begin(string $action): array {
+        if (!in_array($action, ['start', 'restart'], true)) throw new LiteMonFault('WEB_ACTION_INVALID');
+        $expectedSeq = (int) lm_get(LiteStateStore::state(), 'control_seq', 0);
+        if ($action === 'start' && LiteRuntime::lockHeld()) throw new LiteMonFault('ALREADY_RUNNING');
+        // Check the local CLI before asking a running daemon to stop.
+        $health = LiteHealth::local($this->cfg, true, false);
+        if (!$health['ready_to_start']) throw new LiteMonFault((string)($health['blockers'][0] ?? 'NAS_PREFLIGHT_FAILED'));
+        $record = LiteStateStore::requestControl($action, $expectedSeq);
+        $id = (string) $record['id'];
+        $seq = (int) $record['seq'];
+        if (!LiteRuntime::lockHeld()) return $this->advance($id, $seq);
+        return self::status($id, $seq);
+    }
+
+    public function advance(string $id, int $seq): array {
+        $claim = LiteStateStore::claimControl($id, $seq);
+        if ($claim['claimed'] === true) {
+            // __FILE__ is the assembled single mon.php, never a fragment path.
+            $command = escapeshellarg($this->cfg->phpCli) . ' ' . escapeshellarg(__FILE__) . ' --run ' . escapeshellarg('--control-id='
+                . $id) . ' ' . escapeshellarg('--control-seq=' . (string) $seq) . ' >/dev/null 2>&1 &';
+            $failure = null;
+            try {
+                $output = [];
+                $code = 1;
+                @exec($command, $output, $code);
+                if ($code !== 0) $failure = 'WEB_PROCESS_LAUNCH_FAILED';
+            } catch (Throwable $error) {
+                $failure = 'WEB_PROCESS_LAUNCH_FAILED';
+            }
+            if ($failure !== null) LiteStateStore::failControl($id, $seq, $failure);
+        }
+        return self::status($id, $seq);
+    }
+
+    public static function status(string $id, int $seq): array {
+        $liveness = LiteStateStore::daemonLiveness();
+        $state = LiteStateStore::state();
+        $held = LiteRuntime::lockHeld();
+        $identity = lm_get($state, 'run_identity');
+        $record = lm_get($state, 'manual_control');
+        $response = [
+            'operation_id' => $id,
+            'operation_seq' => $seq,
+            'phase' => 'cancelled',
+            'message' => '이 요청은 취소되었거나 다른 요청으로 바뀌었습니다.',
+            'error' => 'CONTROL_REQUEST_CANCELLED',
+            'lock_held' => $held,
+            'daemon_identity' => $identity
+        ];
+        if ($id === '' || $seq < 1 || lm_get($record, 'id') !== $id || lm_get($record, 'seq') !== $seq || lm_get($state, 'control_seq') !== $seq) return $response;
+        $phase = (string) lm_get($record, 'phase', '');
+        if ($phase === 'failed') {
+            return self::result($response, 'failed', '요청을 완료하지 못했습니다.', (string) lm_get($record, 'error', 'CONTROL_REQUEST_FAILED'));
+        }
+        if (lm_get($record, 'source_sha256') !== MON_LITE_SOURCE_SHA256) {
+            return self::result($response, 'failed', '설치 파일이 바뀌었습니다. 새 요청으로 다시 시작해 주세요.', 'CONTROL_SOURCE_MISMATCH');
+        }
+        if ($phase === 'started') {
+            if (!$held) return self::result($response, 'failed', '시작한 데몬이 종료되었습니다.', 'DAEMON_EXITED');
+            $launch = lm_num(lm_get($record, 'launch_unix'));
+            $started = lm_num(lm_get($identity, 'started_unix'));
+            $matches = lm_get($identity, 'control_id') === $id && lm_get($identity, 'control_seq') === $seq && lm_get($identity, 'source_sha256') === MON_LITE_SOURCE_SHA256
+                && $launch !== null && $launch > 0 && $started !== null && $started >= $launch;
+            if (!$matches) return self::result($response, 'failed', '요청한 데몬의 실행 신원을 확인하지 못했습니다.', 'DAEMON_IDENTITY_MISMATCH');
+            if (lm_get($liveness, 'lock_held') !== true || lm_get($liveness, 'heartbeat_fresh') !== true || lm_get($liveness, 'installed_source_matches') !== true) {
+                return self::result($response, 'starting', '시작한 데몬의 응답을 확인하고 있습니다.', 'DAEMON_HEARTBEAT_STALE');
+            }
+            return self::result($response, 'confirmed', '시작 확인 완료');
+        }
+        $deadline = lm_num(lm_get($record, 'deadline_unix'));
+        if ($deadline === null || microtime(true) >= $deadline) {
+            return self::result($response, 'expired', '요청 대기 시간이 지났습니다. 상태를 확인한 뒤 다시 요청해 주세요.', 'CONTROL_REQUEST_EXPIRED');
+        }
+        if ($phase === 'waiting' || $phase === 'stopping') {
+            return $held ? self::result($response, 'stopping', '기존 데몬의 종료를 기다리고 있습니다.'): self::result($response, 'ready', '기존 데몬이 종료되었습니다. 시작을 이어갈 수 있습니다.');
+        }
+        if ($phase === 'launching') return self::result($response, 'starting', '새 데몬의 시작을 확인하고 있습니다.');
+        return self::result($response, 'failed', '요청 상태를 확인하지 못했습니다.', 'CONTROL_REQUEST_INVALID');
+    }
+
+    private static function result(array $response, string $phase, string $message, ?string $error = null): array {
+        $response['phase'] = $phase;
+        $response['message'] = $message;
+        $response['error'] = $error;
+        return $response;
+    }
+}
+
 final class LiteWebController {
 
     public static function run(): int {
-        $cfg = new LiteConfig();
+        header('Cache-Control: no-store, max-age=0');
         $view = (string)($_GET['view'] ?? '');
+        if ($view === 'control') {
+            try {
+                $control = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' ? self::command(): self::controlStatus();
+                return self::controlResponse($control);
+            } catch (Throwable $error) {
+                return self::controlError($error);
+            }
+        }
+        $cfg = new LiteConfig();
         if ($view === 'health') {
             header('Content-Type: application/json; charset=utf-8');
             echo lm_json(['ok' => true, 'health' => LiteHealth::local($cfg, true)]);
             return 0;
         }
+        $notice = '';
+        $ok = true;
+        $control = null;
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            try {
+                $control = self::command($cfg);
+                if (!empty ($control['operation_id'])) {
+                    header(
+                        'Location: ?operation_id=' . rawurlencode((string) $control['operation_id']) . '&operation_seq='
+                            . (int) $control['operation_seq'],
+                        true,
+                        303
+                    );
+                    return 0;
+                }
+                $notice = (string)($control['message'] ?? '');
+            } catch (Throwable $error) {
+                $ok = false;
+                $notice = self::errorMessage($error);
+            }
+        } elseif (!empty ($_GET['operation_id'])) {
+            $control = self::controlStatus();
+            $notice = (string)($control['message'] ?? '');
+        }
         $health = LiteHealth::local($cfg, false);
         $monitor = null;
         $state = LiteStateStore::defaultState();
-        $notice = '';
-        $ok = true;
         try {
             $monitor = new LiteMonitor($cfg);
             $state = $monitor->state();
         } catch (Throwable $error) {
             $ok = false;
-            $notice = $error instanceof LiteMonFault ? $error->faultCode : 'MON_INIT_FAILED';
+            $notice = self::errorMessage($error);
         }
-        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-            try {
-                $action = (string)($_POST['action'] ?? '');
-                if ($action === 'start') {
-                    $health = LiteHealth::local($cfg, true);
-                    if (!$health['ready_to_start']) throw new LiteMonFault((string)($health['blockers'][0] ?? 'NAS_PREFLIGHT_FAILED'));
-                    if ($monitor === null) $monitor = new LiteMonitor($cfg);
-                    self::startDaemon($cfg, $monitor);
-                    $notice = '시작 확인 완료';
-                } elseif ($action === 'stop' || $action === 'scan') {
-                    if ($monitor === null) throw new LiteMonFault('MON_RUNTIME_UNAVAILABLE');
-                    $monitor->requestAction($action);
-                    $notice = $action === 'stop' ? '중지 요청을 기록했습니다.' : '다음 주기에 정밀 스캔을 요청했습니다.';
-                } else {
-                    throw new LiteMonFault('WEB_ACTION_INVALID');
-                }
-            } catch (Throwable $error) {
-                $ok = false;
-                $notice = $error instanceof LiteMonFault ? $error->faultCode : 'WEB_ERROR';
-            }
-        }
-        if ($monitor !== null) $state = $monitor->state();
         $runtime = is_array(lm_get($health, 'runtime')) ? $health['runtime'] : ['path' => MON_LITE_RUNTIME, 'file_count' => 0, 'bytes' => 0];
         if ($view === 'status') return self::status($ok, $monitor, $state, $runtime, $health, $notice);
-        return self::render($cfg, $monitor, $state, $runtime, $health, $notice, $ok);
+        return self::render($cfg, $monitor, $state, $runtime, $health, $notice, $ok, $control);
     }
 
-    private static function startDaemon(LiteConfig $cfg, LiteMonitor $monitor): void {
-        if (LiteRuntime::lockHeld()) throw new LiteMonFault('ALREADY_RUNNING');
-        $launchAt = microtime(true);
-        $command = escapeshellarg($cfg->phpCli) . ' ' . escapeshellarg(__FILE__) . ' --run >/dev/null 2>&1 &';
-        @exec($command, $output, $code);
-        if ($code !== 0) throw new LiteMonFault('WEB_PROCESS_LAUNCH_FAILED');
-        for ($i = 0; $i < 40; $i++) {
-            usleep(200000);
-            clearstatcache();
-            $fresh = $monitor->state();
-            $identity = lm_get($fresh, 'run_identity');
-            if (lm_get($fresh, 'running') === true && LiteRuntime::lockHeld() && lm_get($identity, 'source_sha256') === MON_LITE_SOURCE_SHA256
-                && (float) lm_get($identity, 'started_unix', 0) >= $launchAt) return;
+    private static function command(?LiteConfig $cfg = null): array {
+        $action = (string)($_POST['action'] ?? '');
+        if ($action === 'stop' || $action === 'scan') {
+            LiteStateStore::requestAction($action);
+            if ($action === 'stop') {
+                $status = self::currentControlStatus();
+                $status['message'] = $status['phase'] === 'stopped' ? '중지 완료' : '중지 요청을 기록했습니다. 기존 작업의 안전한 종료를 확인하고 있습니다.';
+                return $status;
+            }
+            return ['phase' => 'requested', 'message' => '다음 주기에 정밀 스캔을 요청했습니다.'];
         }
-        throw new LiteMonFault('DAEMON_START_NOT_CONFIRMED');
+        $manual = new LiteManualControl($cfg ?? new LiteConfig());
+        if ($action === 'start' || $action === 'restart') return $manual->begin($action);
+        if ($action === 'continue') return $manual->advance((string)($_POST['operation_id'] ?? ''), (int)($_POST['operation_seq']
+            ?? 0));
+        throw new LiteMonFault('WEB_ACTION_INVALID');
+    }
+
+    private static function currentControlStatus(): array {
+        $state = LiteStateStore::state();
+        $held = LiteRuntime::lockHeld();
+        $phase = !$held ? 'stopped' : ($state->stop_requested ? 'stopping' : 'running');
+        return [
+            'phase' => $phase,
+            'message' => $phase === 'stopped' ? '중지 완료' : ($phase === 'stopping' ? '기존 데몬의 종료를 확인하고 있습니다.' : '데몬 실행 중'),
+            'lock_held' => $held,
+            'daemon_identity' => lm_get($state, 'run_identity')
+        ];
+    }
+
+    private static function controlStatus(): array {
+        $id = (string)($_GET['operation_id'] ?? '');
+        return $id === '' ? self::currentControlStatus(): LiteManualControl::status($id, (int)($_GET['operation_seq']
+            ?? 0));
+    }
+
+    private static function controlResponse(array $control): int {
+        header('Content-Type: application/json; charset=utf-8');
+        $ok = !in_array($control['phase'] ?? '', ['failed', 'expired', 'cancelled'], true);
+        echo lm_json(['ok' => $ok, 'control' => $control]);
+        return $ok ? 0 : 1;
+    }
+
+    private static function errorMessage(Throwable $error): string {
+        $code = $error instanceof LiteMonFault ? $error->faultCode : 'WEB_ERROR';
+        if ($code === 'ALREADY_RUNNING') return '이미 실행 중입니다. 다시 시작하려면 재시작 버튼을 눌러 주세요.';
+        if (in_array($code, ['CONTROL_CANCELLED', 'CONTROL_REQUEST_CANCELLED'], true)) return '더 최근의 요청으로 취소되었습니다.';
+        if (in_array($code, ['CONTROL_EXPIRED', 'CONTROL_REQUEST_EXPIRED'], true)) return '요청 확인 시간이 지났습니다. 현재 상태를 확인한 뒤 다시 요청해 주세요.';
+        return '요청을 완료하지 못했습니다: ' . $code;
+    }
+
+    private static function controlError(Throwable $error): int {
+        return self::controlResponse(
+            [
+                'phase' => 'failed',
+                'message' => self::errorMessage($error),
+                'error' => $error instanceof LiteMonFault ? $error->faultCode : 'WEB_ERROR'
+            ]
+        );
     }
 
     private static function status(bool $ok, ?LiteMonitor $monitor, stdClass $state, array $runtime, array $health, string $notice): int {
@@ -4446,7 +4695,8 @@ final class LiteWebController {
         array $runtime,
         array $health,
         string $notice,
-        bool $ok
+        bool $ok,
+        ?array $control = null
     ): int {
         header('Content-Type: text/html; charset=utf-8');
         $h = function ($s) {
@@ -4481,9 +4731,85 @@ final class LiteWebController {
             . $h($memText) . ' <br><b>참고자료 게시:</b> ' . ($state->publication_pending ? '재시도 대기' : '대기 없음') . ' / '
             . $h($state->last_publication_error) . ' <br><b>최종 결과 저장:</b> ' . $h($finalText) . ' <br><b>저장:</b> '
             . $h(lm_get($runtime, 'path', MON_LITE_RUNTIME)) . ' · ' . $h(lm_get($runtime, 'file_count', 0)) . ' files · '
-            . round((int) lm_get($runtime, 'bytes', 0) / 1048576, 2) . ' MiB</section><form method="post"><button name="action" value="start">시작</button><button name="action" value="stop">중지</button><button name="action" value="scan">정밀 스캔 요청</button></form><p class="'
+            . round((int) lm_get($runtime, 'bytes', 0) / 1048576, 2) . ' MiB</section><form id="mon-controls" method="post"><button name="action" value="start">시작</button><button name="action" value="restart">재시작</button><button name="action" value="stop">중지</button><button name="action" value="scan">정밀 스캔 요청</button></form><p id="control-progress" role="status" aria-live="polite" class="'
             . ($ok ? 'ok' : 'bad') . '">' . $h($notice) . '</p><section><b>운영 원칙</b><br>5분: mailbox 확인<br>30분: 경량 확인 · 미확인 재시도: 2분<br>정밀 스캔: 평일 16:40 KST · 증분 기본 / 7일마다 220봉 전체 재동기화<br>모든 부속파일: /web/mon_runtime 고정파일<br>운영 규격: '
             . $h(MON_LITE_POLICY) . '</section>';
+        if ($control && !empty ($control['operation_id'])) {
+            if (in_array($control['phase'] ?? '', ['ready', 'stopping', 'starting'], true)) echo '<form method="post"><input type="hidden" name="action" value="continue"><input type="hidden" name="operation_id" value="'
+                . $h($control['operation_id']) . '"><input type="hidden" name="operation_seq" value="' . (int) $control['operation_seq']
+                . '"><button>상태 확인 및 재시작 계속</button></form>';
+        }
+        echo <<<'MON_CONTROL_SCRIPT'
+<script>
+(() => {
+    const form = document.getElementById('mon-controls');
+    const progress = document.getElementById('control-progress');
+    if (!form || !progress || !window.fetch) return;
+    let generation = 0;
+    let busy = false;
+    const buttons = Array.from(form.querySelectorAll('button'));
+    const show = value => { progress.textContent = value; };
+    const enable = value => {
+        busy = !value;
+        buttons.forEach(button => { button.disabled = !value && button.value !== 'stop'; });
+    };
+    const endpoint = new URL(window.location.href);
+    endpoint.search = '?view=control';
+    const command = async data => {
+        const response = await fetch(endpoint.toString(), {
+            method: 'POST', credentials: 'same-origin', cache: 'no-store',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(data).toString()
+        });
+        return (await response.json()).control;
+    };
+    const poll = async (id, sequence, token) => {
+        const deadline = Date.now() + 180000;
+        while (token === generation && Date.now() < deadline) {
+            const url = new URL(endpoint.toString());
+            if (id) {
+                url.searchParams.set('operation_id', id);
+                url.searchParams.set('operation_seq', String(sequence));
+            }
+            let state = (await (await fetch(url.toString(), { credentials: 'same-origin', cache: 'no-store' })).json()).control;
+            if (token !== generation) return;
+            show(state.message || state.phase);
+            if (state.phase === 'ready' && id) {
+                state = await command({ action: 'continue', operation_id: id, operation_seq: String(sequence) });
+                if (token !== generation) return;
+                show(state.message || state.phase);
+            }
+            if (['confirmed', 'failed', 'expired', 'cancelled', 'stopped'].includes(state.phase)) return;
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+        if (token === generation) show('확인 시간이 지났습니다. 상태를 새로고침한 뒤 다시 요청해 주세요.');
+    };
+    form.addEventListener('submit', async event => {
+        const button = event.submitter || document.activeElement;
+        const action = button && button.value;
+        if (!action || (busy && action !== 'stop')) { event.preventDefault(); return; }
+        event.preventDefault();
+        const token = ++generation;
+        enable(false);
+        show(action === 'stop' ? '중지를 요청하고 있습니다.' : '요청을 확인하고 있습니다.');
+        try {
+            const state = await command({ action });
+            if (token !== generation) return;
+            show(state.message || state.phase);
+            if (state.operation_id && !['failed', 'cancelled', 'expired', 'confirmed'].includes(state.phase)) {
+                await poll(state.operation_id, state.operation_seq, token);
+            } else if (action === 'stop' && state.phase === 'stopping') {
+                await poll('', 0, token);
+            }
+        } catch (error) {
+            if (token === generation) show('응답을 확인하지 못했습니다. 상태를 새로고침해 실제 실행 상태를 확인해 주세요.');
+        } finally {
+            if (token === generation) enable(true);
+        }
+    });
+})();
+</script>
+MON_CONTROL_SCRIPT;
         return 0;
     }
 }
@@ -4491,14 +4817,20 @@ final class LiteWebController {
 function lm_web(): int {
     return LiteWebController::run();
 }
-// CLI and web entrypoint
+
 final class LiteEntrypoint {
 
     public static function run(array $arguments): int {
+        $controlId = null;
+        $controlSeq = null;
+        foreach ($arguments as $argument) {
+            if (strpos($argument, '--control-id=') === 0) $controlId = substr($argument, 13);
+            if (strpos($argument, '--control-seq=') === 0) $controlSeq = (int) substr($argument, 14);
+        }
         try {
             if (PHP_SAPI !== 'cli') return LiteWebController::run();
             if (in_array('--run', $arguments, true)) {
-                (new LiteMonitor())->loop();
+                (new LiteMonitor())->loop($controlId, $controlSeq);
             } else {
                 echo lm_json(
                     [
@@ -4512,6 +4844,12 @@ final class LiteEntrypoint {
             return 0;
         } catch (Throwable $error) {
             $code = $error instanceof LiteMonFault ? $error->faultCode : 'MON_LITE_FATAL';
+            if ($controlId !== null && $controlSeq !== null) {
+                try {
+                    LiteStateStore::failControl($controlId, $controlSeq, $code);
+                } catch (Throwable $ignored) {
+                }
+            }
             try {
                 LiteRuntime::log('fatal', ['code' => $code]);
             } catch (Throwable $ignored) {
