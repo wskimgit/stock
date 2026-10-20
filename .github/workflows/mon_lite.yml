@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r17'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r18'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -102,7 +102,7 @@ jobs:
       - name: Candidate identity and CLI preflight
         run: |
           set -eu
-          php -r 'require "mon.php"; $r=new ReflectionClass("LiteMonitor"); $m=$r->getMethod("symbolFromId"); $m->setAccessible(true); if (!$m->invoke(null,"KR|KOSPI|005930")) exit(1); if ($m->invoke(null,"KR|NASDAQ|005930")!==null) exit(2); if (!$m->invoke(null,"US|NASDAQ|BRK.B")) exit(3); if (LiteYahoo::ticker(["country"=>"US","symbol"=>"BRK.B","exchange"=>"NYSE"])!=="BRK-B") exit(4); echo "candidate identity PASS\n";'
+          php -r 'require "mon.php"; if (!LiteMarketData::symbolFromId("KR|KOSPI|005930")) exit(1); if (LiteMarketData::symbolFromId("KR|NASDAQ|005930")!==null) exit(2); if (!LiteMarketData::symbolFromId("US|NASDAQ|BRK.B")) exit(3); if (LiteYahoo::ticker(["country"=>"US","symbol"=>"BRK.B","exchange"=>"NYSE"])!=="BRK-B") exit(4); echo "candidate identity PASS\n";'
           php -r 'require "mon.php"; $c=new LiteConfig(); $c->githubToken="synthetic-ci-token"; $h=LiteHealth::local($c,true); if (!is_array($h["cli_probe"]) || !$h["cli_probe"]["checked"] || !$h["cli_probe"]["ok"]) {fwrite(STDERR,json_encode($h)); exit(1);} echo "CLI preflight PASS\n";'
           rm -rf mon_runtime
 
@@ -111,9 +111,17 @@ jobs:
           set -eu
           php -r 'require "mon.php"; $m=LiteResource::memoryInfo("MemTotal: 262144 kB\nMemFree: 12000 kB\nBuffers: 3000 kB\nCached: 18000 kB\nSReclaimable: 4000 kB\nShmem: 1000 kB\n"); if ($m["source"]!=="reclaimable_estimate" || $m["available_bytes"]!==36000*1024) {var_export($m); exit(1);} echo "legacy meminfo PASS\n";'
           php -r 'require "mon.php"; foreach ([[31,3],[26,2],[21,1],[19,0]] as $x) { $r=["memory_available_bytes"=>$x[0]*1048576]; if (LiteMonitor::lowMemoryBatch($r)!==$x[1]) exit(1);} echo "low-memory batch PASS\n";'
-          grep -F "const LOW_MEMORY_RETRY_SECONDS=120;" mon.php
-          grep -F "WATCHLIST_FALLBACK_UNAVAILABLE" mon.php
-          grep -F "full_resync_pending" mon.php
+          php <<'PHP'
+          <?php
+          require 'mon.php';
+          if(LitePolicy::LOW_MEMORY_RETRY_SECONDS!==120)throw new RuntimeException('retry pacing changed');
+          $http=new class {public function githubGet(string $path,bool $force=false):?array{return null;}};
+          $market=new LiteMarketData($http,new stdClass());
+          LiteRuntime::write('cache',(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>[],'symbols'=>new stdClass(),'benchmarks'=>new stdClass(),'full_resync_pending'=>true]);
+          if($market->cacheObj()->full_resync_pending!==true)throw new RuntimeException('durable weekly resync flag lost');
+          $watch=$market->loadRemoteWatchlist();if(count($watch)!==9)throw new RuntimeException('reference fallback watchlist unavailable');foreach($watch as $symbol)if(!LiteMarketData::symbolFromId($symbol['symbol_id']))throw new RuntimeException('fallback country/exchange identity invalid');
+          echo "retry pacing, durable resync flag and valid fallback watchlist PASS\n";
+          PHP
           rm -rf mon_runtime
 
       - name: PHP headroom and bounded cycle memory
@@ -126,11 +134,44 @@ jobs:
           cat >"$test_dir/memory-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
           require getenv('MON_TEST_SOURCE');
           function mem_assert(bool $ok,string $message): void {if(!$ok)throw new RuntimeException($message);}
-          function mem_prop($object,string $name,$value=null,bool $write=false) {$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($write){$p->setValue($object,$value);return null;}return $p->getValue($object);}
-          function mem_call($object,string $name,array $args=[]) {$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
-          function mem_end(LiteMonitor $monitor): void {mem_call($monitor,method_exists($monitor,'endTurn')?'endTurn':'releaseMemory');}
+          function mem_prop($object,string $name,$value=null,bool $write=false){return fx_prop($object,$name,$value,$write);}
+          function mem_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
+          function mem_end(LiteMonitor $monitor): void {fx_services($monitor)->turn->end();}
           function mem_seed(LiteHttp $http,LiteYahoo $yahoo,int $cycle): void {
               $known=[];foreach(['mon_data.json'=>3145728,'mon_chatgpt_response.json'=>2097152,'mon_result.md'=>1048576,'mon_chatgpt_handoff.json'=>4096] as $name=>$bytes)$known[$name]=['content'=>str_repeat(chr(65+$cycle%20),$bytes),'sha'=>sha1($name.$cycle),'etag'=>'ci-'.$name.'-'.$cycle,'commit_sha'=>null];
               mem_prop($http,'githubKnown',$known,true);mem_prop($http,'githubTurn',$known,true);
@@ -234,13 +275,9 @@ jobs:
           php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","삼성전자","M0"],["KR","KOSPI","105560","KB금융","M1"],["KR","KOSPI","000660","SK하이닉스","W"],["US","NASDAQ","AAPL","Apple","M1"],["US","NASDAQ","NVDA","NVIDIA","M2"],["US","NYSE","JPM","JPMorgan","M0"],["JP","TSE","7203","Toyota","M1"],["JP","TSE","6758","Sony","M0"],["JP","TSE","8306","MUFG","W"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[3],"ms7"=>["code"=>$x[4]],"reason"=>"ChatGPT independent reason", "risk_note"=>"Independent risk"];} $out=LiteMonitor::normalizeChatgptDecision($sel); if(count($out)!==9) exit(1); if($out[4]["symbol_id"]!=="US|NASDAQ|NVDA"||$out[4]["name"]!=="NVIDIA"||$out[4]["ms7"]["code"]!=="M2"||$out[4]["ms7"]["confidence"]!=="CHATGPT_FINAL") exit(2); echo "ChatGPT name+code+MS7 preservation PASS\n";'
           php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930","Samsung"],["KR","KOSPI","105560","KB"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"name"=>$x[3],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} if(count(LiteMonitor::normalizeChatgptDecision($sel))!==2||LiteMonitor::normalizeChatgptDecision([])!==[]) exit(1); echo "partial and zero selections accepted without filler PASS\n";'
           php -r 'require "mon.php"; $sel=[]; foreach([["KR","KOSPI","005930"],["KR","KOSPI","105560"],["KR","KOSPI","000660"],["US","NASDAQ","AAPL"],["US","NASDAQ","NVDA"],["US","NYSE","JPM"],["JP","TSE","7203"],["JP","TSE","6758"],["JP","TSE","8306"]] as $x){$sel[]=["symbol_id"=>$x[0]."|".$x[1]."|".$x[2],"ms7"=>["code"=>"W"],"reason"=>"Independent reason here","risk_note"=>"Risk note"];} $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_NAME_REQUIRED";} if(!$ok) exit(1); echo "decision name required PASS\n";'
-          grep -F "'authority'=>'chatgpt_final'" mon.php
-          grep -F "'analysis_reference'" mon.php
-          grep -F "DECISION_AUTHORITY_REQUIRED" mon.php
-          grep -F "DECISION_NAME_REQUIRED" mon.php
           php -r 'require "mon.php"; $sel=[]; foreach([["005930","Samsung"],["000660","Hynix"],["105560","KB"],["035420","Naver"]] as $x)$sel[]=["symbol_id"=>"KR|KOSPI|".$x[0],"name"=>$x[1],"ms7"=>["code"=>"W"],"reason"=>"Independent current reason","risk_note"=>"Risk note"]; $ok=false; try{LiteMonitor::normalizeChatgptDecision($sel);}catch(LiteMonFault $e){$ok=$e->faultCode==="DECISION_LIMIT_INVALID";} if(!$ok) exit(1); echo "max-three per country PASS\n";'
-          grep -F "\$x['name'].' ('.\$x['symbol_id'].') · MS7" mon.php
           rm -rf mon_runtime
+
       - name: Final-decision persistence failure injection
         run: |
           set -eu
@@ -251,9 +288,42 @@ jobs:
           MON_TEST_SOURCE="$test_dir/mon.php" php <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
           require getenv('MON_TEST_SOURCE');
           function ci_assert(bool $ok,string $message): void {if(!$ok)throw new RuntimeException($message);}
-          function ci_call(LiteMonitor $monitor,string $method,array $args=[]) {$r=new ReflectionMethod(LiteMonitor::class,$method);$r->setAccessible(true);return $r->invokeArgs($monitor,$args);}
+          function ci_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           final class CiGithub {
               public $files=[],$puts=[],$gets=[],$failBefore=[],$failAfter=[],$failRead=[],$badRead=[];
               public function seed(string $path,string $content): void {$this->files[$path]=['content'=>$content,'sha'=>lm_git_blob_sha($content),'commit_sha'=>null];}
@@ -308,8 +378,11 @@ jobs:
               ci_assert(lm_get(lm_get($data,'chatgpt_final'),'request_id')===$rid,'data final request identity');
               ci_assert(lm_get($response,'pair_readback_verified')===true,'receipt pair verified');
               foreach(['mon_result.md','mon_data.json','mon_chatgpt_response.json'] as $path){$seen=false;foreach($http->gets as $get)if($get[0]===$path&&$get[1])$seen=true;ci_assert($seen,'forced readback required: '.$path);}
+              ci_assert(lm_get(lm_get($data,'chatgpt_final'),'authority')==='chatgpt_final','persisted data carries final authority');
+              foreach((array)lm_get($result,'selected',[]) as $selected){$name=(string)lm_get($selected,'name');$sid=(string)lm_get($selected,'symbol_id');$ms=lm_get($selected,'ms7');$code=(string)lm_get($ms,'code');$label=(string)lm_get($ms,'label');ci_assert(strpos($http->files['mon_result.md']['content'],$name.' ('.$sid.') · MS7 '.$code.' '.$label)!==false,'actual saved Markdown preserves name, country/exchange ID and labeled MS7');}
               $conclusion=(string)lm_get($result,'conclusion','');ci_assert(strlen($conclusion)>=8&&strpos($http->files['mon_result.md']['content'],$conclusion)!==false,'conclusion retained in Markdown');
           }
+          $http=ci_reset();$http->seed('mon_chatgpt_handoff.json',lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'decision','request_id'=>'ci-reference-is-not-final','authority'=>'php_reference','independent_analysis'=>false]));LiteRuntime::write('request',(object)['request_id'=>'ci-reference-is-not-final','stage'=>'details']);$fault=null;try{ci_call(ci_monitor($http),'processMailbox');}catch(LiteMonFault $error){$fault=$error->faultCode;}ci_assert($fault==='DECISION_AUTHORITY_REQUIRED'&&$http->puts===[],'reference authority cannot enter final persistence');echo "PASS reference authority rejected before final writes\n";
           foreach(['mon_result.md','mon_data.json','mon_chatgpt_response.json'] as $failPath){
               foreach(['failBefore','failAfter','failRead','badRead'] as $failure){
                   $http=ci_reset();$http->{$failure}[$failPath]=1;$monitor=ci_monitor($http);$thrown=false;
@@ -407,13 +480,16 @@ jobs:
       - name: Low-load runtime invariants
         run: |
           set -eu
-          grep -F "const MAX_FILES = 11;" mon.php
-          grep -F "const MAX_TOTAL = 67108864;" mon.php
-          grep -F "const MAX_FILE = 16777216;" mon.php
-          grep -F "const LIGHT_SECONDS=1800;" mon.php
-          grep -F "const MAILBOX_SECONDS=300;" mon.php
-          grep -F "const FULL_RESYNC_SECONDS=604800;" mon.php
-          grep -F "no cron / no orders" mon.php
+          php <<'PHP'
+          <?php
+          require 'mon.php';
+          foreach(['MAX_FILES'=>11,'MAX_TOTAL'=>67108864,'MAX_FILE'=>16777216] as $name=>$value)if(constant('LiteRuntime::'.$name)!==$value)throw new RuntimeException('runtime bound '.$name);
+          foreach(['LIGHT_SECONDS'=>1800,'MAILBOX_SECONDS'=>300,'FULL_RESYNC_SECONDS'=>604800] as $name=>$value)if(constant('LitePolicy::'.$name)!==$value||constant('LiteMonitor::'.$name)!==$value)throw new RuntimeException('schedule bound '.$name);
+          $before=lm_json(LiteRuntime::read('state'));ob_start();$code=LiteEntrypoint::run([]);$view=lm_decode(ob_get_clean());
+          if($code!==0||lm_get($view,'build')!==MON_LITE_BUILD||LiteRuntime::lockHeld()||lm_json(LiteRuntime::read('state'))!==$before)throw new RuntimeException('informational CLI must not start or change daemon');
+          echo "runtime and schedule bounds; informational CLI does not start daemon PASS\n";
+          PHP
+          rm -rf mon_runtime
 
       - name: CPU accounting and bounded continuation
         run: |
@@ -425,6 +501,39 @@ jobs:
           cat >"$test_dir/cpu-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
 
           /* Offline fixture. Pure tests require exact source bytes; full-scan tests replace
            * only resource-sampling call sites in a disposable copy, never production code. */
@@ -435,8 +544,8 @@ jobs:
           if(!is_string($cpuOriginal))throw new RuntimeException('Cannot read source under test');
           $cpuIdentity=['source_sha256'=>hash('sha256',$cpuOriginal),'fixture_sha256'=>hash_file('sha256',__FILE__),'mode'=>$cpuMode];
           if(in_array($cpuMode,['scan','baseline'],true)){
-              $cpuNeedle='LiteResource::sample()';$cpuReplacement='CpuFixtureResource::sample()';
-              $cpuInstrumented=str_replace($cpuNeedle,$cpuReplacement,$cpuOriginal,$cpuReplacements);
+              $cpuNeedle='/\bLiteResource\s*::\s*sample\s*\(\s*\)/';$cpuReplacement='CpuFixtureResource::sample()';
+              $cpuInstrumented=preg_replace($cpuNeedle,$cpuReplacement,$cpuOriginal,-1,$cpuReplacements);
               if($cpuReplacements<3)throw new RuntimeException('Expected resource call sites are unavailable');
               $cpuScratch=__DIR__.'/scratchreports/cpu-'.getmypid().'-'.bin2hex(random_bytes(6));
               if(!is_dir($cpuScratch)&&!mkdir($cpuScratch,0700,true))throw new RuntimeException('Cannot create isolated fixture directory');
@@ -453,11 +562,8 @@ jobs:
               if(!$pass)throw new RuntimeException('CPU fixture failed: '.$case);
           }
           function cpu_close($got,float $expected,string $case): void {cpu_check(is_numeric($got)&&abs((float)$got-$expected)<0.000001,$case);}
-          function cpu_prop($object,string $name,$value=null,bool $write=false) {
-              $p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);
-              if($write){$p->setValue($object,$value);return null;}return $p->getValue($object);
-          }
-          function cpu_call($object,string $name,array $args=[]) {$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          function cpu_prop($object,string $name,$value=null,bool $write=false){return fx_prop($object,$name,$value,$write);}
+          function cpu_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           function cpu_report(array $extra=[]): void {
               global $cpuCases,$cpuIdentity;
               echo lm_json(array_merge($cpuIdentity,['status'=>'PASS','case_count'=>count($cpuCases),'cases'=>$cpuCases],$extra))."\n";
@@ -622,13 +728,46 @@ jobs:
           cat >"$test_dir/benchmark-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
-          $source=getenv('MON_TEST_SOURCE');$sourceSha=hash_file('sha256',$source);$sourceBytes=file_get_contents($source);$instrumentedCount=substr_count($sourceBytes,'LiteResource::sample()');
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
+          $source=getenv('MON_TEST_SOURCE');$sourceSha=hash_file('sha256',$source);$sourceBytes=file_get_contents($source);$samplePattern='/\bLiteResource\s*::\s*sample\s*\(\s*\)/';$instrumentedCount=preg_match_all($samplePattern,$sourceBytes);
           // Disposable source copy: deterministic scheduling input and a non-mutating quality-call counter.
           final class BenchFixtureResource {public static $hard=false,$soft=false;public static function sample(): array {return ['observed_at'=>gmdate('Y-m-d\TH:i:s\Z'),'process_sapi'=>'cli','cores'=>1,'load1'=>self::$hard?4.0:(self::$soft?2.0:0.1),'cpu_busy_pct'=>self::$hard?99.0:10.0,'cpu_sample_age_seconds'=>0.1,'cpu_mode'=>self::$hard?'defer':(self::$soft?'limited':'normal'),'cpu_reason'=>self::$hard?'CPU_HARD_LOAD':(self::$soft?'CPU_SOFT_LOAD':null),'cpu_batch_limit'=>self::$soft?1:null,'memory_available_bytes'=>128*1048576,'memory_floor_bytes'=>32*1048576,'php_memory_headroom_bytes'=>64*1048576,'php_memory_limit_bytes'=>96*1048576,'effective_memory_available_bytes'=>64*1048576,'memory_mode'=>'normal','heavy_allowed'=>!self::$hard&&!self::$soft,'reason'=>self::$hard||self::$soft?'load':null];}}
-          $instrumented=str_replace('LiteResource::sample()','BenchFixtureResource::sample()',$sourceBytes);$qualityNeedle='public static function compare(?array $old,array $new): array {';$instrumented=str_replace($qualityNeedle,$qualityNeedle."if(\$old&&isset(\$old[0][4])&&\$old[0][4]>=4000&&\$old[0][4]<5000)\$GLOBALS['bench_stock_quality_calls']=(\$GLOBALS['bench_stock_quality_calls']??0)+1;",$instrumented,$qualityCounterSites);if($qualityCounterSites!==1)throw new RuntimeException('Quality counter instrumentation must target exactly one method entry');$instrumentedPath=dirname($source).'/benchmark_instrumented.php';file_put_contents($instrumentedPath,$instrumented);require $instrumentedPath;
+          $instrumented=preg_replace($samplePattern,'BenchFixtureResource::sample()',$sourceBytes);$qualityNeedle='/public\s+static\s+function\s+compare\s*\(\s*\?array\s+\$old\s*,\s*array\s+\$new\s*\)\s*:\s*array\s*\{/';$instrumented=preg_replace_callback($qualityNeedle,static function(array $match):string{return $match[0]."if(\$old&&isset(\$old[0][4])&&\$old[0][4]>=4000&&\$old[0][4]<5000)\$GLOBALS['bench_stock_quality_calls']=(\$GLOBALS['bench_stock_quality_calls']??0)+1;";},$instrumented,-1,$qualityCounterSites);if($qualityCounterSites!==1)throw new RuntimeException('Quality counter instrumentation must target exactly one method entry');$instrumentedPath=dirname($source).'/benchmark_instrumented.php';file_put_contents($instrumentedPath,$instrumented);require $instrumentedPath;
           function bench_assert(bool $value,string $message): void {if(!$value)throw new RuntimeException($message);}
-          function bench_prop($object,string $name,$value=null,bool $set=false){$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($set){$p->setValue($object,$value);return null;}return $p->getValue($object);}
-          function bench_call($object,string $name,array $args=[]){$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          function bench_prop($object,string $name,$value=null,bool $write=false){return fx_prop($object,$name,$value,$write);}
+          function bench_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           final class BenchFixtureGithub {public $watch=[],$files=[],$puts=[],$raceData=null,$dataReads=0;public function githubGet(string $path,bool $force=false): ?array {if($path==='mon_data.json'&&++$this->dataReads===2&&$this->raceData!==null)$this->files[$path]=$this->raceData;if(isset($this->files[$path]))return $this->files[$path];if($path!=='mon_data.json')return null;$bytes=lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'watchlist'=>['symbols'=>$this->watch]]);return ['content'=>$bytes,'sha'=>lm_git_blob_sha($bytes),'commit_sha'=>null];}public function githubPut(string $path,string $content,string $message,?string $oldSha=null): array {$this->puts[]=$path;$this->files[$path]=['content'=>$content,'sha'=>lm_git_blob_sha($content),'commit_sha'=>sha1('ci-'.$path)];return ['blob_sha'=>$this->files[$path]['sha'],'commit_sha'=>$this->files[$path]['commit_sha'],'unchanged'=>false];}public function clearRequestCache(): void {}public function resetStats(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}}
           final class BenchFixtureTransport {
               public $mode='proxy',$calls=[],$advanceBenchmark=false,$advanceStock=false,$stockFail=false,$stockCorrection=1.0;
@@ -688,9 +827,42 @@ jobs:
           cat >"$test_dir/status-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
           require getenv('MON_TEST_SOURCE');
           function status_assert(bool $value,string $message): void {if(!$value)throw new RuntimeException($message);}
-          function status_call($object,string $name,array $args=[]){$method=new ReflectionMethod(get_class($object),$name);$method->setAccessible(true);return $method->invokeArgs($object,$args);}
+          function status_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           foreach(LiteRuntime::FILES as $key){$p=LiteRuntime::path($key.'.php');if(is_file($p))unlink($p);}
           $sourceSha=hash_file('sha256',getenv('MON_TEST_SOURCE'));$monitor=new LiteMonitor();$identity=LiteMonitor::installedIdentity();status_assert($identity['source_sha256']===$sourceSha&&$identity['build']===MON_LITE_BUILD,'installed identity reports exact loaded source');
           $old=LiteMonitor::defaultState();$old->build='MON-LITE-PREVIOUS-DAEMON';$old->running=true;$old->phase='ERROR';$old->heartbeat_at=lm_iso(time()-7200);$old->last_error='OLD_RESOURCE_FAILURE';$old->run_identity=(object)['build'=>$old->build,'source_sha256'=>str_repeat('a',64),'pid'=>12345,'started_at'=>lm_iso(time()-7200),'sapi'=>'cli'];LiteRuntime::write('state',$old);
@@ -716,6 +888,39 @@ jobs:
           cat >"$test_dir/envelope-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
 
           /* Exact-source, offline provider-response tests. No production source rewriting. */
           $envelopeSource=getenv('MON_TEST_SOURCE');
@@ -723,7 +928,7 @@ jobs:
           require $envelopeSource;
           $envelopeCases=[];
           function env_check(bool $pass,string $case): void {global $envelopeCases;$envelopeCases[]=['case'=>$case,'status'=>$pass?'PASS':'FAIL'];if(!$pass)throw new RuntimeException('Envelope fixture failed: '.$case);}
-          function env_prop($object,string $name,$value): void {$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);$p->setValue($object,$value);}
+          function env_prop($object,string $name,$value): void {fx_prop($object,$name,$value,true);}
           function env_stamp(string $date,string $clock): int {return (new DateTimeImmutable($date.' '.$clock,new DateTimeZone('America/New_York')))->getTimestamp();}
           function env_chart(array $timestamps,array $quote,string $currency='USD'): string {
               $start=env_stamp('2026-10-16','09:30:00');
@@ -829,14 +1034,47 @@ jobs:
           cat >"$test_dir/naver-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
           /* Exact-source offline provider tests. Synthetic CI data; optional recorded responses. */
           $naverSource=getenv('MON_TEST_SOURCE');
           if(!is_string($naverSource)||!is_file($naverSource))throw new RuntimeException('MON_TEST_SOURCE required');
           require $naverSource;
           $naverCases=[];$naverScenarios=[];
           function nav_check(bool $ok,string $name): void {global $naverCases;$naverCases[]=['case'=>$name,'status'=>$ok?'PASS':'FAIL'];if(!$ok)throw new RuntimeException('NAVER fixture failed: '.$name);}
-          function nav_prop($object,string $name,$value=null,bool $set=false){$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($set){$p->setValue($object,$value);return null;}return $p->getValue($object);}
-          function nav_call($object,string $name,array $args=[]){$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          function nav_prop($object,string $name,$value=null,bool $write=false){return fx_prop($object,$name,$value,$write);}
+          function nav_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           function nav_rows(int $count=220): array {$rows=[];$date=new DateTimeImmutable('2026-10-19',new DateTimeZone('Asia/Seoul'));while(count($rows)<$count){if((int)$date->format('N')<=5){$n=$count-count($rows);$close=5000.0+$n;$rows[]=[$date->format('Y-m-d'),$close-1,$close+2,$close-2,$close,100000.0+$n];}$date=$date->modify('-1 day');}return array_reverse($rows);}
           function nav_xml(array $rows,string $symbol='KOSPI',string $timeframe='day'): string {$body='<?xml version="1.0"?><protocol><chartdata symbol="'.$symbol.'" timeframe="'.$timeframe.'" count="'.count($rows).'">';foreach($rows as $row){$row[0]=str_replace('-','',(string)$row[0]);$body.='<item data="'.implode('|',$row).'" />';}return $body.'</chartdata></protocol>';}
           function nav_chart(array $rows): string {$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];$timestamps=[];foreach($rows as $row){$timestamps[]=(new DateTimeImmutable($row[0].' 09:00:00',new DateTimeZone('Asia/Seoul')))->getTimestamp();foreach(['open','high','low','close','volume'] as $i=>$key)$q[$key][]=$row[$i+1];}return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'KRW','exchangeTimezoneName'=>'Asia/Seoul'],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$q]]]],'error'=>null]]);}
@@ -855,7 +1093,7 @@ jobs:
           $futureDate=(new DateTimeImmutable('tomorrow',new DateTimeZone('Asia/Seoul')))->format('Y-m-d');$future=$rows;$future[]=[$futureDate,6000.0,6002.0,5999.0,6001.0,0.0];[$partial,$partialHttp]=nav_provider(nav_xml($future));nav_check($partial->naverBenchmark('KR','KOSPI',220)['rows']===$rows,'future Korea session is excluded without inventing a completed bar');
 
           function nav_cache(array $rows): stdClass {$symbol=['symbol_id'=>'KR|KOSPI|005930','country'=>'KR','exchange'=>'KOSPI','symbol'=>'005930','name'=>'Offline Samsung','currency'=>'KRW'];return(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>[$symbol],'symbols'=>(object)[$symbol['symbol_id']=>(object)['status'=>'pending','symbol'=>(object)$symbol,'bars'=>$rows]],'benchmarks'=>(object)['KR-KOSPI'=>array_slice($rows,0,-1)],'benchmark_meta'=>(object)['KR-KOSPI'=>(object)['source_ticker'=>'^KS11','source_provider'=>'YAHOO','provider_symbol'=>'^KS11','status'=>'ok','last_good_at'=>lm_iso(),'last_date'=>'2026-10-16','map_fingerprint'=>'legacy-yahoo-fingerprint']]];}
-          function nav_load($monitor,stdClass $cache,bool $retryOnly=false): array {$stats=['benchmark_downloads'=>0,'benchmark_cache_hits'=>0,'incremental_downloads'=>0,'full_downloads'=>0];$method=new ReflectionMethod(LiteMonitor::class,'loadBenchmark');$method->setAccessible(true);$args=[$cache,'KR-KOSPI',false,$retryOnly,&$stats];$result=$method->invokeArgs($monitor,$args);return [$result,$stats];}
+          function nav_load($monitor,stdClass $cache,bool $retryOnly=false): array {$stats=['benchmark_downloads'=>0,'benchmark_cache_hits'=>0,'incremental_downloads'=>0,'full_downloads'=>0];$method=new ReflectionMethod(LiteMarketData::class,'loadBenchmark');$method->setAccessible(true);$args=[$cache,'KR-KOSPI',false,$retryOnly,&$stats];$result=$method->invokeArgs(fx_services($monitor)->market,$args);return [$result,$stats];}
           $badYahoo=$rows;$badYahoo[count($badYahoo)-1]=['2026-10-19',null,null,null,null,null];[$provider,$http]=nav_provider($xml,nav_chart($badYahoo));$monitor=new LiteMonitor();nav_prop($monitor,'yahoo',$provider,true);$cache=nav_cache($rows);[$loaded,$stats]=nav_load($monitor,$cache);$meta=$cache->benchmark_meta->{'KR-KOSPI'};
           nav_check($loaded['rows']===$rows&&count($loaded['rows'])===220,'fallback replaces the entire benchmark series with native same-index rows');
           nav_check($meta->source_ticker==='^KS11'&&$meta->source_provider==='NAVER'&&$meta->provider_symbol==='KOSPI'&&$meta->currency==='KRW'&&$meta->coverage_status==='complete'&&$meta->required_date==='2026-10-19','saved metadata ties provider identity to completed required-date coverage');
@@ -881,10 +1119,43 @@ jobs:
           cat >"$test_dir/benchmark-gap-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
           /* Exact source and exact private loader, with an offline provider honoring period1. */
           $source=getenv('MON_TEST_SOURCE');require $source;
           function gap_assert(bool $ok,string $name): void {if(!$ok)throw new RuntimeException($name);}
-          function gap_prop($o,string $name,$value): void {$p=new ReflectionProperty(get_class($o),$name);$p->setAccessible(true);$p->setValue($o,$value);}
+          function gap_prop($object,string $name,$value): void {fx_prop($object,$name,$value,true);}
           final class BenchmarkGapTransport {
               public $rows=[],$calls=[];
               public function get(string $url,array $headers=[],int $timeout=8): string {
@@ -895,7 +1166,7 @@ jobs:
           }
           $rows=[];$day=new DateTimeImmutable('2026-10-19',new DateTimeZone('Asia/Tokyo'));while(count($rows)<220){if((int)$day->format('N')<=5){$close=60000.0+220-count($rows);$rows[]=[$day->format('Y-m-d'),$close-1,$close+2,$close-2,$close,100000.0];}$day=$day->modify('-1 day');}$rows=array_reverse($rows);$hole=$rows[200][0];$last=$rows[219][0];gap_assert(strtotime($hole)<strtotime($last)-21*86400,'fixture hole is outside 21 calendar day overlap but inside last21 trading dates');
           $cached=array_values(array_filter($rows,static function($row)use($hole){return $row[0]!==$hole;}));$map=LiteSwing::benchmarkMap($cached);$symbol=['symbol_id'=>'JP|TSE|7203','symbol'=>'7203','country'=>'JP','exchange'=>'TSE','currency'=>'JPY','name'=>'Offline Toyota'];$cache=(object)['contract'=>'MON-LITE-CACHE-1.2','watchlist'=>[$symbol],'symbols'=>(object)[$symbol['symbol_id']=>(object)['status'=>'pending','bars'=>$rows]],'benchmarks'=>(object)['JP'=>$cached],'benchmark_meta'=>(object)['JP'=>(object)['source_ticker'=>'^N225','source_provider'=>'YAHOO','provider_symbol'=>'^N225','coverage_version'=>LiteMonitor::BENCHMARK_COVERAGE_VERSION,'status'=>'ok','checked_at'=>lm_iso(),'last_good_at'=>lm_iso(),'map_fingerprint'=>lm_hash(['^N225','YAHOO','^N225',$map])]]];
-          $http=new BenchmarkGapTransport();$http->rows=$rows;$provider=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();gap_prop($provider,'http',$http);$provider->beginTurn();$monitor=new LiteMonitor();gap_prop($monitor,'yahoo',$provider);$stats=['benchmark_downloads'=>0,'benchmark_cache_hits'=>0,'incremental_downloads'=>0,'full_downloads'=>0];$m=new ReflectionMethod(LiteMonitor::class,'loadBenchmark');$m->setAccessible(true);$args=[$cache,'JP',false,true,&$stats];$result=$m->invokeArgs($monitor,$args);
+          $http=new BenchmarkGapTransport();$http->rows=$rows;$provider=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();gap_prop($provider,'http',$http);$provider->beginTurn();$monitor=new LiteMonitor();gap_prop($monitor,'yahoo',$provider);$stats=['benchmark_downloads'=>0,'benchmark_cache_hits'=>0,'incremental_downloads'=>0,'full_downloads'=>0];$m=new ReflectionMethod(LiteMarketData::class,'loadBenchmark');$m->setAccessible(true);$args=[$cache,'JP',false,true,&$stats];$result=$m->invokeArgs(fx_services($monitor)->market,$args);
           gap_assert(count($http->calls)===1&&$http->calls[0]['period1']<strtotime($hole),'known required date hole triggers one common full-range fetch');gap_assert(count($result['rows'])===220&&isset($result['map'][$hole])&&$result['source_ticker']==='^N225'&&$result['source_provider']==='YAHOO','full primary-source history fills the required hole without provider switching');gap_assert($stats['benchmark_downloads']===1&&$stats['benchmark_cache_hits']===0&&$cache->benchmark_meta->JP->coverage_status==='complete','hole repair is one group refresh with truthful complete coverage');
           echo lm_json(['scenario'=>'exact_source_required_date_outside_incremental_overlap','status'=>'PASS','source_sha256'=>hash_file('sha256',$source),'fixture_sha256'=>hash_file('sha256',__FILE__),'case_count'=>4,'hole_date'=>$hole,'latest_date'=>$last,'calls'=>$http->calls,'rows'=>count($result['rows']),'source_provider'=>$result['source_provider'],'stats'=>$stats])."\n";
           PHP
@@ -911,6 +1182,39 @@ jobs:
           cat >"$test_dir/kr-benchmark-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
           // Production scan/parser/calculation code is retained. Only resource sampling call sites
           // receive deterministic scheduling input, and the Yahoo transport is an offline fixture.
           $source=getenv('MON_TEST_SOURCE');if(!$source||!is_file($source))throw new RuntimeException('MON_TEST_SOURCE required');
@@ -920,11 +1224,11 @@ jobs:
               public static $limited=false;
               public static function sample(): array {return ['observed_at'=>gmdate('Y-m-d\TH:i:s\Z'),'process_sapi'=>'cli','cores'=>1,'load1'=>self::$limited?2.0:0.1,'cpu_busy_pct'=>10.0,'cpu_sample_age_seconds'=>0.1,'cpu_mode'=>self::$limited?'limited':'normal','cpu_reason'=>self::$limited?'CPU_SOFT_LOAD':null,'cpu_batch_limit'=>self::$limited?1:null,'memory_available_bytes'=>128*1048576,'memory_floor_bytes'=>32*1048576,'php_memory_headroom_bytes'=>64*1048576,'php_memory_limit_bytes'=>96*1048576,'effective_memory_available_bytes'=>64*1048576,'memory_mode'=>'normal','heavy_allowed'=>!self::$limited,'reason'=>self::$limited?'load':null];}
           }
-          $callSites=substr_count($sourceBytes,'LiteResource::sample()');if($callSites<1)throw new RuntimeException('resource call site anchor missing');
-          $instrumented=str_replace('LiteResource::sample()','KrFixtureResource::sample()',$sourceBytes);$runMode=getenv('MON_KR_ACTUAL_SHADOW')==='1'?'actual':(getenv('MON_KR_RECORDED_DIR')?'recorded':'ci');$runtimeDir=$outDir.'/runtime-'.$runMode;if(!is_dir($runtimeDir))mkdir($runtimeDir,0700,true);$instrumentedPath=$runtimeDir.'/instrumented.php';file_put_contents($instrumentedPath,$instrumented);require $instrumentedPath;
+          $samplePattern='/\bLiteResource\s*::\s*sample\s*\(\s*\)/';$callSites=preg_match_all($samplePattern,$sourceBytes);if($callSites<1)throw new RuntimeException('resource call site anchor missing');
+          $instrumented=preg_replace($samplePattern,'KrFixtureResource::sample()',$sourceBytes);$runMode=getenv('MON_KR_ACTUAL_SHADOW')==='1'?'actual':(getenv('MON_KR_RECORDED_DIR')?'recorded':'ci');$runtimeDir=$outDir.'/runtime-'.$runMode;if(!is_dir($runtimeDir))mkdir($runtimeDir,0700,true);$instrumentedPath=$runtimeDir.'/instrumented.php';file_put_contents($instrumentedPath,$instrumented);require $instrumentedPath;
           function kr_assert(bool $ok,string $message): void {if(!$ok){global $sourceSha,$instrumented,$outDir,$results;file_put_contents($outDir.'/failure-report.json',json_encode(['source_sha256'=>$sourceSha,'instrumented_sha256'=>hash('sha256',$instrumented),'failed_assertion'=>$message,'scenarios'=>$results],JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE)."\n");throw new RuntimeException($message);}}
-          function kr_prop($object,string $name,$value=null,bool $set=false){$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($set){$p->setValue($object,$value);return null;}return $p->getValue($object);}
-          function kr_call($object,string $name,array $args=[]){$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          function kr_prop($object,string $name,$value=null,bool $write=false){return fx_prop($object,$name,$value,$write);}
+          function kr_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           function kr_clean(): void {foreach(LiteRuntime::FILES as $key){$p=LiteRuntime::path($key.'.php');if(is_file($p))unlink($p);}}
           // Authentic final 21 raw rows captured by read-only provider probes on 2026-10-20.
           // Earlier 199 weekdays are synthetic history for deterministic 220-bar calculations.
@@ -1096,9 +1400,27 @@ jobs:
 
           namespace {
               $quietSource=getenv('MON_TEST_SOURCE');if(!is_string($quietSource)||!is_file($quietSource))throw new RuntimeException('MON_TEST_SOURCE required');
-              $quietOriginal=file_get_contents($quietSource);$quietStart=strpos($quietOriginal,'final class LiteResource {');$quietEnd=strpos($quietOriginal,'final class LiteConfig {',$quietStart===false?0:$quietStart);
-              if($quietStart===false||$quietEnd===false)throw new RuntimeException('Exact resource class boundaries unavailable');
-              $quietClass=substr($quietOriginal,$quietStart,$quietEnd-$quietStart);
+              function quiet_class_source(string $source,string $className): string {
+                  $tokens=token_get_all($source);$positions=[];$offset=0;
+                  foreach($tokens as $token){$positions[]=$offset;$offset+=strlen(is_array($token)?$token[1]:$token);}
+                  $trivia=[T_WHITESPACE,T_COMMENT,T_DOC_COMMENT];
+                  for($i=0,$count=count($tokens);$i<$count;$i++){
+                      if(!is_array($tokens[$i])||$tokens[$i][0]!==T_CLASS)continue;
+                      $name=$i+1;while($name<$count&&is_array($tokens[$name])&&in_array($tokens[$name][0],$trivia,true))$name++;
+                      if(!isset($tokens[$name])||!is_array($tokens[$name])||$tokens[$name][0]!==T_STRING||$tokens[$name][1]!==$className)continue;
+                      $start=$positions[$i];$previous=$i-1;while($previous>=0&&is_array($tokens[$previous])&&in_array($tokens[$previous][0],$trivia,true))$previous--;
+                      if($previous>=0&&is_array($tokens[$previous])&&in_array($tokens[$previous][0],[T_FINAL,T_ABSTRACT],true))$start=$positions[$previous];
+                      $open=$name+1;while($open<$count&&$tokens[$open]!=='{')$open++;
+                      $depth=0;for($end=$open;$end<$count;$end++){
+                          if($tokens[$end]==='{')$depth++;
+                          elseif(is_array($tokens[$end])&&in_array($tokens[$end][0],[T_CURLY_OPEN,T_DOLLAR_OPEN_CURLY_BRACES],true))$depth++;
+                          elseif($tokens[$end]==='}'&&--$depth===0)return substr($source,$start,$positions[$end]+1-$start);
+                      }
+                      throw new RuntimeException('Unbalanced resource class body');
+                  }
+                  throw new RuntimeException('Resource class unavailable');
+              }
+              $quietOriginal=file_get_contents($quietSource);$quietClass=quiet_class_source($quietOriginal,'LiteResource');
               $quietDir=__DIR__.'/scratchreports/quiet-'.getmypid().'-'.bin2hex(random_bytes(5));if(!mkdir($quietDir,0700,true))throw new RuntimeException('Cannot create fixture directory');
               $quietInstrumented="<?php\ndeclare(strict_types=1);\nnamespace MonQuietTest;\n".$quietClass;
               $quietCopy=$quietDir.'/resource.php';if(file_put_contents($quietCopy,$quietInstrumented)!==strlen($quietInstrumented))throw new RuntimeException('Cannot write resource fixture');require $quietCopy;
@@ -1145,15 +1467,48 @@ jobs:
           cat >"$test_dir/quiet-scan-fixture.php" <<'PHP'
           <?php
           declare(strict_types=1);
+          /* Test-only routing to real service owners; no production compatibility proxies. */
+          function fx_services($monitor) {
+              $method=new ReflectionMethod(LiteMonitor::class,'services');
+              $method->setAccessible(true);
+              return $method->invoke($monitor);
+          }
+          function fx_call($object,string $name,array $args=[]) {
+              $target=$object;
+              if($object instanceof LiteMonitor){
+                  $owners=[
+                      'saveDecision'=>'decisions','processMailbox'=>'decisions','resumeDecision'=>'decisions',
+                      'decisionPending'=>'decisions','recordDecisionError'=>'decisions','mailboxCheck'=>'decisions',
+                      'publishData'=>'references','retryPublication'=>'scanner','putVerified'=>'writer',
+                      'cacheObj'=>'market','cachedWatchlist'=>'market','pendingCount'=>'market',
+                      'loadBenchmark'=>'market','benchmarkRequirement'=>'market','analysisReusable'=>'market',
+                      'buildCurrentResults'=>'market','rowCurrent'=>'market','fetchSeries'=>'market',
+                  ];
+                  if($name==='endTurn'){$target=fx_services($object)->turn;$name='end';}
+                  elseif(in_array($name,['startState','idleHeartbeat','stopRequested','resourcePause','heartbeat'],true))$target=LiteStateStore::class;
+                  elseif(isset($owners[$name]))$target=fx_services($object)->{$owners[$name]};
+              }
+              $method=new ReflectionMethod(is_object($target)?get_class($target):$target,$name);
+              $method->setAccessible(true);
+              return $method->invokeArgs(is_object($target)?$target:null,$args);
+          }
+          function fx_prop($object,string $name,$value=null,bool $write=false) {
+              if($object instanceof LiteMonitor&&$name==='benchmarkRefreshes')$object=fx_services($object)->market;
+              $property=new ReflectionProperty(get_class($object),$name);
+              $property->setAccessible(true);
+              if($write){$property->setValue($object,$value);return null;}
+              return $property->getValue($object);
+          }
+
           /* Monitor control flow is retained. Resource sample call sites route to the exact
            * extracted Resource class, whose OS inputs are deterministic in quiet-fixture. */
           $scanSource=getenv('MON_TEST_SOURCE');$scanBytes=file_get_contents($scanSource);$scanSha=hash('sha256',$scanBytes);$scanBaseline=getenv('MON_EXPECT_R17')!=='1';
           $scanTemp=__DIR__.'/scratchreports/quiet-scan-'.($scanBaseline?'before':'after').'-'.getmypid();if(!is_dir($scanTemp))mkdir($scanTemp,0700,true);
-          $scanCopy=str_replace('LiteResource::sample()','QuietScanResource::sample()',$scanBytes,$scanCallSites);if($scanCallSites<3)throw new RuntimeException('Resource sample anchors unavailable');file_put_contents($scanTemp.'/mon.php',$scanCopy);require $scanTemp.'/mon.php';putenv('MON_QUIET_LIBRARY=1');require __DIR__.'/quiet-fixture.php';
+          $scanCopy=preg_replace('/\bLiteResource\s*::\s*sample\s*\(\s*\)/','QuietScanResource::sample()',$scanBytes,-1,$scanCallSites);if($scanCallSites<3)throw new RuntimeException('Resource sample anchors unavailable');file_put_contents($scanTemp.'/mon.php',$scanCopy);require $scanTemp.'/mon.php';putenv('MON_QUIET_LIBRARY=1');require __DIR__.'/quiet-fixture.php';
           $scanCases=[];$scanScenarios=[];
           function qs_check(bool $ok,string $message): void {global $scanCases;$scanCases[]=['case'=>$message,'status'=>$ok?'PASS':'FAIL'];if(!$ok){global $scanTemp,$scanScenarios;file_put_contents($scanTemp.'/failure.json',lm_json(['failed'=>$message,'scenarios'=>$scanScenarios])."\n");throw new RuntimeException($message);}}
-          function qs_prop($object,string $name,$value=null,bool $set=false){$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($set){$p->setValue($object,$value);return null;}return $p->getValue($object);}
-          function qs_call($object,string $name,array $args=[]){$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          function qs_prop($object,string $name,$value=null,bool $write=false){return fx_prop($object,$name,$value,$write);}
+          function qs_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           final class QuietScanResource {
               public static $calls=0,$burst=true,$results=[];
               public static function sample(): array {self::$calls++;if(self::$burst&&self::$calls===2)\MonQuietTest\CpuFixtureHost::advance(0.2431,100.0,98.72);$r=\MonQuietTest\LiteResource::sample();self::$results[]=$r;return $r;}
@@ -1192,6 +1547,54 @@ jobs:
           PHP
           MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R17=1 php -d memory_limit=96M "$test_dir/quiet-fixture.php"
           MON_TEST_SOURCE="$test_dir/mon.php" MON_EXPECT_R17=1 php -d memory_limit=96M "$test_dir/quiet-scan-fixture.php"
+
+      - name: Service composition and scheduler lifecycle parity
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/architecture-fixture.php" <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require getenv('MON_TEST_SOURCE');
+          function arch_check(bool $ok,string $message): void {global $archCases;$archCases[]=['case'=>$message,'status'=>$ok?'PASS':'FAIL'];if(!$ok)throw new RuntimeException($message);}
+          function arch_prop($object,string $name,$value=null,bool $write=false){$p=new ReflectionProperty(get_class($object),$name);$p->setAccessible(true);if($write){$p->setValue($object,$value);return null;}return $p->getValue($object);}
+          function arch_call($object,string $name,array $args=[]){$m=new ReflectionMethod(get_class($object),$name);$m->setAccessible(true);return $m->invokeArgs($object,$args);}
+          final class ArchHttp {public $calls=[];public function clearRequestCache():void{$this->calls[]='clear';}public function resetStats():void{$this->calls[]='reset';}public function releasePayloads():void{$this->calls[]='release';}public function stats():array{return[];}}
+          final class ArchYahoo {public $calls=[];public function beginTurn():void{$this->calls[]='begin';}public function releasePayloads():void{$this->calls[]='release';}public function stats():array{return[];}}
+          final class ArchDecision {public $pending=false,$calls=[],$stop=false,$onCheck=null;public function decisionPending(){if($this->stop){$this->calls[]=['start_state'=>LiteStateStore::state()];throw new LiteMonStop();}$this->calls[]='pending';if(is_callable($this->onCheck))call_user_func($this->onCheck);return$this->pending;}public function mailboxCheck():void{$this->calls[]='mailbox';}}
+          final class ArchScanner {public $calls=[],$onRetry=null;public function retryPublication():void{$this->calls[]='retry';if(is_callable($this->onRetry))call_user_func($this->onRetry);}public function fullScan(bool $retry=false):array{$this->calls[]=$retry?'full_retry':'full';return[];}public function lightCheck():array{$this->calls[]='light';return[];}}
+          final class ArchMarket {public $calls=[],$pending=0;public function cacheObj():stdClass{$this->calls[]='cache';return new stdClass();}public function pendingCount(stdClass $cache):int{$this->calls[]='pending_count';return$this->pending;}}
+          $archCases=[];$archScenarios=[];
+          foreach(LiteRuntime::FILES as $name){$path=LiteRuntime::path($name.'.php');if(is_file($path))unlink($path);}
+          $cfg=new LiteConfig();$cfg->githubToken='';$http=new ArchHttp();$yahoo=new ArchYahoo();$monitor=new LiteMonitor($cfg,$http,$yahoo);
+          arch_check(arch_prop($monitor,'application')===null,'facade construction keeps service composition lazy');$app=arch_call($monitor,'services');arch_check($app instanceof LiteApplication&&arch_call($monitor,'services')===$app,'one composition root is reused for a daemon instance');
+          $types=['market'=>LiteMarketData::class,'writer'=>LiteVerifiedWriter::class,'decisions'=>LiteDecisionService::class,'references'=>LiteReferencePublisher::class,'scanner'=>LiteScanEngine::class,'turn'=>LiteTurn::class];foreach($types as $field=>$class)arch_check($app->$field instanceof $class,'composition owns concrete '.$field.' service');
+          foreach(['market','writer','decisions','references','turn'] as $field)arch_check(arch_prop($app->$field,'http')===$http,'service '.$field.' shares the single HTTP client');foreach(['market','scanner','turn'] as $field)arch_check(arch_prop($app->$field,'yahoo')===$yahoo,'service '.$field.' shares the single Yahoo provider');
+          foreach(['market','writer'] as $field)arch_check(arch_prop($app->decisions,$field)===$app->$field,'decision service uses shared '.$field);foreach(['decisions','writer'] as $field)arch_check(arch_prop($app->references,$field)===$app->$field,'reference service uses shared '.$field);foreach(['market','decisions','references','turn'] as $field)arch_check(arch_prop($app->scanner,$field)===$app->$field,'scan engine uses shared '.$field);
+          arch_check($http->calls===[]&&$yahoo->calls===[],'composing service graph makes no provider or publication request');
+          foreach($types as $field=>$class){$reflection=new ReflectionClass($class);foreach($reflection->getProperties() as $property){if($property->isStatic())continue;$property->setAccessible(true);$value=$property->getValue($app->$field);arch_check(!$value instanceof LiteMonitor&&!$value instanceof LiteApplication,'service '.$field.' has no facade or composition callback');}}
+          $marketProperties=array_map(static function(ReflectionProperty $p):string{return$p->getName();},(new ReflectionClass(LiteMarketData::class))->getProperties());sort($marketProperties);arch_check($marketProperties===['benchmarkRefreshes','http','yahoo'],'market service retains transports and bounded refresh set without cache/session ownership');
+          foreach(['saveDecision','processMailbox','cacheObj','loadBenchmark','benchmarkRequirement','buildCurrentResults','publishData','retryPublication','endTurn'] as $method)arch_check(!method_exists(LiteMonitor::class,$method),'facade has no legacy private proxy '.$method);arch_check(!method_exists(LiteMonitor::class,'__call'),'facade does not hide service routing behind magic calls');
+          foreach((new ReflectionClass(LitePolicy::class))->getConstants() as $name=>$value)arch_check(defined('LiteMonitor::'.$name)&&constant('LiteMonitor::'.$name)===$value,'public policy alias preserved '.$name);
+          $due=static function(bool $full,bool $mailbox,bool $light):stdClass{$s=LiteStateStore::defaultState();$s->last_full_scan=lm_iso(time()-3600);$s->next_full_scan=lm_iso(time()+($full?-1:3600));$s->next_mailbox_check=lm_iso(time()+($mailbox?-1:3600));$s->next_light_check=lm_iso(time()+($light?-1:3600));return$s;};
+          foreach([
+              ['pending_due_mailbox',true,true,true,true,0,['retry'],['pending'],[]],
+              ['pending_no_mailbox',true,true,false,true,0,[],['pending'],[]],
+              ['mailbox_before_full',false,true,true,true,0,['retry'],['pending','pending','mailbox'],[]],
+              ['full_before_light',false,true,false,true,0,['full'],['pending'],[]],
+              ['light_pending_to_retry',false,false,false,true,2,['full_retry'],['pending'],['cache','pending_count']],
+              ['light_empty',false,false,false,true,0,['light'],['pending'],['cache','pending_count']],
+              ['not_due',false,false,false,false,0,[],['pending'],[]],
+          ] as $case){[$name,$pending,$full,$mailbox,$light,$count,$expectedScan,$expectedDecision,$expectedMarket]=$case;$decision=new ArchDecision();$decision->pending=$pending;$scanner=new ArchScanner();$market=new ArchMarket();$market->pending=$count;$app->decisions=$decision;$app->scanner=$scanner;$app->market=$market;arch_call($monitor,'executeDueWork',[$due($full,$mailbox,$light)]);arch_check($scanner->calls===$expectedScan&&$decision->calls===$expectedDecision&&$market->calls===$expectedMarket,'scheduler priority and due work parity '.$name);$archScenarios[$name]=['scanner'=>$scanner->calls,'decisions'=>$decision->calls,'market'=>$market->calls];}
+          $decision=new ArchDecision();$scanner=new ArchScanner();$market=new ArchMarket();$scanner->onRetry=static function()use($decision){$decision->pending=true;};$app->decisions=$decision;$app->scanner=$scanner;$app->market=$market;arch_call($monitor,'executeDueWork',[$due(true,true,true)]);arch_check($scanner->calls===['retry']&&$decision->calls===['pending','pending'],'decision becoming pending during retry blocks mailbox and new scans');
+          $state=LiteStateStore::defaultState();$state->running=true;$state->scan_request_seq=3;$state->scan_handled_seq=1;LiteStateStore::saveState($state);arch_call($monitor,'recordCycleError',[new LiteMonFault('ARCH_PROVIDER_FAILURE')]);$error=LiteStateStore::state();arch_check($error->phase==='ERROR'&&$error->last_error==='ARCH_PROVIDER_FAILURE'&&$error->scan_handled_seq===3&&strtotime($error->next_light_check)>=time()+119&&strtotime($error->next_light_check)<=time()+121,'cycle errors retain truthful state and bounded retry scheduling');
+          $decision=new ArchDecision();$decision->stop=true;$app->decisions=$decision;$monitor->loop();$final=LiteStateStore::state();$during=$decision->calls[0]['start_state'];arch_check($during->running===true&&$during->phase==='WAIT'&&lm_get($during->run_identity,'source_sha256')===MON_LITE_SOURCE_SHA256,'real loop begins with WAIT and exact daemon identity before service work');arch_check($final->running===false&&$final->phase==='IDLE'&&!LiteRuntime::lockHeld(),'real loop stop path releases daemon lock and persists IDLE');
+          echo lm_json(['scenario'=>'service_dag_and_scheduler_lifecycle_parity','status'=>'PASS','source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE')),'fixture_sha256'=>hash_file('sha256',__FILE__),'case_count'=>count($archCases),'cases'=>$archCases,'scheduler_scenarios'=>$archScenarios])."\n";
+          PHP
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/architecture-fixture.php"
 
       - name: Source identities
         run: sha256sum mon.php monitor.md MON-Wiki.md mon_data.json mon_result.md mon_chatgpt_handoff.json mon_chatgpt_response.json

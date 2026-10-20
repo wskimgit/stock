@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261020-r17` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261020-r18` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 최종 판단과 효율적인 실행
 
@@ -63,10 +63,16 @@
 - PHP 참고분석 게시 성공은 ChatGPT 최종 저장 성공이 아니다. `SAVED_VERIFIED`에는 같은 결정 쌍과 receipt 재조회가 필요하다.
 - 새 스캔의 이전 결론은 `previous_chatgpt_final`에 보존하고 원래 시각의 과거 판단으로 표시한다. Markdown에 남은 마지막 결론도 JSON scan 상태·결정 ID와 대조한다.
 
+## 단일 파일 내부 구조
+
+배포는 `mon.php` 한 개다. 상태·시장자료·검증 writer·결정/outbox·참고 게시·단계별 스캔·서비스 조합을 내부 클래스로 분리한다. 실제 클래스 책임표는 `monitor.md` 3.1절을 따른다. 기반 수치 계산·외부 계약·고정 runtime 파일은 유지하며 서비스가 스케줄러로 역호출하지 않는다.
+
+`LiteMonitor`는 진입점·스케줄링, `LiteWebController`·`LiteEntrypoint`는 상태·원자 명령·수동 시작·CLI 분기를 맡는다. 큰 캐시는 스캔 단계 종료 시 해제하고 최종 결정 복구를 참고 게시보다 우선한다. 웹 조회에서 시장 스캔을 실행하지 않는다. 코드 검증만 끝난 단계는 `CODE_COMPLETE / DEPLOYMENT_PENDING`이며 NAS의 새 데몬 identity와 실제 동작을 따로 확인한다.
+
 ## NAS·파일·권위
 
 `/web/mon.php`는 PHP 7.4+에서 웹 수동 시작하며 `/web/mon_runtime`을 자동 생성한다. `?view=health`에서 cURL·GitHub token·실제 PHP CLI 경로/버전/SAPI/cURL·exec·runtime 쓰기/용량·자원·읽기 통신을 확인한다. 필수 blocker는 시작을 거부하고 일시적 외부 통신 실패는 warning으로 남긴다.
 
 Runtime은 최대 11파일·64 MiB·단일 16 MiB다. 별도 bridge·이벤트별 파일·cron·부팅 자동시작·자동주문·자동매매를 추가하지 않는다. NAS가 꺼지면 수동 시작 전까지 PHP 복구도 실행되지 않는다.
 
-운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`은 유지하며 r17 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.
+운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`은 유지하며 r18 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.

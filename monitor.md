@@ -1,7 +1,7 @@
 # mon 지시문 — MON 2.2.3 Lite Clean Start
 
 > 운영 규격: **MON-LITE-OPS-2.2.3**
-> Build: **`MON-LITE-2.2.3-20261020-r17`**
+> Build: **`MON-LITE-2.2.3-20261020-r18`**
 > 단일 권위 저장소: **`wskimgit/stock`**
 > 실행 권위 문서: **`monitor.md`**
 > 참고 Wiki: **`MON-Wiki.md`** — 비권위 요약이며 충돌 시 `monitor.md`를 따른다.
@@ -16,7 +16,7 @@
 
 - NAS 로컬 MON 자료가 없어도 `/web/mon_runtime`을 자동 생성한다.
 - MON의 현재 코드·지시문·상태·결과는 `wskimgit/stock`만 사용한다. SIS에는 MON CURRENT 사본을 두지 않는다.
-- 활성 파일의 `policy`는 모두 `MON-LITE-OPS-2.2.3`이어야 한다. 코드/지시문은 r17이며 기존 시장 결과에 남은 r10 등의 `build`는 그 결과를 생성한 당시 identity다. 코드 정비만으로 시장 JSON의 시각·build·결과를 새 실행처럼 수정하지 않는다.
+- 활성 파일의 `policy`는 모두 `MON-LITE-OPS-2.2.3`이어야 한다. 코드/지시문은 r18이며 기존 시장 결과에 남은 r10 등의 `build`는 그 결과를 생성한 당시 identity다. 코드 정비만으로 시장 JSON의 시각·build·결과를 새 실행처럼 수정하지 않는다.
 - 초기 handoff는 `stage=idle`이다. PHP는 내장 fallback 후보군(KR/US/JP 각 3개)으로 보조자료를 만들 수 있다. 미검증 fallback은 최종 추천이 아니다.
 - 로컬 request 증명이 없는 과거 `decision`은 재실행하지 않는다.
 - 새 candidates 요청은 **현재 활성 후보군 전체를 교체**한다. 과거 강한 후보를 유지하려면 새 후보군에 다시 포함한다.
@@ -34,6 +34,28 @@
 | `mon_chatgpt_response.json` | MON→ChatGPT mailbox |
 
 `mon_chatgpt_bridge.php` 등 1.x 보조코드는 사용하지 않는다.
+
+### 3.1 단일 파일 내부 구조
+
+배포 파일은 계속 **`mon.php` 한 개**다. 내부 책임을 아래 클래스들로 분리하며 계산식·선정 기준·공개 JSON/state/cache/outbox 계약과 고정 runtime 파일은 유지한다.
+
+| 클래스 | 책임 |
+|---|---|
+| `LitePolicy` | 운영 상수와 정밀 스캔 시각의 단일 기준 |
+| `LiteStateStore` | 원자 상태 병합·중지/스캔 명령·실행 identity·생존 확인 |
+| `LiteTurn` | 회차별 통신 통계와 임시 payload 해제 |
+| `LiteMarketData` | 후보·봉·캐시·기준지수·분석 재사용·보조순위 |
+| `LiteVerifiedWriter` | 원격 SHA 충돌 검사·게시·정확한 내용 재조회 |
+| `LiteDecisionService` | ChatGPT mailbox·결정 검증·영속 outbox·결과 쌍/receipt 복구 |
+| `LiteReferencePublisher` | 준비된 참고분석 게시와 과거 최종 결정 보존 |
+| `LiteScanEngine` | 단계별 스캔·체크포인트·게시 재시도 조정 |
+| `LiteApplication` | 하나의 HTTP/provider를 공유하는 서비스 조합 |
+
+기반 `LiteRuntime`·`LiteResource`·`LiteConfig`·`LiteHealth`·`LiteHttp`·`LiteYahoo`·`LiteSwing`·`LiteQuality`를 유지한다. **상태/기반 → 시장자료·검증 writer → 결정 → 참고 게시 → 스캔 → 조합·facade** 순서로 의존성을 구성한다. 하위 서비스가 `LiteMonitor`를 역호출하지 않는다. `LiteMonitor`는 공개 진입점·스케줄러를 맡고, `LiteWebController`·`LiteEntrypoint`는 상태 조회·원자 명령·수동 시작·CLI 분기를 맡는다. 웹 요청에서 시장 스캔을 동기 실행하지 않는다.
+
+스캔은 준비, 대상/자원 확인, 공통 기준지수, 종목/체크포인트, 결과/캐시 저장, 큰 작업 자료 해제, 참고결과 게시·mailbox 정리 순서로 진행한다. 캐시와 작업 세션은 해당 스캔 안에서만 보유하고 종료·중단 시 남은 큐를 보존한다. 최종 결정 복구는 참고 스캔·게시보다 먼저 실행하며 참고 게시자도 pending 결정을 확인한다. 참고 게시자는 준비된 snapshot을 받아 시장 자료를 다시 수집하지 않는다.
+
+내부 클래스 분리는 설치 파일이나 `/web/mon_runtime` 파일 증가를 뜻하지 않는다. 저장소의 코드 검증 완료와 NAS 설치·새 데몬 실행 검증은 별도 상태로 보고한다.
 
 ## 4. 운영 주기
 
@@ -266,7 +288,7 @@ PHP 스캔은 `analysis_reference`와 참고 MS7만 만들며 최종 추천으�
 - `SAVED_VERIFIED`: 결과 JSON·Markdown·receipt의 실제 재조회 증명이 모두 있다. 결정 식별자와 확인한 GitHub commit/file 링크를 제시한다.
 - `PENDING_REMOTE` / `pending_receipt`: 복구 원문은 보존되어 있고 실패 단계의 복구가 남았다. 저장 완료라고 하지 않는다.
 - `UNSAVED_REMOTE`: 원격 저장이 검증되지 않았고 영속 복구도 확보하지 못했다. 원인과 마지막으로 성공한 단계를 정확히 알린다.
-- 코드 검증 완료, GitHub 반영, NAS 배포, NAS 실동작은 별도 상태다. NAS의 실제 배포 identity와 lifecycle을 관찰하지 못했으면 `DEPLOYMENT_PENDING` 또는 `UNKNOWN`으로 보고한다.
+- 코드/CI 검증 완료는 `CODE_COMPLETE / DEPLOYMENT_PENDING`이다. GitHub 반영, NAS 설치, 수동 재시작한 데몬의 identity·health·실제 lifecycle을 각각 확인한다. NAS 증거가 없으면 `UNKNOWN` 또는 `DEPLOYMENT_PENDING`이며 `LIVE_VERIFIED`로 보고하지 않는다.
 
 ## 16. 한 줄 운영 원칙
 
