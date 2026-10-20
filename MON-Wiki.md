@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261020-r18` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261020-r19` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 최종 판단과 효율적인 실행
 
@@ -69,10 +69,16 @@
 
 `LiteMonitor`는 진입점·스케줄링, `LiteWebController`·`LiteEntrypoint`는 상태·원자 명령·수동 시작·CLI 분기를 맡는다. 큰 캐시는 스캔 단계 종료 시 해제하고 최종 결정 복구를 참고 게시보다 우선한다. 웹 조회에서 시장 스캔을 실행하지 않는다. 코드 검증만 끝난 단계는 `CODE_COMPLETE / DEPLOYMENT_PENDING`이며 NAS의 새 데몬 identity와 실제 동작을 따로 확인한다.
 
+## 수동 시작·재시작
+
+시작·재시작은 외부 통신 대기 없이 로컬 CLI 조건부터 확인한다. 재시작은 **기존 데몬 중지 → 실제 종료 확인 → 한 번 시작 → 새 실행 확인** 순서다. 화면의 중지 중·시작 중·시작 확인·실패·시간초과를 구분하며 접수만으로 완료라고 하지 않는다. 절차는 `LiteManualControl`이 맡는다.
+
+나중에 누른 중지는 대기 요청을 취소한다. 대기 중 페이지를 닫으면 뒤늦게 자동 시작하지 않으며, 이미 실행된 데몬은 별도로 중지해야 한다. 최대 3분 확인 후 시간초과면 다시 수동 요청한다. 대기 중 중지는 약 1초마다 확인하고 작업 중에는 현재 통신/체크포인트 경계에서 반영한다. 예약 작업 점검 30초·대기 heartbeat 60초를 유지한다. 강제 종료·무인 재시작·추가 runtime 파일 없이 캐시와 pending outbox를 보존한다.
+
 ## NAS·파일·권위
 
-`/web/mon.php`는 PHP 7.4+에서 웹 수동 시작하며 `/web/mon_runtime`을 자동 생성한다. `?view=health`에서 cURL·GitHub token·실제 PHP CLI 경로/버전/SAPI/cURL·exec·runtime 쓰기/용량·자원·읽기 통신을 확인한다. 필수 blocker는 시작을 거부하고 일시적 외부 통신 실패는 warning으로 남긴다.
+`/web/mon.php`는 PHP 7.4+에서 웹 수동 시작하며 `/web/mon_runtime`을 자동 생성한다. 로컬 사전점검은 cURL·GitHub token·실제 PHP CLI 경로/버전/SAPI/cURL·exec·runtime 쓰기/용량·자원을 확인한다. `?view=health` deep 진단에는 외부 읽기 통신도 포함한다. 필수 blocker는 시작을 거부하고 일시적 외부 통신 실패는 warning으로 남긴다.
 
 Runtime은 최대 11파일·64 MiB·단일 16 MiB다. 별도 bridge·이벤트별 파일·cron·부팅 자동시작·자동주문·자동매매를 추가하지 않는다. NAS가 꺼지면 수동 시작 전까지 PHP 복구도 실행되지 않는다.
 
-운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`은 유지하며 r18 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.
+운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`은 유지하며 r19 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.
