@@ -12,4 +12,92 @@
 
 <!-- LONGBREAK:BEGIN -->
 LongBreak 자동 저장 영역입니다. 최근 32개 항목을 보관하며 이전 내용은 Git 커밋 이력에서 확인할 수 있습니다.
+
+<!-- LBUNIT eyJpZCI6IjViZTMzNzE1MDhjYWU5NTc0MzRkMDViOTZkNzUyYmEzNWQ2ZGJlNTVlNjA4YmM3YjhhOTQxOWNlM2Y5ZGUwYzMiLCJrZXkiOiI0MGMyNTk0MGQxNTMxMmU2M2JjMGQ3MjEyMmNiODg2YmE4ZjFlZDZhNGEzNDQyMjdkODdkMDkzYmVhYzY5ZTUxIiwib3JpZ2luIjoiNGFkZThiMDY5MjU4NWQ3NyIsInNlcSI6MSwiY3JlYXRlZF9hdCI6MTc5Mjc1MzM3NywiaGFzaCI6ImI1MWI2ODA2ZDRjNWE3OWE0MmQ4ZTgxYWYyOWI4OTExMzZjZTdlZDZmODFiNDExZTJiMTE2ZDIwYmUwZDM0YjEifQ== -->
+# LongBreak 선택 실행 결과
+
+- 실행 ID: cc7b7bdc84d17cfcadc75443
+- 원래 실행 버전: 1.9.0
+- 실행 상태: COMPLETE · 선택 범위 처리 완료
+- 시작: 2026-10-23 19:52:34 KST / 완료: 2026-10-23 20:02:57 KST
+- 판정 동결 시각: 2026-10-23 20:02:57 KST (한국·미국 시세를 포함한 모든 시각 Asia/Seoul, KST). 원래 관측 시각은 유지하고 시간대만 변환했습니다. 아래 현재 돌파는 이 완료 시각에만 유효했던 판정입니다. 게시 시점의 실시간 확정이 아닙니다.
+- 선택 범위: 대형주 후보 · 한국 201&#126;250위&#40;50종목&#41; · 미국 201&#126;250위&#40;50종목&#41; · 합계 100종목
+- 저장된 시장별 범위: KR 201~250 / 50종목 · US 201~250 / 50종목
+- MA 설정: 시장 ALL / MA200 / 연속 하회 40거래일 / 돌파 후 허용 5거래일
+- STC 설정: 최근 완료 일봉 Slow Stochastic (14,3,3), %D와 시그널 모두 30 이하
+
+| 대상 총수 | 처리수 | MA 분석수 | STC 분석수 | 자료 오류수 | 미해결수 | 현재 돌파 | 이전·완료봉 돌파 | STC 30 이하 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 100 | 99 | 100 | 0 | 0 | 0 | 2 | 34 |
+
+## 완료 시각에 최근 시세로 확인한 MA 돌파
+
+해당 조건 0종목.
+
+## 이전 관측·완료봉 MA 돌파 참고
+
+이전 관측은 원래 시세 시각과 출처를 보존합니다. 현재 돌파로 재확정하지 않습니다.
+
+| 시장 | 종목코드 | 종목명 | 판정 | 가격 | MA | 일봉일자·출처 | 시세 시각·출처 |
+| --- | --- | --- | --- | ---: | ---: | --- | --- |
+| US | ORLY | O&&#35;039;Reilly Automotive, Inc. - Common Stock | 완료봉 돌파 참고 | 92 | 90.65585 | 2026-10-22 / YAHOO | 완료 종가 / YAHOO |
+| US | AEP | American Electric Power Company, Inc. - Common Stock | 완료봉 돌파 참고 | 130.639999 | 127.71815 | 2026-10-22 / YAHOO | 완료 종가 / YAHOO |
+
+총 2건 중 2건 표시.
+
+## STC %D·시그널 모두 30 이하
+
+MA 돌파 표와 중복될 수 있는 독립 조건입니다. 최신 완료 일봉 기준이며 실시간 분봉 신호가 아닙니다.
+
+| 시장 | 종목코드 | 종목명 | %D | 시그널 | 일봉일자 | 출처 |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| KR | 214370 | 케어젠 | 13.7319 | 24.9095 | 2026-10-23 | NAVER |
+| KR | 004800 | 효성 | 10.4003 | 12.0992 | 2026-10-23 | NAVER |
+| KR | 319400 | 현대무벡스 | 13.1776 | 18.2507 | 2026-10-23 | NAVER |
+| KR | 081660 | 미스토홀딩스 | 20.3704 | 25.9528 | 2026-10-23 | NAVER |
+| KR | 489790 | 한화비전 | 12.4296 | 14.8428 | 2026-10-23 | NAVER |
+| US | VRT | Vertiv Holdings, LLC Class A Common Stock | 12.2815 | 9.9385 | 2026-10-22 | YAHOO |
+| KR | 112610 | 씨에스윈드 | 5.2293 | 10.9656 | 2026-10-23 | NAVER |
+| KR | 051600 | 한전KPS | 7.9959 | 8.782 | 2026-10-23 | NAVER |
+| KR | 281820 | 케이씨텍 | 18.9574 | 20.4833 | 2026-10-23 | NAVER |
+| KR | 229640 | LS에코에너지 | 27.5779 | 19.3809 | 2026-10-23 | NAVER |
+| KR | 204320 | HL만도 | 4.2392 | 8.7578 | 2026-10-23 | NAVER |
+| KR | 140410 | 메지온 | 18.0213 | 18.5194 | 2026-10-23 | NAVER |
+| US | HPE | Hewlett Packard Enterprise Company Common Stock | 13.1132 | 10.6183 | 2026-10-22 | YAHOO |
+| KR | 058610 | 에스피지 | 21.204 | 24.8877 | 2026-10-23 | NAVER |
+| KR | 140860 | 파크시스템스 | 6.7602 | 7.2681 | 2026-10-23 | NAVER |
+| US | LITE | Lumentum Holdings Inc. - Common Stock | 10.1401 | 10.765 | 2026-10-22 | YAHOO |
+| KR | 030530 | 원익홀딩스 | 16.0436 | 18.6397 | 2026-10-23 | NAVER |
+| US | BCS | Barclays PLC Common Stock | 17.2019 | 15.1036 | 2026-10-22 | YAHOO |
+| KR | 103140 | 풍산 | 2.9266 | 5.5148 | 2026-10-23 | NAVER |
+| KR | 032820 | 우리기술 | 7.3202 | 9.8842 | 2026-10-23 | NAVER |
+| KR | 069960 | 현대백화점 | 13.2612 | 21.3174 | 2026-10-23 | NAVER |
+| KR | 073240 | 금호타이어 | 5.9815 | 6.3636 | 2026-10-23 | NAVER |
+| KR | 060370 | LS마린솔루션 | 24.902 | 23.3987 | 2026-10-23 | NAVER |
+| US | BE | Bloom Energy Corporation Class A Common Stock | 15.9034 | 14.6134 | 2026-10-22 | YAHOO |
+| KR | 000120 | CJ대한통운 | 4.3594 | 16.2908 | 2026-10-23 | NAVER |
+| KR | 020560 | 아시아나항공 | 9.807 | 10.2505 | 2026-10-23 | NAVER |
+| US | NWG | NatWest Group plc American Depositary Shares, &#40;each representing… | 24.5943 | 25.7762 | 2026-10-22 | YAHOO |
+| KR | 089030 | 테크윙 | 9.6538 | 8.497 | 2026-10-23 | NAVER |
+| KR | 036540 | SFA반도체 | 12.7181 | 12.9597 | 2026-10-23 | NAVER |
+| KR | 439260 | 대한조선 | 14.1194 | 20.4997 | 2026-10-23 | NAVER |
+| KR | 008770 | 호텔신라 | 9.2921 | 17.8165 | 2026-10-23 | NAVER |
+| KR | 023590 | 다우기술 | 8.4894 | 8.9601 | 2026-10-23 | NAVER |
+| KR | 083650 | 비에이치아이 | 12.461 | 16.5059 | 2026-10-23 | NAVER |
+| US | APO | Apollo Global Management, Inc. &#40;New&#41; Common Stock | 23.8813 | 13.637 | 2026-10-22 | YAHOO |
+
+총 34건 중 34건 표시.
+
+## 오류·조건 미달 사유 집계
+
+종목 목록 자체는 돌파 결과가 아닙니다. STC 미계산 0종목. 사유는 행당 MA·시세 사유와 STC 미계산 사유를 함께 집계하므로 중복될 수 있습니다.
+
+| 사유 코드 | 건수 |
+| --- | ---: |
+| MA/시세:COMPLETED&#95;BAR&#95;REFERENCE | 97 |
+| MA/시세:HISTORY&#95;SHORT | 1 |
+
+이 결과는 모니터링 참고 자료이며 MON의 최종 추천이 아닙니다.
+
+<!-- /LBUNIT -->
 <!-- LONGBREAK:END -->
