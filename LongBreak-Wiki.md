@@ -100,4 +100,110 @@ MA 돌파 표와 중복될 수 있는 독립 조건입니다. 최신 완료 일�
 이 결과는 모니터링 참고 자료이며 MON의 최종 추천이 아닙니다.
 
 <!-- /LBUNIT -->
+
+<!-- LBUNIT eyJpZCI6ImRlNTljZGU1MGY5MjQ4NjI1YzM4YmUzZGI2OGEyMDg2ODU5MjIzNDhkOWU2NzAwNTE0ZjYwMzFiYjk5OTIyMjkiLCJrZXkiOiI3YjY5YjY3ZDg3MTFhMDk5MWI3ZmExOWY3ZjRlNzUzN2M4OTdhOGI0ZTdlOGYzODZmMDM1NDg4N2QzNWQ4ZjMyIiwib3JpZ2luIjoiNGFkZThiMDY5MjU4NWQ3NyIsInNlcSI6MiwiY3JlYXRlZF9hdCI6MTc5MjkyNDU3NywiaGFzaCI6ImExMGFkNzJmZmRiYmU5NWJiZWMxZmMxNGY3Y2Y0MDdmZTNiNWNiNzkxZWE4Njk1ZGU5YWY5MmY2YzAwNjMyMTYifQ== -->
+# LongBreak 선택 실행 결과
+
+- 실행 ID: 3aec9556d47f3002801f9037
+- 원래 실행 버전: 1.8.0
+- 실행 상태: COMPLETE · 선택 범위 처리 완료
+- 시작: 2026-10-25 19:25:33 KST / 완료: 2026-10-25 19:36:17 KST
+- 판정 동결 시각: 2026-10-25 19:36:17 KST (한국·미국 시세를 포함한 모든 시각 Asia/Seoul, KST). 원래 관측 시각은 유지하고 시간대만 변환했습니다. 아래 현재 돌파는 이 완료 시각에만 유효했던 판정입니다. 게시 시점의 실시간 확정이 아닙니다.
+- 선택 범위: 대형주 후보 · 한국 1&#126;50위&#40;50종목&#41; · 미국 1&#126;50위&#40;50종목&#41; · 합계 100종목
+- 저장된 시장별 범위: KR 1~50 / 50종목 · US 1~50 / 50종목
+- MA 설정: 시장 ALL / MA200 / 연속 하회 40거래일 / 돌파 후 허용 5거래일
+- STC 설정: 최근 완료 일봉 Slow Stochastic (14,3,3), %D와 시그널 모두 30 이하
+
+| 대상 총수 | 처리수 | MA 분석수 | STC 분석수 | 자료 오류수 | 미해결수 | 현재 돌파 | 이전·완료봉 돌파 | STC 30 이하 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 100 | 98 | 100 | 0 | 0 | 0 | 0 | 57 |
+
+## 완료 시각에 최근 시세로 확인한 MA 돌파
+
+해당 조건 0종목.
+
+## 이전 관측·완료봉 MA 돌파 참고
+
+이전 관측은 원래 시세 시각과 출처를 보존합니다. 현재 돌파로 재확정하지 않습니다.
+
+해당 조건 0종목.
+
+## STC %D·시그널 모두 30 이하
+
+MA 돌파 표와 중복될 수 있는 독립 조건입니다. 최신 완료 일봉 기준이며 실시간 분봉 신호가 아닙니다.
+
+| 시장 | 종목코드 | 종목명 | %D | 시그널 | 일봉일자 | 출처 |
+| --- | --- | --- | ---: | ---: | --- | --- |
+| KR | 005930 | 삼성전자 | 17.2749 | 16.809 | 2026-10-23 | NAVER |
+| US | NVDA | NVIDIA Corporation - Common Stock | 11.7914 | 15.171 | 2026-10-23 | YAHOO |
+| KR | 000660 | SK하이닉스 | 12.2215 | 10.2694 | 2026-10-23 | NAVER |
+| KR | 402340 | SK스퀘어 | 8.5757 | 7.5337 | 2026-10-23 | NAVER |
+| US | GOOGL | Alphabet Inc. - Class A Common Stock | 7.0351 | 14.828 | 2026-10-23 | YAHOO |
+| US | GOOG | Alphabet Inc. - Class C Capital Stock | 7.7377 | 14.2514 | 2026-10-23 | YAHOO |
+| KR | 009150 | 삼성전기 | 10.4601 | 10.6097 | 2026-10-23 | NAVER |
+| KR | 005380 | 현대자동차 | 19.6413 | 27.1801 | 2026-10-23 | NAVER |
+| US | TSM | Taiwan Semiconductor Manufacturing Company Ltd. | 17.2484 | 20.0954 | 2026-10-23 | YAHOO |
+| KR | 105560 | KB금융 | 23.0262 | 28.1888 | 2026-10-23 | NAVER |
+| US | SPCX | Space Exploration Technologies Corp. - Class A Common Stock | 27.5634 | 28.7472 | 2026-10-23 | YAHOO |
+| KR | 032830 | 삼성생명 | 27.4775 | 25.1086 | 2026-10-23 | NAVER |
+| US | META | Meta Platforms, Inc. - Class A Common Stock | 10.6641 | 13.2984 | 2026-10-23 | YAHOO |
+| KR | 028260 | 삼성물산 | 29.2335 | 25.6115 | 2026-10-23 | NAVER |
+| US | AVGO | Broadcom Inc. - Common Stock | 7.9153 | 10.7112 | 2026-10-23 | YAHOO |
+| KR | 055550 | 신한지주 | 7.3534 | 6.0946 | 2026-10-23 | NAVER |
+| KR | 012450 | 한화에어로스페이스 | 7.4178 | 8.3439 | 2026-10-23 | NAVER |
+| US | SKHY | SK hynix Inc. - American Depositary Shares | 7.7788 | 7.9169 | 2026-10-23 | YAHOO |
+| KR | 034020 | 두산에너빌리티 | 5.8295 | 7.7329 | 2026-10-23 | NAVER |
+| US | MU | Micron Technology, Inc. - Common Stock | 12.3594 | 14.8719 | 2026-10-23 | YAHOO |
+| KR | 034730 | SK | 26.4462 | 21.417 | 2026-10-23 | NAVER |
+| KR | 086790 | 하나금융지주 | 20.2815 | 19.8816 | 2026-10-23 | NAVER |
+| US | AMD | Advanced Micro Devices, Inc. - Common Stock | 11.1723 | 11.3993 | 2026-10-23 | YAHOO |
+| KR | 329180 | HD현대중공업 | 5.4895 | 5.0543 | 2026-10-23 | NAVER |
+| KR | 012330 | 현대모비스 | 12.5282 | 22.3313 | 2026-10-23 | NAVER |
+| KR | 035420 | NAVER | 19.4291 | 25.1077 | 2026-10-23 | NAVER |
+| US | ASML | ASML Holding N.V. - New York Registry Shares | 12.6182 | 15.9793 | 2026-10-23 | YAHOO |
+| KR | 066570 | LG전자 | 3.6008 | 4.2082 | 2026-10-23 | NAVER |
+| KR | 010120 | 엘에스일렉트릭 | 14.6183 | 14.2668 | 2026-10-23 | NAVER |
+| KR | 316140 | 우리금융지주 | 21.8053 | 22.1331 | 2026-10-23 | NAVER |
+| US | INTC | Intel Corporation - Common Stock | 6.8811 | 7.673 | 2026-10-23 | YAHOO |
+| US | CSCO | Cisco Systems, Inc. - Common Stock | 14.2502 | 11.4073 | 2026-10-23 | YAHOO |
+| KR | 010130 | 고려아연 | 4.4865 | 8.2904 | 2026-10-23 | NAVER |
+| US | ORCL | Oracle Corporation Common Stock | 11.5327 | 12.6861 | 2026-10-23 | YAHOO |
+| KR | 042700 | 한미반도체 | 9.5224 | 13.2549 | 2026-10-23 | NAVER |
+| KR | 298040 | 효성중공업 | 11.719 | 12.1629 | 2026-10-23 | NAVER |
+| KR | 009540 | HD한국조선해양 | 8.4352 | 7.0918 | 2026-10-23 | NAVER |
+| KR | 267260 | HD현대일렉트릭 | 7.7975 | 9.055 | 2026-10-23 | NAVER |
+| US | BAC | Bank of America Corporation Common Stock | 27.2781 | 26.1714 | 2026-10-23 | YAHOO |
+| KR | 042660 | 한화오션 | 3.7557 | 4.7803 | 2026-10-23 | NAVER |
+| US | CAT | Caterpillar, Inc. Common Stock | 9.5605 | 12.4992 | 2026-10-23 | YAHOO |
+| KR | 051910 | LG화학 | 10.997 | 20.9578 | 2026-10-23 | NAVER |
+| US | LRCX | Lam Research Corporation - Common Stock | 2.6544 | 3.4141 | 2026-10-23 | YAHOO |
+| KR | 017670 | SK텔레콤 | 9.3686 | 11.5106 | 2026-10-23 | NAVER |
+| US | AMAT | Applied Materials, Inc. - Common Stock | 3.1651 | 3.9245 | 2026-10-23 | YAHOO |
+| US | HSBC | HSBC Holdings, plc. Common Stock | 17.0687 | 20.1107 | 2026-10-23 | YAHOO |
+| US | DELL | Dell Technologies Inc. Class C Common Stock | 16.4502 | 16.7435 | 2026-10-23 | YAHOO |
+| KR | 010950 | S-Oil | 12.4049 | 15.4127 | 2026-10-23 | NAVER |
+| KR | 010140 | 삼성중공업 | 7.9865 | 10.7148 | 2026-10-23 | NAVER |
+| US | GE | GE Aerospace Common Stock | 16.0242 | 21.0431 | 2026-10-23 | YAHOO |
+| KR | 003550 | LG | 7.0803 | 11.4793 | 2026-10-23 | NAVER |
+| KR | 003670 | 포스코퓨처엠 | 18.7449 | 29.2113 | 2026-10-23 | NAVER |
+| KR | 000150 | 두산 | 10.6617 | 11.807 | 2026-10-23 | NAVER |
+| KR | 272210 | 한화시스템 | 19.1889 | 22.863 | 2026-10-23 | NAVER |
+| KR | 006800 | 미래에셋증권 | 11.3614 | 13.1751 | 2026-10-23 | NAVER |
+| US | PANW | Palo Alto Networks, Inc. - Common Stock | 26.8054 | 16.2241 | 2026-10-23 | YAHOO |
+| KR | 035720 | 카카오 | 8.6614 | 18.4938 | 2026-10-23 | NAVER |
+
+총 57건 중 57건 표시.
+
+## 오류·조건 미달 사유 집계
+
+종목 목록 자체는 돌파 결과가 아닙니다. STC 미계산 0종목. 사유는 행당 MA·시세 사유와 STC 미계산 사유를 함께 집계하므로 중복될 수 있습니다.
+
+| 사유 코드 | 건수 |
+| --- | ---: |
+| MA/시세:COMPLETED&#95;BAR&#95;REFERENCE | 98 |
+| MA/시세:HISTORY&#95;SHORT | 2 |
+
+이 결과는 모니터링 참고 자료이며 MON의 최종 추천이 아닙니다.
+
+<!-- /LBUNIT -->
 <!-- LONGBREAK:END -->
