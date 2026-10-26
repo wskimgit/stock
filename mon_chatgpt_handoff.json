@@ -2,10 +2,10 @@
   "contract": "MON-LITE-BRIDGE-1.0",
   "policy": "MON-LITE-OPS-2.2.3",
   "stage": "idle",
-  "request_id": "mon-20261026T074429Z-independent",
-  "decision_id": "mon-final-fa44efa28744468c853c4cf641b59928",
+  "request_id": "mon-20261026T082229Z-emerging",
+  "decision_id": "mon-final-7365d2489e21da2b68c0452f364d2b03",
   "completed_by": "chatgpt_direct",
-  "completion_status": "saved_verified",
-  "reviewed_candidate_count": 45,
-  "updated_at": "2026-10-26T07:47:06Z"
+  "completion_status": "pair_published_receipt_pending",
+  "reviewed_candidate_count": 123,
+  "updated_at": "2026-10-26T08:31:08Z"
 }
