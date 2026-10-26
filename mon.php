@@ -1265,6 +1265,13 @@ final class LiteSwing {
             || ($t['technical_qualified'] ?? false) !== true || ($trend['buy_reference_qualified'] ?? false) !== true
             || ($trend['history_complete'] ?? false) !== true || ($trend['support_broken'] ?? false)
             || in_array($a['reference_setup']['status'] ?? '', ['invalidated', 'unverified'], true)) return false;
+        $day = $a['bars_as_of'] ?? null;
+        if (!self::referenceDate($day)) return false;
+        $cross = $t['macd_cross_date'] ?? null;
+        $age = lm_num($t['macd_cross_age_days'] ?? null);
+        $event = ($t['ma5_reclaim_close'] ?? false) === true || (in_array($t['macd_kind'] ?? null, ['MACD_GOLD', 'MACD_AFTER'], true)
+            && self::referenceDate($cross) && strcmp($cross, $day) <= 0 && $age !== null && $age >= 0 && $age <= 3);
+        if (!$event) return false;
         $values = [];
         foreach (['last_close', 'MA5', 'MA20', 'MA60', 'MA200', 'MA5_slope_1', 'MA20_slope_1', 'MA20_slope_5',
             'MA60_slope_1', 'MA60_slope_5', 'ATR14', 'volume_ratio20', 'R20', 'RS20_pp', 'prior20_low'] as $key) {
@@ -1343,12 +1350,14 @@ final class LiteSwing {
         $support = lm_num($v['locked_support'] ?? null);
         if (!in_array($status, ['active', 'invalidated'], true) || !self::referenceDate($v['signal_date'] ?? null)
             || $support === null || $support <= 0) return null;
+        $established = $v['established_at'] ?? $v['signal_date'];
+        if (!self::referenceDate($established) || strcmp($established, $v['signal_date']) < 0) return null;
         $out = ['status' => $status, 'signal_date' => $v['signal_date'],
-            'established_at' => self::referenceDate($v['established_at'] ?? null) ? $v['established_at'] : $v['signal_date'], 'locked_support' => $support,
+            'established_at' => $established, 'locked_support' => $support,
             'invalidated_at' => null, 'invalidated_support' => null];
         if ($status === 'invalidated') {
             $floor = lm_num($v['invalidated_support'] ?? null);
-            if (!self::referenceDate($v['invalidated_at'] ?? null) || strcmp($v['invalidated_at'], $v['signal_date']) < 0
+            if (!self::referenceDate($v['invalidated_at'] ?? null) || strcmp($v['invalidated_at'], $established) < 0
                 || $floor === null || $floor <= 0) return null;
             $out['invalidated_at'] = $v['invalidated_at'];
             $out['invalidated_support'] = $floor;
@@ -1380,14 +1389,37 @@ final class LiteSwing {
         $last = lm_num($a['metrics']['last_close'] ?? null);
         $old = $prior['reference_setup'] ?? null;
         $setup = self::normalizeReferenceSetup($old);
-        if ((array_key_exists('reference_setup', $prior) && $setup === null) || ($setup['status'] ?? '') === 'unverified') {
+        if ($setup === null && !array_key_exists('reference_setup', $prior) && ($prior['eligible'] ?? false) === true
+            && in_array($prior['ms7']['code'] ?? '', ['M1', 'M2'], true)
+            && lm_num($prior['metrics']['S'] ?? null) !== null && is_string($prior['bars_as_of'] ?? null)) {
+            $setup = ['status' => 'active', 'signal_date' => $prior['bars_as_of'], 'established_at' => $prior['bars_as_of'], 'locked_support' => $prior['metrics']['S'],
+                'invalidated_at' => null, 'invalidated_support' => null, 'reason_codes' => ['prior_reference_support_preserved']];
+            $old = $setup;
+            $prior['reference_setup'] = $setup;
+            $setup = self::normalizeReferenceSetup($setup);
+        }
+        $priorDay = (string)($prior['reference_setup_last_evaluated_date'] ?? $prior['bars_as_of'] ?? '');
+        if ($setup && self::referenceDate($priorDay) && strcmp($day, $priorDay) < 0) {
+            $a['reference_setup'] = $setup;
+            $a['eligible'] = false;
+            $a['status'] = 'observe';
+            $a['trend']['buy_reference_qualified'] = false;
+            $a['reason_codes'][] = 'reference_setup_older_bar';
+            $a['technical']['trend'] = $a['trend'];
+            $a['ms7'] = self::ms7FromAnalysis($a);
+            return $a;
+        }
+        $futureGuard = false;
+        foreach (['signal_date', 'established_at', 'invalidated_at', 'rearmed_after', 'guard_unverified_since'] as $field)
+            if (isset($setup[$field]) && self::referenceDate($setup[$field]) && strcmp($setup[$field], $day) > 0) $futureGuard = true;
+        if ((array_key_exists('reference_setup', $prior) && $setup === null) || ($setup['status'] ?? '') === 'unverified' || $futureGuard) {
             $raw = is_object($old) ? (array)$old : (is_array($old) ? $old : []);
             $first = $setup['first_guard_unverified_at'] ?? $raw['first_guard_unverified_at'] ?? null;
-            if (!self::referenceDate($first)) $first = $day;
+            if (!self::referenceDate($first) || strcmp($first, $day) > 0) $first = $day;
             $candidate = $a;
             unset($candidate['reference_setup']);
             $cross = $a['technical']['macd_cross_date'] ?? null;
-            $newCross = self::referenceDate($cross) && strcmp($cross, $first) > 0
+            $newCross = self::referenceDate($cross) && strcmp($cross, $first) > 0 && strcmp($cross, $day) <= 0
                 && in_array($a['technical']['macd_kind'] ?? null, ['MACD_GOLD', 'MACD_AFTER'], true);
             if ($newCross && self::referenceBuyReady($candidate)) {
                 $a['reference_setup'] = ['status' => 'active', 'signal_date' => $cross, 'established_at' => $day,
@@ -1406,27 +1438,10 @@ final class LiteSwing {
             $a['ms7'] = self::ms7FromAnalysis($a);
             return $a;
         }
-        $priorDay = (string)($prior['reference_setup_last_evaluated_date'] ?? $prior['bars_as_of'] ?? '');
-        if ($setup && self::referenceDate($priorDay) && strcmp($day, $priorDay) < 0) {
-            $a['reference_setup'] = $setup;
-            $a['eligible'] = false;
-            $a['status'] = 'observe';
-            $a['trend']['buy_reference_qualified'] = false;
-            $a['reason_codes'][] = 'reference_setup_older_bar';
-            $a['technical']['trend'] = $a['trend'];
-            $a['ms7'] = self::ms7FromAnalysis($a);
-            return $a;
-        }
-        if ($setup === null && ($prior['eligible'] ?? false) === true
-            && in_array($prior['ms7']['code'] ?? '', ['M1', 'M2'], true)
-            && lm_num($prior['metrics']['S'] ?? null) !== null && is_string($prior['bars_as_of'] ?? null)) {
-            $setup = ['status' => 'active', 'signal_date' => $prior['bars_as_of'], 'established_at' => $prior['bars_as_of'], 'locked_support' => $prior['metrics']['S'],
-                'invalidated_at' => null, 'invalidated_support' => null, 'reason_codes' => ['prior_reference_support_preserved']];
-        }
         $event = ($a['technical']['ma5_reclaim_close'] ?? false) ? $day : null;
         $cross = $a['technical']['macd_cross_date'] ?? null;
         if (in_array($a['technical']['macd_kind'] ?? null, ['MACD_GOLD', 'MACD_AFTER'], true) && is_string($cross)
-            && ($event === null || strcmp($cross, $event) > 0)) $event = $cross;
+            && self::referenceDate($cross) && strcmp($cross, $day) <= 0 && ($event === null || strcmp($cross, $event) > 0)) $event = $cross;
         if ($setup && ($setup['status'] ?? '') === 'active' && $last !== null) {
             $from = max((string)($setup['established_at'] ?? $setup['signal_date']), $priorDay);
             $failedDay = null;
@@ -1441,13 +1456,16 @@ final class LiteSwing {
                 $a['ms7'] = self::ms7FromAnalysis($a);
                 return $a;
             }
+            // Recheck the retained window for provider corrections, including previously evaluated bars.
+            // Coverage continuity still uses $from above, so a long unobserved gap remains unverified.
+            $retainedFrom = (string)($setup['established_at'] ?? $setup['signal_date']);
             foreach ($completedBars as $bar) {
-                if (strcmp((string)$bar[0], $from) > 0 && strcmp((string)$bar[0], $day) <= 0 && (float)$bar[4] < (float)$setup['locked_support']) {
+                if (strcmp((string)$bar[0], $retainedFrom) >= 0 && strcmp((string)$bar[0], $day) <= 0 && (float)$bar[4] < (float)$setup['locked_support']) {
                     $failedDay = (string)$bar[0];
                     break;
                 }
             }
-            if ($failedDay === null && strcmp($day, $from) > 0 && $last < (float)$setup['locked_support']) $failedDay = $day;
+            if ($failedDay === null && strcmp($day, $from) >= 0 && $last < (float)$setup['locked_support']) $failedDay = $day;
             if ($failedDay !== null) {
                 $setup['status'] = 'invalidated';
                 $setup['invalidated_at'] = $failedDay;
