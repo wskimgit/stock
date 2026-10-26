@@ -4,15 +4,15 @@
   "stage": "decision",
   "authority": "chatgpt_final",
   "status": "saved",
-  "decision_id": "mon-final-fa44efa28744468c853c4cf641b59928",
-  "request_id": "mon-20261026T074429Z-independent",
-  "evaluation_id": "independent-1b6b0801911bec347291fefd",
-  "analysis_at": "2026-10-26T07:44:29Z",
-  "outcome": "completed",
-  "result_blob_sha": "7750f091973d067ed884f8b2b8d47037afe53099",
-  "data_blob_sha": "381e07d31643f205854f43f51174b13958034160",
-  "result_commit_sha": "354ffa32a38725b9cb6c23a7f298374805f2960b",
-  "data_commit_sha": "354ffa32a38725b9cb6c23a7f298374805f2960b",
+  "decision_id": "mon-final-7365d2489e21da2b68c0452f364d2b03",
+  "request_id": "mon-20261026T082229Z-emerging",
+  "evaluation_id": "independent-55cc96726111464d30653af5",
+  "analysis_at": "2026-10-26T08:31:08Z",
+  "outcome": "limited_evidence",
+  "result_blob_sha": "8ca3d869d08b17cd6fbdaa13e41100f51ba80b0e",
+  "data_blob_sha": "ea2ccf56931a1c6c1606a4adf19c82cfc7eab208",
+  "result_commit_sha": "92245b0bde9b071f3cfe57c94688ebac72cd5144",
+  "data_commit_sha": "92245b0bde9b071f3cfe57c94688ebac72cd5144",
   "pair_readback_verified": true,
   "selected_count": 8,
   "country_counts": {
@@ -20,8 +20,8 @@
     "US": 2,
     "JP": 3
   },
-  "reviewed_candidate_count": 45,
-  "independent_ohlcv_count": 45,
+  "reviewed_candidate_count": 123,
+  "independent_ohlcv_count": 122,
   "completed_daily_sessions": {
     "KR": "2026-10-26",
     "US": "2026-10-23",
@@ -32,11 +32,11 @@
     "done": 38,
     "pending": 0,
     "candidate_count": 38,
-    "source_ref": "6190feacfe3f4e41cad542c32294cb5d10cfebfd"
+    "source_ref": "a03665d3fce4ac21f65b264799d859c32818d8ec"
   },
   "immediate_buy_count": 0,
   "m2_count": 0,
-  "conditional_m1_count": 4,
+  "conditional_m1_count": 3,
   "publication_route": "chatgpt_direct",
-  "saved_at": "2026-10-26T07:47:06Z"
+  "saved_at": "2026-10-26T08:32:45Z"
 }
