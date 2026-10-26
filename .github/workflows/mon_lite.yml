@@ -359,12 +359,22 @@ jobs:
           guard_assert(($up['reference_setup']['status']??'')==='active','qualified new signal checkpoints one active setup');
           $locked=$up['reference_setup']['locked_support'];
           // Accepted small provider revisions must still be compared with the fixed setup support.
-          $revisionBars=$bars;$revisionBenchmark=$benchmark;guard_append($revisionBars,$revisionBenchmark,$locked+.01,1000);
-          $evaluatedHealthy=guard_analyze($revisionBars,$revisionBenchmark,$up);$revisedDate=end($revisionBars)[0];
+          $revisionBars=$bars;$revisionBenchmark=$benchmark;
+          // A slightly stronger original GC keeps histogram positive on D1; D2 must not accidentally be a new GC.
+          $revisionBars[count($revisionBars)-1][4]=126.5;$revisionInitial=guard_analyze($revisionBars,$revisionBenchmark);$revisionSupport=$revisionInitial['reference_setup']['locked_support'];
+          guard_assert(($revisionInitial['reference_setup']['status']??'')==='active'&&LiteSwing::referenceBuyReady($revisionInitial),'revision control starts from a fully qualified established setup');
+          guard_append($revisionBars,$revisionBenchmark,$revisionSupport+.01,1000);
+          $evaluatedHealthy=guard_analyze($revisionBars,$revisionBenchmark,$revisionInitial);$revisedDate=end($revisionBars)[0];
           guard_assert(($evaluatedHealthy['reference_setup']['status']??'')==='active','pre-revision setup remains active above its fixed support');
-          $revisionBars[count($revisionBars)-1][4]=$locked-.01;guard_append($revisionBars,$revisionBenchmark,126,2500);
+          $revisionBars[count($revisionBars)-1][4]=$revisionSupport-.01;guard_append($revisionBars,$revisionBenchmark,126,2500);
+          $revisionControl=guard_analyze($revisionBars,$revisionBenchmark);
+          $controlDiag=lm_json(['cross'=>$revisionControl['technical']['macd_cross_date']??null,'kind'=>$revisionControl['technical']['macd_kind']??null,'hist'=>$revisionControl['technical']['histogram']??null,'failure_date'=>$revisedDate,'support'=>$revisionSupport]);
+          $controlOk=LiteSwing::referenceBuyReady($revisionControl)&&is_string($revisionControl['technical']['macd_cross_date']??null)&&strcmp($revisionControl['technical']['macd_cross_date'],$revisedDate)<0;
+          guard_assert($controlOk,'revision control retains the old GC and full current gates'.($controlOk?'':': '.$controlDiag));
           $revised=guard_analyze($revisionBars,$revisionBenchmark,$evaluatedHealthy);
-          guard_assert(($revised['reference_setup']['status']??'')==='invalidated'&&($revised['reference_setup']['invalidated_at']??null)===$revisedDate,'accepted revision of an already evaluated bar records its original support failure date');
+          $revisionDiag=lm_json(['status'=>$revised['reference_setup']['status']??null,'failure'=>$revised['reference_setup']['invalidated_at']??null,'rearmed_after'=>$revised['reference_setup']['rearmed_after']??null,'cross'=>$revised['technical']['macd_cross_date']??null,'kind'=>$revised['technical']['macd_kind']??null,'hist'=>$revised['technical']['histogram']??null]);
+          $revisionOk=($revised['reference_setup']['status']??'')==='invalidated'&&($revised['reference_setup']['invalidated_at']??null)===$revisedDate;
+          guard_assert($revisionOk,'accepted revision of an already evaluated bar records its original support failure date'.($revisionOk?'':': '.$revisionDiag));
           guard_assert(!guard_buy_code($revised),'a later recovery with the old cross cannot hide a revised historical support failure');
           $sameBarRevision=guard_fixture()[0];$lastIndex=count($sameBarRevision)-1;$sameBarRevision[$lastIndex][1]=$locked-.2;$sameBarRevision[$lastIndex][3]=$locked-1;$sameBarRevision[$lastIndex][4]=$locked-.01;
           $sameBarBroken=guard_analyze($sameBarRevision,$benchmark,$up);
