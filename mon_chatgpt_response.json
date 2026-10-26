@@ -4,15 +4,15 @@
   "stage": "decision",
   "authority": "chatgpt_final",
   "status": "saved",
-  "decision_id": "mon-final-08eda8257a5cae4b8bc60e14f36602a1",
-  "request_id": "mon-20261024T030054Z-independent",
-  "evaluation_id": "independent-05b9914fae3a506de1a60812",
-  "analysis_at": "2026-10-24T03:04:52Z",
+  "decision_id": "mon-final-fa44efa28744468c853c4cf641b59928",
+  "request_id": "mon-20261026T074429Z-independent",
+  "evaluation_id": "independent-1b6b0801911bec347291fefd",
+  "analysis_at": "2026-10-26T07:44:29Z",
   "outcome": "completed",
-  "result_blob_sha": "109d07f1f5341aaf8a1a23c71a1bf397fdc4882e",
-  "data_blob_sha": "4c2eb945c5827f90ad60a918dfda9926b2f5c7a2",
-  "result_commit_sha": "299b2fc5fb42c1f74322e28ca9cb299fa0431641",
-  "data_commit_sha": "299b2fc5fb42c1f74322e28ca9cb299fa0431641",
+  "result_blob_sha": "7750f091973d067ed884f8b2b8d47037afe53099",
+  "data_blob_sha": "381e07d31643f205854f43f51174b13958034160",
+  "result_commit_sha": "354ffa32a38725b9cb6c23a7f298374805f2960b",
+  "data_commit_sha": "354ffa32a38725b9cb6c23a7f298374805f2960b",
   "pair_readback_verified": true,
   "selected_count": 8,
   "country_counts": {
@@ -20,18 +20,23 @@
     "US": 2,
     "JP": 3
   },
-  "reviewed_candidate_count": 44,
-  "independent_ohlcv_count": 44,
+  "reviewed_candidate_count": 45,
+  "independent_ohlcv_count": 45,
+  "completed_daily_sessions": {
+    "KR": "2026-10-26",
+    "US": "2026-10-23",
+    "JP": "2026-10-26"
+  },
   "php_reference_publication": {
-    "at": "2026-10-24T02:55:38Z",
+    "at": "2026-10-26T07:40:39Z",
     "done": 38,
     "pending": 0,
     "candidate_count": 38,
-    "source_ref": "927b0475e7fee3782e5d3a37cc6c144b52c15c79"
+    "source_ref": "6190feacfe3f4e41cad542c32294cb5d10cfebfd"
   },
   "immediate_buy_count": 0,
   "m2_count": 0,
   "conditional_m1_count": 4,
   "publication_route": "chatgpt_direct",
-  "saved_at": "2026-10-24T03:06:45Z"
+  "saved_at": "2026-10-26T07:47:06Z"
 }
