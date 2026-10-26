@@ -4,39 +4,45 @@
   "stage": "decision",
   "authority": "chatgpt_final",
   "status": "saved",
-  "decision_id": "mon-final-7365d2489e21da2b68c0452f364d2b03",
-  "request_id": "mon-20261026T082229Z-emerging",
-  "evaluation_id": "independent-55cc96726111464d30653af5",
-  "analysis_at": "2026-10-26T08:31:08Z",
+  "decision_id": "mon-final-8abf2e079107d0f4d52ca43599699f44",
+  "request_id": "mon-20261026T124351Z-r20",
+  "evaluation_id": "independent-eab4f137e4cdd40250d7ef14",
+  "analysis_at": "2026-10-26T12:43:51Z",
   "outcome": "limited_evidence",
-  "result_blob_sha": "8ca3d869d08b17cd6fbdaa13e41100f51ba80b0e",
-  "data_blob_sha": "ea2ccf56931a1c6c1606a4adf19c82cfc7eab208",
-  "result_commit_sha": "92245b0bde9b071f3cfe57c94688ebac72cd5144",
-  "data_commit_sha": "92245b0bde9b071f3cfe57c94688ebac72cd5144",
+  "result_blob_sha": "ebfa1650e432901ebd135a8cbe118d28b076d098",
+  "data_blob_sha": "1837359edae97df6449af56adb93b7b564f86150",
+  "result_commit_sha": "b1b3f62a4dc820dd308bd904e655b7bbbbf49e53",
+  "data_commit_sha": "b1b3f62a4dc820dd308bd904e655b7bbbbf49e53",
   "pair_readback_verified": true,
-  "selected_count": 8,
+  "selected_count": 9,
   "country_counts": {
     "KR": 3,
-    "US": 2,
+    "US": 3,
     "JP": 3
   },
-  "reviewed_candidate_count": 123,
-  "independent_ohlcv_count": 122,
+  "reviewed_candidate_count": 124,
+  "independent_ohlcv_count": 123,
   "completed_daily_sessions": {
     "KR": "2026-10-26",
     "US": "2026-10-23",
     "JP": "2026-10-26"
   },
-  "php_reference_publication": {
-    "at": "2026-10-26T07:40:39Z",
-    "done": 38,
-    "pending": 0,
-    "candidate_count": 38,
-    "source_ref": "a03665d3fce4ac21f65b264799d859c32818d8ec"
-  },
   "immediate_buy_count": 0,
   "m2_count": 0,
-  "conditional_m1_count": 3,
+  "conditional_m1_count": 0,
+  "ms7_counts": {
+    "M0": 6,
+    "M1": 0,
+    "M2": 0,
+    "W": 2,
+    "S1": 1,
+    "S2": 0,
+    "S3": 0
+  },
   "publication_route": "chatgpt_direct",
-  "saved_at": "2026-10-26T08:32:45Z"
+  "readback_method": {
+    "result": "Exact commit file content and Git blob SHA",
+    "data": "Exact commit file Git blob SHA plus immutable blob content; GitHub Contents response omits content over 1 MiB"
+  },
+  "saved_at": "2026-10-26T12:47:00Z"
 }
