@@ -6,7 +6,7 @@
  */
 declare(strict_types = 1);
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261020-r19';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261026-r20';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -1098,6 +1098,57 @@ final class LiteSwing {
         return ['kind' => null, 'cross_index' => null];
     }
 
+    private static function averageAt(array $closes, int $period, int $offset = 0): ?float {
+        $end = count($closes) - $offset;
+        if ($end < $period) return null;
+        $sum = 0.0;
+        for ($i = $end - $period; $i < $end; $i++) $sum += $closes[$i];
+        return lm_round6($sum / $period);
+    }
+
+    /** Scalar trend context shares the existing completed-bar snapshot; no extra provider call. */
+    private static function trendContext(array $b, array $closes): array {
+        $n = count($closes);
+        $last = $closes[$n - 1];
+        $v = [];
+        foreach ([5, 20, 60, 120, 200] as $period) {
+            $now = self::averageAt($closes, $period);
+            $prev = self::averageAt($closes, $period, 1);
+            $prev5 = self::averageAt($closes, $period, 5);
+            $v['MA' . $period] = $now;
+            $v['MA' . $period . '_slope_1'] = $now !== null && $prev !== null ? lm_round6($now - $prev) : null;
+            $v['MA' . $period . '_slope_5'] = $now !== null && $prev5 !== null ? lm_round6($now - $prev5) : null;
+        }
+        $priorLow = null;
+        $volumeSum = 0.0;
+        if ($n >= 21) for ($i = $n - 21; $i < $n - 1; $i++) {
+            $priorLow = $priorLow === null ? $b[$i][3] : min($priorLow, $b[$i][3]);
+            $volumeSum += $b[$i][5];
+        }
+        $v['prior20_low'] = $priorLow;
+        $v['volume_ratio20'] = $n >= 21 && $volumeSum > 0 ? lm_round6($b[$n - 1][5] / ($volumeSum / 20)) : null;
+        $v['R20'] = $n >= 21 ? lm_round6($last / $closes[$n - 21] - 1) : null;
+        $enough = $n >= 205;
+        $fall20 = $v['MA20'] !== null && $v['MA20_slope_5'] !== null && $last < $v['MA20'] && $v['MA20_slope_5'] < 0;
+        $fall60 = $v['MA60'] !== null && $v['MA60_slope_5'] !== null && $last < $v['MA60'] && $v['MA60_slope_5'] < 0;
+        $below200 = $v['MA200'] !== null && $last < $v['MA200'];
+        $broken = $priorLow !== null && $last < $priorLow;
+        $up = $enough && $v['R20'] > 0 && $last >= $v['MA5'] && $last >= $v['MA20'] && $last >= $v['MA60']
+            && $v['MA5_slope_1'] > 0
+            && $v['MA20_slope_1'] >= 0 && $v['MA20_slope_5'] >= 0
+            && $v['MA60_slope_1'] >= 0 && $v['MA60_slope_5'] >= 0;
+        $state = !$enough ? 'insufficient_history' : ($broken ? 'support_broken' : (($fall20 || $fall60) ? 'declining' : ($up ? 'uptrend' : 'recovering')));
+        return ['metrics' => $v, 'trend' => [
+            'state' => $state, 'history_complete' => $enough, 'absolute_uptrend' => $up,
+            'below_falling_ma20' => $fall20, 'below_falling_ma60' => $fall60,
+            'below_ma200' => $below200, 'long_term_damage' => $below200,
+            'prior20_low' => $priorLow, 'support_broken' => $broken,
+            'volume_ratio20' => $v['volume_ratio20'],
+            'volume_confirmed' => $v['volume_ratio20'] !== null && $v['volume_ratio20'] >= 1.10,
+            'buy_reference_qualified' => false
+        ]];
+    }
+
     private static function technicalBars(array $b): array {
         $n = count($b);
         if ($n < 15) throw new LiteMonFault('MA_HISTORY_MISSING');
@@ -1127,8 +1178,11 @@ final class LiteSwing {
         if ($reclaim) $qualified[] = 'MA5_RECLAIM_CLOSE';
         if ($kind['kind'] !== null) $qualified[] = $kind['kind'];
         $lastHist = $hist[$n - 1];
+        $context = self::trendContext($b, $closes);
         return [
-            'formula_version' => 'MON-SWING-1.1',
+            'formula_version' => 'MON-SWING-1.2',
+            'trend_metrics' => $context['metrics'],
+            'trend' => $context['trend'],
             'bars_as_of' => $b[$n - 1][0],
             'bar_count' => $n,
             'qualifying_signals' => $qualified,
@@ -1200,56 +1254,272 @@ final class LiteSwing {
         return $bm;
     }
 
-    public static function ms7FromAnalysis(array $a): array {
-        $labels = [
-            'M0' => '관찰',
-            'M1' => '매입 검토',
-            'M2' => '분할매입',
-            'W' => '대기',
-            'S1' => '매도 준비',
-            'S2' => '분할매도',
-            'S3' => '대부분 매도'
-        ];
+    /** Recheck stored scalar gates before display; a cached true flag is not enough. */
+    public static function referenceBuyReady(array $a): bool {
         $m = $a['metrics'] ?? [];
         $t = $a['technical'] ?? [];
+        $trend = $a['trend'] ?? [];
+        $check = $a['final_check'] ?? [];
+        if (in_array(lm_get($check, 'status'), ['unavailable', 'needs_review'], true) || lm_get($check, 'error')) return false;
+        if (($a['eligible'] ?? false) !== true || ($t['formula_version'] ?? '') !== 'MON-SWING-1.2'
+            || ($t['technical_qualified'] ?? false) !== true || ($trend['buy_reference_qualified'] ?? false) !== true
+            || ($trend['history_complete'] ?? false) !== true || ($trend['support_broken'] ?? false)
+            || in_array($a['reference_setup']['status'] ?? '', ['invalidated', 'unverified'], true)) return false;
+        $day = $a['bars_as_of'] ?? null;
+        if (!self::referenceDate($day)) return false;
+        $cross = $t['macd_cross_date'] ?? null;
+        $age = lm_num($t['macd_cross_age_days'] ?? null);
+        $event = ($t['ma5_reclaim_close'] ?? false) === true || (in_array($t['macd_kind'] ?? null, ['MACD_GOLD', 'MACD_AFTER'], true)
+            && self::referenceDate($cross) && strcmp($cross, $day) <= 0 && $age !== null && $age >= 0 && $age <= 3);
+        if (!$event) return false;
+        $values = [];
+        foreach (['last_close', 'MA5', 'MA20', 'MA60', 'MA200', 'MA5_slope_1', 'MA20_slope_1', 'MA20_slope_5',
+            'MA60_slope_1', 'MA60_slope_5', 'ATR14', 'volume_ratio20', 'R20', 'RS20_pp', 'prior20_low'] as $key) {
+            $values[$key] = lm_num($m[$key] ?? null);
+            if ($values[$key] === null) return false;
+        }
+        $hist = lm_num($t['histogram'] ?? null);
+        $last = $values['last_close'];
+        return $hist !== null && $hist > 0 && $values['R20'] > 0 && $values['RS20_pp'] > 0
+            && $values['ATR14'] > 0 && $values['volume_ratio20'] >= 1.10
+            && $last >= $values['MA5'] && $last >= $values['MA20'] && $last >= $values['MA60'] && $last >= $values['MA200']
+            && $last >= $values['prior20_low'] && $last - $values['MA20'] <= 2 * $values['ATR14']
+            && $values['MA5_slope_1'] > 0 && $values['MA20_slope_1'] >= 0 && $values['MA20_slope_5'] >= 0
+            && $values['MA60_slope_1'] >= 0 && $values['MA60_slope_5'] >= 0;
+    }
+
+    /** Reference MS7 is a diagnostic, never an order or a ChatGPT final decision. */
+    public static function ms7FromAnalysis(array $a): array {
+        $labels = ['M0' => '관찰', 'M1' => '매입 검토', 'M2' => '분할매입', 'W' => '대기',
+            'S1' => '매도 준비', 'S2' => '분할매도', 'S3' => '대부분 매도'];
+        $m = $a['metrics'] ?? [];
+        $t = $a['technical'] ?? [];
+        $trend = $a['trend'] ?? [];
         $rs = lm_num($m['RS20_pp'] ?? null);
         $last = lm_num($m['last_close'] ?? null);
         $ma5 = lm_num($m['MA5'] ?? null);
         $ma20 = lm_num($m['MA20'] ?? null);
         $hist = lm_num($t['histogram'] ?? null);
-        $tech = ($t['technical_qualified'] ?? false) === true;
-        if ($rs === null || $last === null || $ma5 === null || $ma20 === null) return [
-            'code' => 'W',
-            'label' => $labels['W'],
-            'confidence' => 'PROVISIONAL',
-            'reason_codes' => ['data_pending']
+        if ($rs === null || $last === null || $ma5 === null || $ma20 === null || !isset($trend['state'])) return [
+            'code' => 'W', 'label' => $labels['W'], 'confidence' => 'PROVISIONAL', 'reason_codes' => ['trend_data_pending']
         ];
-        if ($rs <= - 15 && $last < $ma20 && ($hist === null || $hist < 0)) {
+        $invalidated = ($a['reference_setup']['status'] ?? '') === 'invalidated';
+        if (($trend['support_broken'] ?? false) || $invalidated) {
+            $code = $rs <= -15 ? 'S3' : ($rs <= -10 ? 'S2' : 'S1');
+            $why = [$invalidated ? 'previous_setup_invalidated' : 'prior20_support_broken', 'risk_warning_not_order'];
+        } elseif (($trend['below_falling_ma20'] ?? false) && ($trend['below_falling_ma60'] ?? false)) {
+            $code = $rs <= -15 ? 'S3' : ($rs <= -10 ? 'S2' : 'S1');
+            $why = ['absolute_downtrend', 'risk_warning_not_order'];
+        } elseif ($rs <= -15 && $last < $ma20 && ($hist === null || $hist < 0)) {
             $code = 'S3';
-            $why = ['severe_relative_weakness', 'below_ma20'];
-        } elseif ($rs <= - 10 && $last < $ma20) {
+            $why = ['severe_relative_weakness', 'below_ma20', 'risk_warning_not_order'];
+        } elseif ($rs <= -10 && $last < $ma20) {
             $code = 'S2';
-            $why = ['relative_weakness', 'below_ma20'];
-        } elseif ($rs <= - 5 && $last < $ma20) {
+            $why = ['relative_weakness', 'below_ma20', 'risk_warning_not_order'];
+        } elseif ($rs <= -5 && $last < $ma20) {
             $code = 'S1';
-            $why = ['weak_relative_strength', 'below_ma20'];
-        } elseif ($tech && $rs > 0 && $last >= $ma20) {
-            $code = 'M2';
-            $why = ['swing_signal', 'positive_rs20', 'above_ma20'];
-        } elseif (($tech && $rs > - 2) || ($rs >= 3 && $last >= $ma5)) {
-            $code = 'M1';
-            $why = ['improving_structure'];
-        } elseif ($rs > 0 || $last >= $ma5) {
+            $why = ['weak_relative_strength', 'below_ma20', 'risk_warning_not_order'];
+        } elseif (self::referenceBuyReady($a)) {
+            $stack = lm_num($m['MA200'] ?? null) !== null && $ma5 >= $ma20 && $ma20 >= (float)$m['MA60']
+                && (float)$m['MA60'] >= (float)$m['MA200'] && (float)($m['MA200_slope_5'] ?? -1) >= 0;
+            $code = $stack ? 'M2' : 'M1';
+            $why = [$stack ? 'aligned_trend_reference' : 'confirmed_recovery_reference', 'qualified_swing_signal', 'volume_confirmed', 'positive_rs20'];
+        } elseif (($trend['history_complete'] ?? false) && ($last >= $ma5 || ($hist !== null && $hist > 0))) {
             $code = 'M0';
-            $why = ['relative_or_price_support'];
+            $why = ['recovery_observation_only', 'buy_conditions_incomplete'];
         } else {
             $code = 'W';
             $why = ['signal_not_ready'];
         }
-        return ['code' => $code, 'label' => $labels[$code], 'confidence' => 'CONFIRMED', 'reason_codes' => $why];
+        return ['code' => $code, 'label' => $labels[$code], 'confidence' => 'REFERENCE_ONLY', 'reason_codes' => $why];
     }
 
-    public static function analyzeMapped(array $symbol, array $bars, array $bm): array {
+    public static function referenceDate($value): bool {
+        if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m)) return false;
+        return checkdate((int)$m[2], (int)$m[3], (int)$m[1]);
+    }
+
+    /** A corrupt future evaluation date cannot outrank real completed bars forever. */
+    public static function referenceCheckpointDay($value, ?array $setup = null): ?string {
+        if (!self::referenceDate($value)) return null;
+        $today = (new DateTimeImmutable('now', new DateTimeZone('Asia/Seoul')))->format('Y-m-d');
+        if (strcmp($value, $today) <= 0) return $value;
+        // Quarantine only the future checkpoint date. Preserve independently valid past evidence.
+        $anchor = null;
+        if (($setup['status'] ?? '') === 'invalidated') $anchor = $setup['invalidated_at'] ?? null;
+        elseif (($setup['status'] ?? '') === 'active') $anchor = $setup['established_at'] ?? null;
+        elseif (($setup['status'] ?? '') === 'unverified') $anchor = $setup['first_guard_unverified_at'] ?? null;
+        return self::referenceDate($anchor) && strcmp($anchor, $today) <= 0 ? $anchor : null;
+    }
+
+    /** Only bounded scalar fields from the existing cache may cross a restart. */
+    public static function normalizeReferenceSetup($value): ?array {
+        $v = is_object($value) ? (array)$value : $value;
+        if (!is_array($v)) return null;
+        if (($v['status'] ?? '') === 'unverified') return ['status' => 'unverified',
+            'first_guard_unverified_at' => self::referenceDate($v['first_guard_unverified_at'] ?? null) ? $v['first_guard_unverified_at'] : null,
+            'previous_failure_date_unknown' => true, 'reason_codes' => ['reference_setup_invalid']];
+        $status = $v['status'] ?? '';
+        $support = lm_num($v['locked_support'] ?? null);
+        if (!in_array($status, ['active', 'invalidated'], true) || !self::referenceDate($v['signal_date'] ?? null)
+            || $support === null || $support <= 0) return null;
+        $established = $v['established_at'] ?? $v['signal_date'];
+        if (!self::referenceDate($established) || strcmp($established, $v['signal_date']) < 0) return null;
+        $out = ['status' => $status, 'signal_date' => $v['signal_date'],
+            'established_at' => $established, 'locked_support' => $support,
+            'invalidated_at' => null, 'invalidated_support' => null];
+        if ($status === 'invalidated') {
+            $floor = lm_num($v['invalidated_support'] ?? null);
+            if (!self::referenceDate($v['invalidated_at'] ?? null) || strcmp($v['invalidated_at'], $established) < 0
+                || $floor === null || $floor <= 0) return null;
+            $out['invalidated_at'] = $v['invalidated_at'];
+            $out['invalidated_support'] = $floor;
+        }
+        if (isset($v['rearmed_after'])) {
+            $floor = lm_num($v['previous_invalidated_support'] ?? null);
+            if (!self::referenceDate($v['rearmed_after']) || $floor === null || $floor <= 0
+                || strcmp($v['signal_date'], $v['rearmed_after']) <= 0) return null;
+            $out['rearmed_after'] = $v['rearmed_after'];
+            $out['previous_invalidated_support'] = $floor;
+        }
+        if (($v['previous_guard_unverified'] ?? false) === true) {
+            if (!self::referenceDate($v['guard_unverified_since'] ?? null) || strcmp($v['signal_date'], $v['guard_unverified_since']) <= 0) return null;
+            $out['previous_guard_unverified'] = true;
+            $out['previous_failure_date_unknown'] = true;
+            $out['guard_unverified_since'] = $v['guard_unverified_since'];
+        }
+        $allowed = ['locked_support_broken', 'previous_hypothesis_failed', 'new_signal_after_failure', 'new_macd_cross_setup',
+            'old_support_recovered', 'reference_hypothesis_started', 'prior_reference_support_preserved', 'new_cross_after_unverified'];
+        $out['reason_codes'] = [];
+        foreach (array_slice(is_array($v['reason_codes'] ?? null) ? $v['reason_codes'] : [], 0, 4) as $reason)
+            if (is_string($reason) && in_array($reason, $allowed, true)) $out['reason_codes'][] = $reason;
+        return $out;
+    }
+
+    /** Preserve one fixed hypothesis, not a history of prices or an inferred account position. */
+    public static function applyReferenceSetup(array $a, array $prior = [], array $completedBars = []): array {
+        $day = (string)($a['bars_as_of'] ?? '');
+        $last = lm_num($a['metrics']['last_close'] ?? null);
+        $old = $prior['reference_setup'] ?? null;
+        $setup = self::normalizeReferenceSetup($old);
+        if ($setup === null && !array_key_exists('reference_setup', $prior) && ($prior['eligible'] ?? false) === true
+            && in_array($prior['ms7']['code'] ?? '', ['M1', 'M2'], true)
+            && lm_num($prior['metrics']['S'] ?? null) !== null && is_string($prior['bars_as_of'] ?? null)) {
+            $setup = ['status' => 'active', 'signal_date' => $prior['bars_as_of'], 'established_at' => $prior['bars_as_of'], 'locked_support' => $prior['metrics']['S'],
+                'invalidated_at' => null, 'invalidated_support' => null, 'reason_codes' => ['prior_reference_support_preserved']];
+            $old = $setup;
+            $prior['reference_setup'] = $setup;
+            $setup = self::normalizeReferenceSetup($setup);
+        }
+        $priorDay = (string)($prior['reference_setup_last_evaluated_date'] ?? $prior['bars_as_of'] ?? '');
+        if ($setup && self::referenceDate($priorDay) && strcmp($day, $priorDay) < 0) {
+            $a['reference_setup'] = $setup;
+            $a['eligible'] = false;
+            $a['status'] = 'observe';
+            $a['trend']['buy_reference_qualified'] = false;
+            $a['reason_codes'][] = 'reference_setup_older_bar';
+            $a['technical']['trend'] = $a['trend'];
+            $a['ms7'] = self::ms7FromAnalysis($a);
+            return $a;
+        }
+        $futureGuard = false;
+        foreach (['signal_date', 'established_at', 'invalidated_at', 'rearmed_after', 'guard_unverified_since'] as $field)
+            if (isset($setup[$field]) && self::referenceDate($setup[$field]) && strcmp($setup[$field], $day) > 0) $futureGuard = true;
+        if ((array_key_exists('reference_setup', $prior) && $setup === null) || ($setup['status'] ?? '') === 'unverified' || $futureGuard) {
+            $raw = is_object($old) ? (array)$old : (is_array($old) ? $old : []);
+            $first = $setup['first_guard_unverified_at'] ?? $raw['first_guard_unverified_at'] ?? null;
+            if (!self::referenceDate($first) || strcmp($first, $day) > 0) $first = $day;
+            $candidate = $a;
+            unset($candidate['reference_setup']);
+            $cross = $a['technical']['macd_cross_date'] ?? null;
+            $newCross = self::referenceDate($cross) && strcmp($cross, $first) > 0 && strcmp($cross, $day) <= 0
+                && in_array($a['technical']['macd_kind'] ?? null, ['MACD_GOLD', 'MACD_AFTER'], true);
+            if ($newCross && self::referenceBuyReady($candidate)) {
+                $a['reference_setup'] = ['status' => 'active', 'signal_date' => $cross, 'established_at' => $day,
+                    'locked_support' => $a['metrics']['S'], 'invalidated_at' => null, 'invalidated_support' => null,
+                    'previous_guard_unverified' => true, 'previous_failure_date_unknown' => true,
+                    'guard_unverified_since' => $first, 'reason_codes' => ['new_cross_after_unverified']];
+            } else {
+                $a['reference_setup'] = ['status' => 'unverified', 'first_guard_unverified_at' => $first,
+                    'previous_failure_date_unknown' => true, 'reason_codes' => ['reference_setup_invalid']];
+                $a['eligible'] = false;
+                $a['status'] = 'observe';
+                $a['trend']['buy_reference_qualified'] = false;
+                $a['reason_codes'][] = 'reference_setup_invalid';
+            }
+            $a['technical']['trend'] = $a['trend'];
+            $a['ms7'] = self::ms7FromAnalysis($a);
+            return $a;
+        }
+        $event = ($a['technical']['ma5_reclaim_close'] ?? false) ? $day : null;
+        $cross = $a['technical']['macd_cross_date'] ?? null;
+        if (in_array($a['technical']['macd_kind'] ?? null, ['MACD_GOLD', 'MACD_AFTER'], true) && is_string($cross)
+            && self::referenceDate($cross) && strcmp($cross, $day) <= 0 && ($event === null || strcmp($cross, $event) > 0)) $event = $cross;
+        if ($setup && ($setup['status'] ?? '') === 'active' && $last !== null) {
+            $from = max((string)($setup['established_at'] ?? $setup['signal_date']), $priorDay);
+            $failedDay = null;
+            if ($completedBars && strcmp($from, (string)$completedBars[0][0]) < 0) {
+                $a['reference_setup'] = ['status' => 'unverified', 'first_guard_unverified_at' => $day,
+                    'previous_failure_date_unknown' => true, 'reason_codes' => ['reference_setup_invalid']];
+                $a['eligible'] = false;
+                $a['status'] = 'observe';
+                $a['trend']['buy_reference_qualified'] = false;
+                $a['reason_codes'][] = 'reference_setup_window_missing';
+                $a['technical']['trend'] = $a['trend'];
+                $a['ms7'] = self::ms7FromAnalysis($a);
+                return $a;
+            }
+            // Recheck the retained window for provider corrections, including previously evaluated bars.
+            // Coverage continuity still uses $from above, so a long unobserved gap remains unverified.
+            $retainedFrom = (string)($setup['established_at'] ?? $setup['signal_date']);
+            foreach ($completedBars as $bar) {
+                if (strcmp((string)$bar[0], $retainedFrom) >= 0 && strcmp((string)$bar[0], $day) <= 0 && (float)$bar[4] < (float)$setup['locked_support']) {
+                    $failedDay = (string)$bar[0];
+                    break;
+                }
+            }
+            if ($failedDay === null && strcmp($day, $from) >= 0 && $last < (float)$setup['locked_support']) $failedDay = $day;
+            if ($failedDay !== null) {
+                $setup['status'] = 'invalidated';
+                $setup['invalidated_at'] = $failedDay;
+                $setup['invalidated_support'] = $setup['locked_support'];
+                $setup['reason_codes'] = ['locked_support_broken', 'previous_hypothesis_failed'];
+            }
+        }
+        $candidate = $a;
+        unset($candidate['reference_setup']);
+        $full = self::referenceBuyReady($candidate);
+        unset($candidate);
+        if ($setup && ($setup['status'] ?? '') === 'invalidated') {
+            $failed = (string)($setup['invalidated_at'] ?? '');
+            $floor = lm_num($setup['invalidated_support'] ?? $setup['locked_support'] ?? null);
+            $newSignal = $event !== null && strcmp($event, $failed) > 0;
+            $newCross = is_string($cross) && strcmp($cross, $failed) > 0
+                && in_array($a['technical']['macd_kind'] ?? null, ['MACD_GOLD', 'MACD_AFTER'], true);
+            $oldSupportRecovered = $floor !== null && $last !== null && $last > $floor;
+            if (!$full || !$newSignal || (!$newCross && !$oldSupportRecovered)) {
+                $a['eligible'] = false;
+                $a['status'] = 'risk';
+                $a['trend']['buy_reference_qualified'] = false;
+                $a['reason_codes'][] = 'previous_setup_invalidated';
+            } else {
+                $setup = ['status' => 'active', 'signal_date' => $event, 'established_at' => $day, 'locked_support' => $a['metrics']['S'],
+                    'invalidated_at' => null, 'invalidated_support' => null,
+                    'rearmed_after' => $failed, 'previous_invalidated_support' => $floor,
+                    'reason_codes' => ['new_signal_after_failure', $newCross ? 'new_macd_cross_setup' : 'old_support_recovered']];
+            }
+        } elseif ($setup === null && $full && $event !== null) {
+            $setup = ['status' => 'active', 'signal_date' => $event, 'established_at' => $day, 'locked_support' => $a['metrics']['S'],
+                'invalidated_at' => null, 'invalidated_support' => null, 'reason_codes' => ['reference_hypothesis_started']];
+        }
+        if ($setup !== null) $a['reference_setup'] = $setup;
+        $a['reason_codes'] = array_values(array_unique($a['reason_codes']));
+        $a['technical']['trend'] = $a['trend'];
+        $a['ms7'] = self::ms7FromAnalysis($a);
+        return $a;
+    }
+
+    public static function analyzeMapped(array $symbol, array $bars, array $bm, array $priorAnalysis = []): array {
         $b = self::bars($bars);
         $n = count($b);
         if ($n < 60) throw new LiteMonFault('HISTORY_MISSING');
@@ -1311,7 +1581,26 @@ final class LiteSwing {
             'S' => lm_round6($support),
             'R' => lm_round6($resistance)
         ];
-        $eligible = $metrics['RS20_pp'] > 0 && $tech['technical_qualified'];
+        foreach ($tech['trend_metrics'] as $key => $value) if (!array_key_exists($key, $metrics)) $metrics[$key] = $value;
+        $trend = $tech['trend'];
+        $trend['ma20_extension_pct'] = $ma20 > 0 ? lm_round6(100 * ($last / $ma20 - 1)) : null;
+        $trend['ma20_distance_atr'] = $atr > 0 ? lm_round6(($last - $ma20) / $atr) : null;
+        $trend['overextended'] = $atr > 0 ? $last - $ma20 > 2 * $atr : null;
+        $trend['buy_reference_qualified'] = $trend['absolute_uptrend'] && !$trend['below_ma200'] && !$trend['support_broken'] && $trend['overextended'] === false
+            && $trend['volume_confirmed'] && $metrics['RS20_pp'] > 0 && $metrics['R20'] > 0
+            && $tech['technical_qualified'] && $tech['histogram'] !== null && $tech['histogram'] > 0;
+        $trend['reasons'] = array_values(array_filter([
+            !$trend['history_complete'] ? 'long_history_incomplete' : null,
+            $trend['below_falling_ma20'] ? 'below_falling_ma20' : null,
+            $trend['below_falling_ma60'] ? 'below_falling_ma60' : null,
+            $trend['below_ma200'] ? 'below_ma200' : null,
+            $trend['support_broken'] ? 'prior20_support_broken' : null,
+            !$trend['volume_confirmed'] ? 'volume_below_1_10' : null,
+            $trend['overextended'] === true ? 'ma20_extension_above_2_atr' : null,
+            $trend['overextended'] === null ? 'extension_atr_unavailable' : null,
+            $metrics['R20'] <= 0 ? 'absolute_return_nonpositive' : null
+        ]));
+        $eligible = $trend['buy_reference_qualified'];
         $a = [
             'symbol_id' => $symbol['symbol_id'],
             'country' => $symbol['country'],
@@ -1320,20 +1609,25 @@ final class LiteSwing {
             'bars_as_of' => $lastDate,
             'metrics' => $metrics,
             'technical' => $tech,
+            'trend' => $trend,
             'entry_plans' => $plans,
             'eligible' => $eligible,
-            'status' => $eligible ? 'pass' : 'near',
+            'status' => $eligible ? 'pass' : ($trend['support_broken'] || $trend['state'] === 'declining' ? 'risk' : 'observe'),
             'reason_codes' => array_values(
                 array_filter(
                     [
                         $metrics['RS20_pp'] <= 0 ? 'not_stronger_than_market' : null,
-                        !$tech['technical_qualified'] ? 'no_swing_signal' : null
+                        !$tech['technical_qualified'] ? 'no_swing_signal' : null,
+                        !$trend['absolute_uptrend'] ? 'absolute_trend_not_confirmed' : null,
+                        !$trend['volume_confirmed'] ? 'volume_below_1_10' : null,
+            $trend['overextended'] === true ? 'ma20_extension_above_2_atr' : null,
+            $trend['overextended'] === null ? 'extension_atr_unavailable' : null,
+                        $trend['support_broken'] ? 'prior20_support_broken' : null
                     ]
                 )
             )
         ];
-        $a['ms7'] = self::ms7FromAnalysis($a);
-        return $a;
+        return self::applyReferenceSetup($a, $priorAnalysis, $b);
     }
 }
 
@@ -1763,7 +2057,7 @@ final class LitePolicy {
     const FINAL_RECHECK_TTL = 14400;
     const LOW_MEMORY_HARD_FLOOR = 20971520;
     const LOW_MEMORY_RETRY_SECONDS = 120;
-    const CALCULATION_VERSION = 'MON-LITE-CALC-2.2.3-r15';
+    const CALCULATION_VERSION = 'MON-LITE-CALC-2.2.3-r20';
 
     public static function nextFullAt(?int $now = null): string {
         $now = $now ?? time();
@@ -2199,6 +2493,68 @@ final class LiteMarketData {
         return $c;
     }
 
+    public static function needsTrendHistoryRefresh($row): bool {
+        $bars = lm_get($row, 'bars');
+        return is_array($bars) && count($bars) < 205 && lm_get($row, 'calculation_version') !== LitePolicy::CALCULATION_VERSION;
+    }
+
+    public function priorReferenceAnalysis(stdClass $c, string $sid, $row): array {
+        $prior = lm_array(lm_get($row, 'analysis')) ?? [];
+        $stored = lm_get(lm_get($c, 'reference_setups'), $sid);
+        if (!$stored) return $prior;
+        $storedSetup = LiteSwing::normalizeReferenceSetup(lm_get($stored, 'reference_setup'));
+        $storedDay = LiteSwing::referenceCheckpointDay(lm_get($stored, 'last_evaluated_date'), $storedSetup);
+        $timelineValid = $storedDay !== null;
+        foreach (['signal_date', 'established_at', 'invalidated_at', 'rearmed_after', 'guard_unverified_since', 'first_guard_unverified_at'] as $field)
+            if (isset($storedSetup[$field]) && ($storedDay === null || strcmp((string)$storedSetup[$field], $storedDay) > 0)) $timelineValid = false;
+        if ($storedSetup === null || !$timelineValid) {
+            $prior['reference_setup'] = ['status' => 'unverified', 'first_guard_unverified_at' => $timelineValid ? ($storedSetup['first_guard_unverified_at'] ?? null) : null,
+                'previous_failure_date_unknown' => true, 'reason_codes' => ['reference_setup_invalid']];
+            return $prior;
+        }
+        // The separate checkpoint is authoritative even if an old symbol row is replayed or re-added.
+        $prior['reference_setup'] = $storedSetup;
+        $prior['reference_setup_last_evaluated_date'] = $storedDay;
+        return $prior;
+    }
+
+    public function guardCurrentAnalysis(stdClass $c, string $sid, $row): array {
+        $a = lm_array(lm_get($row, 'analysis')) ?? [];
+        return LiteSwing::applyReferenceSetup($a, $this->priorReferenceAnalysis($c, $sid, $row), (array)lm_get($row, 'bars', []));
+    }
+
+    public function rememberReferenceSetup(stdClass $c, string $sid, array $a): void {
+        if (!array_key_exists('reference_setup', $a) || !self::symbolFromId($sid)) return;
+        $setup = LiteSwing::normalizeReferenceSetup($a['reference_setup']);
+        if ($setup === null) $setup = ['status' => 'unverified', 'reason_codes' => ['reference_setup_invalid']];
+        if (!property_exists($c, 'reference_setups') || !is_object($c->reference_setups)) $c->reference_setups = new stdClass();
+        $day = (string)($a['bars_as_of'] ?? '');
+        if (LiteSwing::referenceCheckpointDay($day) === null) return;
+        $old = lm_get($c->reference_setups, $sid);
+        $oldSetup = LiteSwing::normalizeReferenceSetup(lm_get($old, 'reference_setup'));
+        $oldDay = LiteSwing::referenceCheckpointDay(lm_get($old, 'last_evaluated_date'), $oldSetup);
+        $knownFailure = is_array($oldSetup) && ($oldSetup['status'] ?? '') === 'invalidated'
+            && $oldDay !== null && strcmp((string)$oldSetup['invalidated_at'], $oldDay) <= 0;
+        $legitimateRearm = is_array($oldSetup) && ($setup['status'] ?? '') === 'active' && LiteSwing::referenceBuyReady($a)
+            && ((($oldSetup['status'] ?? '') === 'invalidated' && ($setup['rearmed_after'] ?? null) === ($oldSetup['invalidated_at'] ?? null))
+                || (($oldSetup['status'] ?? '') === 'unverified' && ($setup['previous_guard_unverified'] ?? false) === true
+                    && ($setup['guard_unverified_since'] ?? null) === ($oldSetup['first_guard_unverified_at'] ?? null)));
+        // Uncertain or unproven incoming state cannot erase a dated, known failure.
+        // A future/otherwise inconsistent old checkpoint is not protected as known evidence.
+        if ($knownFailure && (($setup['status'] ?? '') === 'unverified'
+            || (($setup['status'] ?? '') === 'active' && !$legitimateRearm))) return;
+        if ($old && $oldDay !== null && (strcmp($day, $oldDay) < 0 || ($day === $oldDay && is_array($oldSetup)
+            && in_array($oldSetup['status'] ?? '', ['invalidated', 'unverified'], true) && ($setup['status'] ?? '') === 'active' && !$legitimateRearm))) return;
+        $c->reference_setups->$sid = (object)['reference_setup' => $setup, 'last_evaluated_date' => $day];
+        $rows = get_object_vars($c->reference_setups);
+        if (count($rows) <= 256) return;
+        uksort($rows, static function($left, $right) use($rows) {
+            return strcmp((string)lm_get($rows[$left], 'last_evaluated_date', ''), (string)lm_get($rows[$right], 'last_evaluated_date', ''))
+                ?: strcmp($left, $right);
+        });
+        $c->reference_setups = (object)array_slice($rows, -256, null, true);
+    }
+
     public function pendingCount(stdClass $c): int {
         $ids = [];
         $active = [];
@@ -2483,7 +2839,7 @@ final class LiteMarketData {
         foreach ($watch as $sym) {
             $r = lm_get($c->symbols, $sym['symbol_id']);
             if (!isset ($queued[$sym['symbol_id']]) && $this->rowCurrent($c, $sym, $r)) {
-                $a = $r->analysis;
+                $a = $this->guardCurrentAnalysis($c, $sym['symbol_id'], $r);
                 if (!isset ($a['ms7']) || !is_array($a['ms7'])) $a['ms7'] = LiteSwing::ms7FromAnalysis($a);
                 $fc = lm_get($r, 'final_check');
                 if ($fc instanceof stdClass) $a['final_check'] = (array) $fc;
@@ -2512,6 +2868,18 @@ final class LiteMarketData {
         return [$results, $errors, $done, $pending];
     }
 
+    public static function referenceStateLabel(array $row): string {
+        $labels = ['support_broken' => '지지 붕괴', 'declining' => '중기 하락', 'recovering' => '회복 관찰',
+            'uptrend' => '단·중기 상승 확인', 'insufficient_history' => '추세 자료 부족',
+            'analysis_refresh_required' => '새 규격 재계산 필요', 'final_check_unavailable' => '가격 보조확인 미완료',
+            'reference_setup_review_required' => '이전 가설 검증 필요', 'pending' => '자료 미확인',
+            'needs_review' => '자료 충돌 확인 필요', 'evaluated' => '완료봉 확인', 'unresolved' => '자료 미확인'];
+        $state = (string)($row['trend']['state'] ?? $row['data_status'] ?? 'unresolved');
+        $text = $labels[$state] ?? '자료 확인 필요';
+        if (($row['trend']['long_term_damage'] ?? false) === true) $text .= ' · 장기선 하회';
+        return $text;
+    }
+
     public static function ms7Priority(string $code): int {
         $m = ['M2' => 0, 'M1' => 1, 'M0' => 2, 'W' => 3, 'S1' => 4, 'S2' => 5, 'S3' => 6];
         return $m[$code] ?? 9;
@@ -2537,85 +2905,74 @@ final class LiteMarketData {
         ];
     }
 
-    public static function recommendThree(array $rows, array $candidateIds = []): array {
-        $countries = ['KR', 'US', 'JP'];
-        $out = ['KR' => [], 'US' => [], 'JP' => []];
-        $used = [];
-        $evaluated = [];
+    /** Separate discovery observations and risk warnings from qualified buy references. */
+    public static function referenceLists(array $rows, array $candidateIds = []): array {
+        $empty = ['KR' => [], 'US' => [], 'JP' => []];
+        $lists = ['buy_candidates' => $empty, 'observations' => $empty, 'risk_warnings' => $empty, 'unresolved' => $empty];
+        $seen = [];
+        usort($rows, static function($a, $b) {
+            $ca = (string)lm_get(lm_get($a, 'ms7'), 'code', 'W');
+            $cb = (string)lm_get(lm_get($b, 'ms7'), 'code', 'W');
+            $pa = in_array($ca, ['S1', 'S2', 'S3'], true) ? -(int)substr($ca, 1) : self::ms7Priority($ca);
+            $pb = in_array($cb, ['S1', 'S2', 'S3'], true) ? -(int)substr($cb, 1) : self::ms7Priority($cb);
+            if ($pa !== $pb) return $pa <=> $pb;
+            $ma = lm_get($a, 'metrics');
+            $mb = lm_get($b, 'metrics');
+            if (in_array($ca, ['S1', 'S2', 'S3'], true)) return (float)lm_get($ma, 'RS20_pp', -999) <=> (float)lm_get($mb, 'RS20_pp', -999)
+                ?: (float)lm_get($ma, 'R20', -999) <=> (float)lm_get($mb, 'R20', -999)
+                ?: strcmp((string)lm_get($a, 'symbol_id', ''), (string)lm_get($b, 'symbol_id', ''));
+            return (float)lm_get($mb, 'RS20_pp', -999) <=> (float)lm_get($ma, 'RS20_pp', -999)
+                ?: strcmp((string)lm_get($a, 'symbol_id', ''), (string)lm_get($b, 'symbol_id', ''));
+        });
         foreach ($rows as $r) {
             if (!is_array($r)) continue;
             $sid = (string)($r['symbol_id'] ?? '');
-            $p = explode('|', $sid);
-            $country = $r['country'] ?? ($p[0] ?? '');
-            if (!in_array($country, $countries, true) || !isset ($r['metrics'])) continue;
-            if (!isset ($r['ms7']) || !is_array($r['ms7'])) $r['ms7'] = LiteSwing::ms7FromAnalysis($r);
-            $evaluated[] = $r;
-        }
-        usort(
-            $evaluated,
-            function ($a, $b) {
-                $pa = self::ms7Priority((string)($a['ms7']['code'] ?? 'W'));
-                $pb = self::ms7Priority((string)($b['ms7']['code'] ?? 'W'));
-                if ($pa !== $pb) return $pa <=> $pb;
-                $ra = (float)($a['metrics']['RS20_pp'] ?? - 999);
-                $rb = (float)($b['metrics']['RS20_pp'] ?? - 999);
-                if ($ra !== $rb) return $rb <=> $ra;
-                $xa = (float)($a['metrics']['R20'] ?? - 999);
-                $xb = (float)($b['metrics']['R20'] ?? - 999);
-                return $xb <=> $xa ? : strcmp((string) $a['symbol_id'], (string) $b['symbol_id']);
-            }
-        );
-        foreach ($evaluated as $r) {
-            $country = $r['country'];
-            if (count($out[$country]) >= 3) continue;
-            $sid = $r['symbol_id'];
-            if (isset ($used[$sid])) continue;
-            $out[$country][] = [
-                'symbol_id' => $sid,
-                'country' => $country,
-                'name' => $r['name'] ?? explode('|', $sid)[2],
-                'bars_as_of' => $r['bars_as_of'] ?? null,
-                'last_close' => $r['metrics']['last_close'] ?? null,
-                'ms7' => $r['ms7'],
-                'data_status' => 'evaluated',
-                'reason_codes' => $r['reason_codes'] ?? []
+            $sym = self::symbolFromId($sid, $r);
+            if (!$sym || isset($seen[$sid])) continue;
+            $seen[$sid] = true;
+            $cc = $sym['country'];
+            $metrics = is_array($r['metrics'] ?? null) ? $r['metrics'] : null;
+            $ms = is_array($r['ms7'] ?? null) ? $r['ms7'] : LiteSwing::ms7FromAnalysis($r);
+            $code = (string)($ms['code'] ?? 'W');
+            $ready = ($r['selection_ready'] ?? true) !== false;
+            $current = ($r['technical']['formula_version'] ?? '') === 'MON-SWING-1.2';
+            $check = $r['final_check'] ?? [];
+            $checkUnavailable = in_array(lm_get($check, 'status'), ['unavailable', 'needs_review'], true) || (bool)lm_get($check, 'error');
+            $guardUnverified = ($r['reference_setup']['status'] ?? '') === 'unverified'
+                || in_array('reference_setup_older_bar', $r['reason_codes'] ?? [], true);
+            if ($metrics !== null && (!$current || $checkUnavailable || $guardUnverified)) $ms = ['code' => 'W', 'label' => '대기', 'confidence' => 'PROVISIONAL',
+                'reason_codes' => [!$current ? 'analysis_refresh_required' : ($checkUnavailable ? 'final_check_unavailable' : 'reference_setup_review_required')]];
+            if ($metrics === null || !$ready || !$current || $checkUnavailable || $guardUnverified) $bucket = 'unresolved';
+            elseif (in_array($code, ['S1', 'S2', 'S3'], true) || ($r['reference_setup']['status'] ?? '') === 'invalidated') $bucket = 'risk_warnings';
+            elseif ($current && LiteSwing::referenceBuyReady($r) && in_array($code, ['M1', 'M2'], true)) $bucket = 'buy_candidates';
+            else $bucket = 'observations';
+            if (count($lists[$bucket][$cc]) >= 3) continue;
+            $lists[$bucket][$cc][] = [
+                'symbol_id' => $sid, 'country' => $cc, 'name' => $r['name'] ?? $sym['name'],
+                'bars_as_of' => $r['bars_as_of'] ?? null, 'last_close' => $metrics['last_close'] ?? null,
+                'ms7' => $ms, 'eligible' => $bucket === 'buy_candidates',
+                'data_status' => $metrics === null ? 'pending' : (!$current ? 'analysis_refresh_required' : ($checkUnavailable ? 'final_check_unavailable' : ($guardUnverified ? 'reference_setup_review_required' : (!$ready ? 'needs_review' : 'evaluated')))),
+                'reason_codes' => $r['reason_codes'] ?? [], 'trend' => $r['trend'] ?? null,
+                'reference_setup' => $r['reference_setup'] ?? null
             ];
-            $used[$sid] = true;
         }
         foreach ($candidateIds as $sid) {
-            if (!is_string($sid) || isset ($used[$sid])) continue;
-            $p = explode('|', $sid);
-            $country = $p[0] ?? '';
-            if (!in_array($country, $countries, true) || count($out[$country]) >= 3) continue;
-            $out[$country][] = [
-                'symbol_id' => $sid,
-                'country' => $country,
-                'name' => $p[2] ?? $sid,
-                'bars_as_of' => null,
-                'last_close' => null,
+            if (!is_string($sid) || isset($seen[$sid])) continue;
+            $sym = self::symbolFromId($sid);
+            if (!$sym || count($lists['unresolved'][$sym['country']]) >= 3) continue;
+            $seen[$sid] = true;
+            $lists['unresolved'][$sym['country']][] = [
+                'symbol_id' => $sid, 'country' => $sym['country'], 'name' => $sym['name'],
+                'bars_as_of' => null, 'last_close' => null, 'eligible' => false,
                 'ms7' => ['code' => 'W', 'label' => '대기', 'confidence' => 'PROVISIONAL', 'reason_codes' => ['data_pending']],
-                'data_status' => 'pending',
-                'reason_codes' => ['data_pending']
+                'data_status' => 'pending', 'reason_codes' => ['data_pending']
             ];
-            $used[$sid] = true;
         }
-        foreach (self::fallbackCandidates() as $country => $fallbacks) foreach ($fallbacks as $f) {
-            if (count($out[$country]) >= 3) break;
-            $sid = $f['symbol_id'];
-            if (isset ($used[$sid])) continue;
-            $out[$country][] = [
-                'symbol_id' => $sid,
-                'country' => $country,
-                'name' => $f['name'],
-                'bars_as_of' => null,
-                'last_close' => null,
-                'ms7' => ['code' => 'W', 'label' => '대기', 'confidence' => 'PROVISIONAL', 'reason_codes' => ['fallback_no_data']],
-                'data_status' => 'fallback',
-                'reason_codes' => ['fallback_no_data']
-            ];
-            $used[$sid] = true;
-        }
-        return $out;
+        return $lists;
+    }
+
+    public static function recommendThree(array $rows, array $candidateIds = []): array {
+        return self::referenceLists($rows, $candidateIds)['buy_candidates'];
     }
 
     public function resyncDue(stdClass $c): bool {
@@ -2973,6 +3330,7 @@ final class LiteDecisionService {
                 $r = lm_get($c->symbols, $sid);
                 $a = $r ? lm_get($r, 'analysis'): null;
                 if (!isset ($detailQueue[$sid]) && $this->market->rowCurrent($c, LiteMarketData::symbolFromId($sid), $r)) {
+                    $a = $this->market->guardCurrentAnalysis($c, $sid, $r);
                     $rows[] = $a;
                     $usable[] = $sid;
                 } else {
@@ -2983,7 +3341,8 @@ final class LiteDecisionService {
             foreach ($rejected as $sid) $rows[] = ['symbol_id' => $sid, 'status' => 'rejected', 'error' => 'INVALID_SYMBOL_ID'];
             foreach ($rows as & $rr) if (is_array($rr) && isset ($rr['metrics']) && (!isset ($rr['ms7']) || !is_array($rr['ms7']))) $rr['ms7'] = LiteSwing::ms7FromAnalysis($rr);
             unset ($rr);
-            $analysisReference = LiteMarketData::recommendThree($rows, $ids);
+            $referenceLists = LiteMarketData::referenceLists($rows, $ids);
+            $analysisReference = $referenceLists['buy_candidates'];
             $status = 'ready_for_chatgpt';
             $evaluationId = lm_hash(
                 [
@@ -3011,6 +3370,7 @@ final class LiteDecisionService {
                 'unresolved_ids' => $unresolved,
                 'rejected_ids' => $rejected,
                 'analysis_reference' => $analysisReference,
+                'reference_lists' => $referenceLists,
                 'rows' => $rows,
                 'as_of' => lm_iso()
             ];
@@ -3103,6 +3463,13 @@ final class LiteDecisionService {
         $selected = self::normalizeChatgptDecision(lm_array($selected));
         $grouped = ['KR' => [], 'US' => [], 'JP' => []];
         foreach ($selected as $x) $grouped[$x['country']][] = $x;
+        $decisionLists = ['buy_candidates' => ['KR' => [], 'US' => [], 'JP' => []],
+            'observations' => ['KR' => [], 'US' => [], 'JP' => []], 'risk_warnings' => ['KR' => [], 'US' => [], 'JP' => []]];
+        foreach ($selected as $x) {
+            $code = $x['ms7']['code'];
+            $bucket = in_array($code, ['M1', 'M2'], true) ? 'buy_candidates' : (in_array($code, ['S1', 'S2', 'S3'], true) ? 'risk_warnings' : 'observations');
+            $decisionLists[$bucket][$x['country']][] = $x;
+        }
         $result = [
             'contract' => 'MON-LITE-RESULT-2.1',
             'policy' => MON_LITE_POLICY,
@@ -3120,6 +3487,7 @@ final class LiteDecisionService {
             'market_view' => $marketView,
             'selected' => $selected,
             'recommendations' => $grouped,
+            'decision_lists' => $decisionLists,
             'unresolved_ids' => $unresolved,
             'saved_at' => $now,
             'save_status' => 'pending_remote',
@@ -3140,14 +3508,19 @@ final class LiteDecisionService {
             ""
         ];
         $heads = ['KR' => '한국', 'US' => '미국', 'JP' => '일본'];
+        $sections = ['buy_candidates' => '매입 검토 · M1/M2', 'observations' => '관찰·대기 · M0/W', 'risk_warnings' => '위험 경계 · S1/S2/S3'];
+        $lines[] = '- 관찰·대기와 위험 경계는 신규 매입 추천이 아니며, MS7은 자동 주문 지시가 아닙니다.';
         foreach (['KR', 'US', 'JP'] as $cc) {
             $lines[] = '## ' . $heads[$cc] . ' · ' . ($marketView[$cc] ?? '자료 미확인');
-            if (!$grouped[$cc]) $lines[] = '- 신규 추천 없음';
-            foreach ($grouped[$cc] as $x) {
-                $ms = $x['ms7'];
-                $price = array_key_exists('reference_price', $x) && $x['reference_price'] !== null ? ' · 참고가 ' . (string) $x['reference_price'] : '';
-                $lines[] = '- ' . $x['name'] . ' (' . $x['symbol_id'] . ') · MS7 ' . $ms['code'] . ' ' . $ms['label']
-                    . $price . ' · ' . $x['reason'] . ' · 위험: ' . $x['risk_note'];
+            foreach ($sections as $bucket => $title) {
+                $lines[] = '### ' . $title;
+                if (!$decisionLists[$bucket][$cc]) $lines[] = '- 해당 없음';
+                foreach ($decisionLists[$bucket][$cc] as $x) {
+                    $ms = $x['ms7'];
+                    $price = array_key_exists('reference_price', $x) && $x['reference_price'] !== null ? ' · 참고가 ' . (string)$x['reference_price'] : '';
+                    $lines[] = '- ' . $x['name'] . ' (' . $x['symbol_id'] . ') · MS7 ' . $ms['code'] . ' ' . $ms['label']
+                        . $price . ' · ' . $x['reason'] . ' · 위험: ' . $x['risk_note'];
+                }
             }
             $lines[] = '';
         }
@@ -3339,6 +3712,7 @@ final class LiteDecisionService {
             if (!is_object($data->scan ?? null)) $data->scan = new stdClass();
             $data->scan->decision_status = 'chatgpt_final';
             $data->recommendations = (object) $r['recommendations'];
+            if (isset($r['decision_lists'])) $data->decision_lists = $r['decision_lists'];
             $data->chatgpt_final = (object) $final;
             unset ($data->previous_chatgpt_final);
             $o['data_json'] = lm_json($data);
@@ -3438,7 +3812,8 @@ final class LiteReferencePublisher {
         $ids = array_map(function ($x) {
             return $x['symbol_id'];
         }, $watch);
-        $ref = $summary['analysis_reference'] ?? LiteMarketData::recommendThree($summary['results'] ?? [], $ids);
+        $referenceLists = $summary['reference_lists'] ?? LiteMarketData::referenceLists($summary['results'] ?? [], $ids);
+        $ref = $referenceLists['buy_candidates'];
         $data = [
             'contract' => 'MON-LITE-DATA-2.2',
             'policy' => MON_LITE_POLICY,
@@ -3459,6 +3834,7 @@ final class LiteReferencePublisher {
                 'decision_status' => 'awaiting_chatgpt'
             ],
             'analysis_reference' => $ref,
+            'reference_lists' => $referenceLists,
             'results' => $summary['results'],
             'errors' => $summary['errors']
         ];
@@ -3494,20 +3870,37 @@ final class LiteReferencePublisher {
         $lines = [
             "MON 2.2.3 Lite · 보조 참고분석 · " . $summary['at'],
             "",
-            '- 아래 3×3은 PHP/MON 참고분석이며 최종 추천이 아닙니다.',
+            '- 아래 목록은 PHP/MON 참고분석이며 최종 추천이 아닙니다. 나라별 매입 검토는 최대 3개이고 0개도 정상입니다.',
+            '- 관찰·대기와 위험 경계는 매입 후보와 분리하며 자동 주문을 의미하지 않습니다.',
             '- 최종 결정 권한: ChatGPT 독립 분석',
             '- 평가 ' . $summary['done'] . ' / ' . $summary['candidate_count'] . ' · 미확인 ' . $summary['pending'] . ' · 정밀 적격 '
                 . $summary['eligible_count']
         ];
         $heads = ['KR' => '한국', 'US' => '미국', 'JP' => '일본'];
+        $sectionHeads = ['buy_candidates' => '매입 검토 참고', 'observations' => '관찰·대기', 'risk_warnings' => '위험 경계', 'unresolved' => '자료 미확인'];
         foreach (['KR', 'US', 'JP'] as $country) {
             $lines[] = '';
             $lines[] = '## ' . $heads[$country] . ' 참고';
-            foreach ($ref[$country] ?? [] as $r) {
-                $ms = $r['ms7'] ?? ['code' => 'W', 'label' => '대기', 'confidence' => 'PROVISIONAL'];
-                $price = $r['last_close'] === null ? '가격 미확인' : (string) $r['last_close'];
-                $lines[] = '- ' . ($r['symbol_id'] ?? '') . ' · 참고 MS7 ' . ($ms['code'] ?? 'W') . ' ' . ($ms['label']
-                    ?? '대기') . ' · ' . $price . ' · ' . ($ms['confidence'] ?? 'PROVISIONAL');
+            foreach ($sectionHeads as $bucket => $title) {
+                $lines[] = '### ' . $title;
+                if (!$referenceLists[$bucket][$country]) $lines[] = '- 해당 없음';
+                foreach ($referenceLists[$bucket][$country] as $r) {
+                    $ms = $r['ms7'] ?? ['code' => 'W', 'label' => '대기', 'confidence' => 'PROVISIONAL'];
+                    $price = $r['last_close'] === null ? '가격 미확인' : (string)$r['last_close'];
+                    $lines[] = '- ' . ($r['name'] ?? '') . ' (' . ($r['symbol_id'] ?? '') . ') · 참고 MS7 '
+                        . ($ms['code'] ?? 'W') . ' ' . ($ms['label'] ?? '대기') . ' · ' . $price
+                        . ' · 상태 ' . LiteMarketData::referenceStateLabel($r);
+                    $setup = $r['reference_setup'] ?? null;
+                    if (is_array($setup) && ($setup['status'] ?? '') === 'invalidated') $lines[] = '  - 이전 가설 실패: '
+                        . (string)($setup['invalidated_at'] ?? '') . ' · 고정 지지 ' . (string)($setup['invalidated_support'] ?? '');
+                    elseif (is_array($setup) && ($setup['status'] ?? '') === 'unverified') $lines[] = '  - 이전 가설 검증 미완료: 최초 확인 '
+                        . (string)($setup['first_guard_unverified_at'] ?? '') . ' · 실제 실패 시점 미확인';
+                    elseif (is_array($setup) && ($setup['previous_guard_unverified'] ?? false)) $lines[] = '  - 이전 가설의 실제 실패 시점은 미확인 · 새 신호 '
+                        . (string)($setup['signal_date'] ?? '') . '로 독립 재평가';
+                    elseif (is_array($setup) && isset($setup['rearmed_after'])) $lines[] = '  - 이전 가설 실패: '
+                        . (string)$setup['rearmed_after'] . ' · 당시 지지 ' . (string)($setup['previous_invalidated_support'] ?? '')
+                        . ' · 새 신호 ' . (string)($setup['signal_date'] ?? '') . '로 별도 재평가';
+                }
             }
         }
         if (($data['scan']['decision_status'] ?? '') === 'independent_chatgpt_required') {
@@ -3893,8 +4286,9 @@ final class LiteScanEngine {
             $stockLast = $oldBars ? $oldBars[count($oldBars) - 1][0] : '';
             $benchmarkLast = $work->bench[$benchKey][count($work->bench[$benchKey]) - 1][0] ?? '';
             $seriesQuality = null;
-            $bars = $work->retryOnly && !$work->forceFull && lm_get($old, 'recalculate_only') === true && $oldBars
-                && $benchmarkLast !== '' && strcmp($stockLast, $benchmarkLast) >= 0 ? $oldBars : $this->market->fetchSeries($sym, $oldBars, $work->forceFull, $work->stats, $seriesQuality);
+            $upgradeHistory = LiteMarketData::needsTrendHistoryRefresh($old);
+            $bars = $work->retryOnly && !$work->forceFull && !$upgradeHistory && lm_get($old, 'recalculate_only') === true && $oldBars
+                && $benchmarkLast !== '' && strcmp($stockLast, $benchmarkLast) >= 0 ? $oldBars : $this->market->fetchSeries($sym, $oldBars, $work->forceFull || $upgradeHistory, $work->stats, $seriesQuality);
             if ($seriesQuality !== null) $work->stats['quality_reused']++;
             $q = $seriesQuality ?? LiteQuality::compare($oldBars, $bars);
             if (!$q['accept']) throw new LiteMonFault($q['reason']);
@@ -3943,10 +4337,10 @@ final class LiteScanEngine {
                 $work->cache->scan_queue = array_keys($work->queuedIds);
             }
             if ($this->market->analysisReusable($old, $bars, $work->benchFingerprint[$benchKey])) {
-                $a = $old->analysis;
+                $a = $this->market->guardCurrentAnalysis($work->cache, $sid, $old);
                 $work->stats['analysis_reused']++;
             } else {
-                $a = LiteSwing::analyzeMapped($sym, $bars, $work->benchMap[$benchKey]);
+                $a = LiteSwing::analyzeMapped($sym, $bars, $work->benchMap[$benchKey], $this->market->priorReferenceAnalysis($work->cache, $sid, $old));
                 $work->stats['analysis_recomputed']++;
             }
             if (!isset ($a['ms7']) || !is_array($a['ms7'])) $a['ms7'] = LiteSwing::ms7FromAnalysis($a);
@@ -3954,6 +4348,7 @@ final class LiteScanEngine {
                 $recovery = $this->yahoo->recoveryFor($sid);
                 if ($recovery !== null) $a['provider_recovery'] = $recovery;
             }
+            $this->market->rememberReferenceSetup($work->cache, $sid, $a);
             $row = (object) [
                 'status' => 'ok',
                 'symbol' => (object) $sym,
@@ -4053,7 +4448,8 @@ final class LiteScanEngine {
         $work->candidateIds = array_map(static function ($x) {
             return $x['symbol_id'];
         }, $work->watch);
-        $work->analysisReference = LiteMarketData::recommendThree($work->results, $work->candidateIds);
+        $referenceLists = LiteMarketData::referenceLists($work->results, $work->candidateIds);
+        $work->analysisReference = $referenceLists['buy_candidates'];
         $work->coverage = [
             'KR' => ['done' => 0, 'pending' => 0],
             'US' => ['done' => 0, 'pending' => 0],
@@ -4075,6 +4471,7 @@ final class LiteScanEngine {
             })),
             'coverage' => $work->coverage,
             'analysis_reference' => $work->analysisReference,
+            'reference_lists' => $referenceLists,
             'results' => $work->results,
             'errors' => $work->errors,
             'network_stats' => $work->stats
@@ -4734,6 +5131,46 @@ final class LiteWebController {
             . round((int) lm_get($runtime, 'bytes', 0) / 1048576, 2) . ' MiB</section><form id="mon-controls" method="post"><button name="action" value="start">시작</button><button name="action" value="restart">재시작</button><button name="action" value="stop">중지</button><button name="action" value="scan">정밀 스캔 요청</button></form><p id="control-progress" role="status" aria-live="polite" class="'
             . ($ok ? 'ok' : 'bad') . '">' . $h($notice) . '</p><section><b>운영 원칙</b><br>5분: mailbox 확인<br>30분: 경량 확인 · 미확인 재시도: 2분<br>정밀 스캔: 평일 16:40 KST · 증분 기본 / 7일마다 220봉 전체 재동기화<br>모든 부속파일: /web/mon_runtime 고정파일<br>운영 규격: '
             . $h(MON_LITE_POLICY) . '</section>';
+        try {
+            $evidence = LiteRuntime::read('evidence');
+            $scan = lm_array(lm_get($evidence, 'latest_scan'));
+            if (is_array($scan) && isset($scan['results'])) {
+                $lists = $scan['reference_lists'] ?? LiteMarketData::referenceLists($scan['results'], []);
+                echo '<section><b>마지막 PHP 참고분석</b> · ' . $h($scan['at'] ?? '시각 미확인')
+                    . '<p>최종 추천은 ChatGPT가 독립 결정합니다. 관찰·대기와 위험 경계는 매입 후보가 아니며 자동 주문을 뜻하지 않습니다.</p>';
+                $titles = ['buy_candidates' => '매입 검토 참고', 'observations' => '관찰·대기', 'risk_warnings' => '위험 경계', 'unresolved' => '자료 미확인'];
+                $countries = ['KR' => '한국', 'US' => '미국', 'JP' => '일본'];
+                foreach ($titles as $bucket => $title) {
+                    echo '<h3>' . $h($title) . '</h3>';
+                    foreach ($countries as $cc => $label) {
+                        $items = array_slice($lists[$bucket][$cc] ?? [], 0, 3);
+                        echo '<b>' . $h($label) . '</b>';
+                        if (!$items) { echo ' · 해당 없음<br>'; continue; }
+                        echo '<ul>';
+                        foreach ($items as $item) {
+                            echo '<li>' . $h(($item['name'] ?? '') . ' (' . ($item['symbol_id'] ?? '') . ')') . ' · '
+                                . $h(($item['ms7']['code'] ?? 'W') . ' ' . ($item['ms7']['label'] ?? '대기')) . ' · '
+                                . $h(LiteMarketData::referenceStateLabel($item));
+                            $setup = $item['reference_setup'] ?? null;
+                            if (is_array($setup) && ($setup['status'] ?? '') === 'invalidated') echo '<br>' . $h('이전 가설 실패 '
+                                . ($setup['invalidated_at'] ?? '') . ' · 고정 지지 ' . ($setup['invalidated_support'] ?? ''));
+                            elseif (is_array($setup) && ($setup['status'] ?? '') === 'unverified') echo '<br>' . $h('이전 가설 검증 미완료 · 최초 확인 '
+                                . ($setup['first_guard_unverified_at'] ?? '') . ' · 실제 실패 시점 미확인');
+                            elseif (is_array($setup) && ($setup['previous_guard_unverified'] ?? false)) echo '<br>' . $h('이전 가설 실패 시점 미확인 · 새 신호 '
+                                . ($setup['signal_date'] ?? '') . '로 독립 재평가');
+                            elseif (is_array($setup) && isset($setup['rearmed_after'])) echo '<br>' . $h('이전 실패 '
+                                . $setup['rearmed_after'] . ' · 당시 지지 ' . ($setup['previous_invalidated_support'] ?? '')
+                                . ' · 새 신호 ' . ($setup['signal_date'] ?? '') . '로 재평가');
+                            echo '</li>';
+                        }
+                        echo '</ul>';
+                    }
+                }
+                echo '</section>';
+            }
+        } catch (Throwable $ignored) {
+            echo '<section>참고분석 표시 자료를 확인하지 못했습니다. 마지막 저장 결과와 상태를 확인해 주세요.</section>';
+        }
         if ($control && !empty ($control['operation_id'])) {
             if (in_array($control['phase'] ?? '', ['ready', 'stopping', 'starting'], true)) echo '<form method="post"><input type="hidden" name="action" value="continue"><input type="hidden" name="operation_id" value="'
                 . $h($control['operation_id']) . '"><input type="hidden" name="operation_seq" value="' . (int) $control['operation_seq']

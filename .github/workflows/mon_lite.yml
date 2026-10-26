@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261020-r19'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261026-r20'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -93,7 +93,7 @@ jobs:
           }
           actual = {p.as_posix() for p in root.rglob('*') if p.is_file() and '.git' not in p.parts}
           # Other explicitly restored systems are outside MON maintenance scope.
-          optional_authorized = {'reporting.md', 'mgdaemon.md', 'STC14.json'}
+          optional_authorized = {'reporting.md', 'mgdaemon.md', 'STC14.json', 'LongBreak-Wiki.md'}
           assert expected <= actual and actual <= expected | optional_authorized, (sorted(actual-expected-optional_authorized), sorted(expected-actual))
 
           print('MON consistency PASS')
@@ -213,8 +213,14 @@ jobs:
           }
           if($mode==='calculation'){
               $benchmark=[];for($j=0;$j<220;$j++)$benchmark[]=[gmdate('Y-m-d',1600000000+$j*86400),100+$j,103+$j,99+$j,102+$j,100000];$map=LiteSwing::benchmarkMap($benchmark);$hashes=[];
-              foreach([35,300] as $count){$analyses=[];$ids=[];for($i=0;$i<$count;$i++){$countries=[['KR','KOSPI','KRW'],['US','NASDAQ','USD'],['JP','TSE','JPY']];$cc=$countries[$i%3];$symbol=$cc[0]==='KR'?sprintf('%06d',100000+$i):($cc[0]==='JP'?(string)(1000+$i):'CI'.$i);$id=$cc[0].'|'.$cc[1].'|'.$symbol;$s=['symbol_id'=>$id,'symbol'=>$symbol,'country'=>$cc[0],'exchange'=>$cc[1],'currency'=>$cc[2],'name'=>'Fixture '.$i];$bars=[];for($j=0;$j<220;$j++){$open=1000+$i*10+$j*2+$j%7+($j>200?-6*($j-200):0)+($j>215?20*($j-215):0);$bars[]=[$benchmark[$j][0],$open,$open+5,$open-4,$open+1+$j%3,10000+$i*100+$j*20];}$analyses[]=LiteSwing::analyzeMapped($s,$bars,$map);$ids[]=$id;}$hashes[(string)$count]=lm_hash([$analyses,LiteMonitor::recommendThree($analyses,$ids)]);unset($analyses,$ids,$bars);}
-              if($expect)mem_assert($hashes===['35'=>'5bd8ec822790eac322067588e7a43b27c85a7c46051ac401225bdba1f65d5935','300'=>'44be8eddb74734a7c8f947af4b5bd31b47682003b7d28cac02479b7e0adcc635'],'35/300 numerical and reference selection outputs must match accepted r13 fixture');echo lm_json(['scenario'=>'35_300_calculation_regression','result_sha256'=>$hashes,'peak_allocated_bytes'=>memory_get_peak_usage(true),'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
+              foreach([35,300] as $count){$analyses=[];$ids=[];for($i=0;$i<$count;$i++){$countries=[['KR','KOSPI','KRW'],['US','NASDAQ','USD'],['JP','TSE','JPY']];$cc=$countries[$i%3];$symbol=$cc[0]==='KR'?sprintf('%06d',100000+$i):($cc[0]==='JP'?(string)(1000+$i):'CI'.$i);$id=$cc[0].'|'.$cc[1].'|'.$symbol;$s=['symbol_id'=>$id,'symbol'=>$symbol,'country'=>$cc[0],'exchange'=>$cc[1],'currency'=>$cc[2],'name'=>'Fixture '.$i];$bars=[];for($j=0;$j<220;$j++){$open=1000+$i*10+$j*2+$j%7+($j>200?-6*($j-200):0)+($j>215?20*($j-215):0);$bars[]=[$benchmark[$j][0],$open,$open+5,$open-4,$open+1+$j%3,10000+$i*100+$j*20];}$analysis=LiteSwing::analyzeMapped($s,$bars,$map);
+                  // Fixed pre-r20 numerical oracle: strategy classification and additive provenance intentionally changed.
+                  $stockR=(1407+10*$i)/(1403+10*$i)-1;
+                  $expected=['last_close'=>1407+10*$i,'MA5'=>1376.8+10*$i,'MA10'=>1366.3+10*$i,'MA20'=>1377+10*$i,'R20'=>$stockR,'RS20_pp'=>100*($stockR-20/301),'ADV20'=>19538621+279600*$i+1000*$i*$i,'ATR14'=>12.285714285714286,'S'=>1377+10*$i,'R'=>1409+10*$i];
+                  foreach($expected as $key=>$value)mem_assert(isset($analysis['metrics'][$key])&&abs($analysis['metrics'][$key]-$value)<0.000002,'unchanged numerical metric '.$key.' for fixture '.$i);
+                  foreach(['macd'=>0.4050365549076105,'signal'=>-2.2072980874784607,'histogram'=>2.612334642386071] as $key=>$value)mem_assert(isset($analysis['technical'][$key])&&abs($analysis['technical'][$key]-$value)<0.000002,'unchanged SMA-seeded MACD '.$key.' for fixture '.$i);
+                  $analyses[]=$analysis;$ids[]=$id;}$hashes[(string)$count]=lm_hash([$analyses,LiteMonitor::recommendThree($analyses,$ids)]);unset($analyses,$ids,$bars);}
+              if($expect)mem_assert(count($hashes)===2,'both 35/300 numerical fixture sizes completed');echo lm_json(['scenario'=>'35_300_calculation_regression','numeric_oracle_assertions'=>335*13,'strategy_output_hash_is_diagnostic_only'=>true,'result_sha256'=>$hashes,'peak_allocated_bytes'=>memory_get_peak_usage(true),'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
           }
           if($mode==='queue'){
               final class MemQueueHttp {public function clearRequestCache(): void {}public function resetStats(): void {}public function stats(): array {return [];}public function githubGet(string $path,bool $force=false): ?array {return null;}public function releasePayloads(): void {}}
@@ -262,13 +268,232 @@ jobs:
           php -r 'require "mon.php"; $x=LiteYahoo::benchmarkCandidates("JP"); if ($x!==["^TOPX","1306.T","^N225"]) {var_export($x); exit(1);} echo "JP benchmark fallback policy PASS\n";'
           rm -rf mon_runtime
 
-      - name: Reference-only MS7 recommendation contract
+      - name: Absolute trend, reference separation and invalidation regressions
         run: |
           set -eu
-          php -r 'require "mon.php"; $a=["metrics"=>["RS20_pp"=>5,"last_close"=>110,"MA5"=>105,"MA20"=>100],"technical"=>["technical_qualified"=>true,"histogram"=>1]]; $m=LiteSwing::ms7FromAnalysis($a); if($m["code"]!=="M2") {var_export($m); exit(1);} echo "MS7 strong mapping PASS\n";'
-          php -r 'require "mon.php"; $r=LiteMonitor::recommendThree([],[]); foreach(["KR","US","JP"] as $c){if(count($r[$c])!==3) exit(1); foreach($r[$c] as $x) if(($x["ms7"]["code"]??"")!=="W") exit(2);} echo "always-three fallback PASS\n";'
-          php -r 'require "mon.php"; $rows=[["symbol_id"=>"KR|KOSPI|111111","country"=>"KR","name"=>"A","metrics"=>["RS20_pp"=>4,"R20"=>.1,"ADV20"=>100,"last_close"=>110,"MA5"=>105,"MA20"=>100],"technical"=>["technical_qualified"=>true,"histogram"=>1],"reason_codes"=>[]]]; $r=LiteMonitor::recommendThree($rows,["KR|KOSPI|111111","KR|KOSPI|222222","KR|KOSPI|333333"]); if(count($r["KR"])!==3||$r["KR"][0]["ms7"]["code"]!=="M2") exit(1); echo "evaluated plus pending fill PASS\n";'
+          MON_TEST_SOURCE=mon.php php -d memory_limit=96M <<'PHP'
+          <?php
+          declare(strict_types=1);
+          require getenv('MON_TEST_SOURCE');
+          $checks=[];
+          function guard_assert(bool $ok,string $message): void {
+              global $checks;
+              if(!$ok)throw new RuntimeException($message);
+              $checks[]=$message;
+          }
+          function guard_symbol(string $ticker='CIUP'): array {
+              return ['symbol_id'=>'US|NASDAQ|'.$ticker,'country'=>'US','exchange'=>'NASDAQ','symbol'=>$ticker,'name'=>'Offline '.$ticker,'currency'=>'USD'];
+          }
+          function guard_append(array &$bars,array &$benchmark,float $close,float $volume=1000): void {
+              $i=count($benchmark);
+              $date=gmdate('Y-m-d',1600000000+$i*86400);
+              $bars[]=[$date,$close-.2,$close+1,$close-1,$close,$volume];
+              $base=100+.05*$i;
+              $benchmark[]=[$date,$base-.1,$base+.3,$base-.3,$base,100000];
+          }
+          function guard_fixture(bool $falling=false): array {
+              $bars=[];$benchmark=[];
+              for($j=0;$j<220;$j++){
+                  if($falling){
+                      $close=$j<180?100+.5*$j:190-1.1*($j-180);
+                      if($j===219)$close+=4;
+                  }else{
+                      $close=$j<200?100+.1*$j:($j<210?120+.4*($j-200):123.6-.2*($j-209));
+                      if($j===218)$close=123;
+                      if($j===219)$close=126;
+                  }
+                  guard_append($bars,$benchmark,$close,$j===219?2500:1000);
+                  if($falling){$price=400-1.3*$j;$benchmark[$j]=[$bars[$j][0],$price+.1,$price+.3,$price-.3,$price,100000];}
+              }
+              return [$bars,$benchmark];
+          }
+          function guard_analyze(array $bars,array $benchmark,array $prior=[],string $ticker='CIUP'): array {
+              return LiteSwing::analyzeMapped(guard_symbol($ticker),array_slice($bars,-220),LiteSwing::benchmarkMap(array_slice($benchmark,-220)),$prior);
+          }
+          function guard_buy_code(array $analysis): bool {
+              return in_array($analysis['ms7']['code']??'', ['M1','M2'],true);
+          }
+          [$bars,$benchmark]=guard_fixture();
+          $up=guard_analyze($bars,$benchmark);
+          guard_assert(($up['technical']['formula_version']??'')==='MON-SWING-1.2','current formula identity');
+          guard_assert(($up['technical']['technical_qualified']??false)===true,'positive control has a real new technical signal');
+          guard_assert(($up['trend']['absolute_uptrend']??false)===true,'positive control has a recovered absolute trend');
+          guard_assert(($up['trend']['buy_reference_qualified']??false)===true&&$up['eligible']===true&&guard_buy_code($up),'recovered volume-confirmed signal can enter buy references');
+          guard_assert($up['metrics']['MA20_slope_1']>0&&$up['metrics']['MA20_slope_5']>0&&$up['metrics']['MA60_slope_5']>0,'positive control is not just a one-day moving-average bounce');
+          // The boundary uses actual numbers; stale cached flags cannot approve an overextended row.
+          $edge=$up;$edge['metrics']['MA20']=120.0;$edge['metrics']['ATR14']=3.0;$edge['metrics']['last_close']=126.0;
+          guard_assert(LiteSwing::referenceBuyReady($edge)===true,'exact two-ATR extension boundary is permitted');
+          $over=$edge;$over['metrics']['last_close']=126.01;$over['technical']['last_close']=126.01;
+          guard_assert(LiteSwing::referenceBuyReady($over)===false&&!guard_buy_code(['ms7'=>LiteSwing::ms7FromAnalysis($over)]),'above two-ATR extension is observation only despite stale eligibility flags');
+          foreach([0.0,null] as $badAtr){$missingAtr=$edge;$missingAtr['metrics']['ATR14']=$badAtr;guard_assert(LiteSwing::referenceBuyReady($missingAtr)===false&&!guard_buy_code(['ms7'=>LiteSwing::ms7FromAnalysis($missingAtr)]),'zero or unavailable ATR never certifies a reference buy');}
+          $lowVolume=$bars;$lowVolume[219][5]=500;
+          $thin=guard_analyze($lowVolume,$benchmark);
+          guard_assert(($thin['trend']['volume_confirmed']??true)===false&&!guard_buy_code($thin)&&$thin['eligible']===false,'low participation cannot inherit a bullish technical signal as a buy reference');
+          [$fallBars,$fallBenchmark]=guard_fixture(true);
+          $fall=guard_analyze($fallBars,$fallBenchmark,[],'CIDOWN');
+          guard_assert($fall['metrics']['R20']<0&&$fall['metrics']['RS20_pp']>0,'falling stock can have positive relative strength');
+          guard_assert($fall['metrics']['last_close']>=$fall['metrics']['MA5'],'falling fixture deliberately reclaims its short average');
+          guard_assert(($fall['trend']['below_falling_ma20']??false)===true&&($fall['trend']['below_falling_ma60']??false)===true,'falling fixture remains below falling medium averages');
+          guard_assert(!guard_buy_code($fall)&&$fall['eligible']===false,'positive RS and MA5 bounce cannot override the absolute-trend rejection');
+          guard_assert($fall['metrics']['MA200_slope_1']>0&&$fall['metrics']['last_close']<$fall['metrics']['MA200'],'long average can still rise after price breaks below it');
+          guard_assert(($fall['trend']['long_term_damage']??false)===true,'price-under-long-average damage is explicit without inventing a falling MA200');
+          foreach([[-12,'S2'],[-20,'S3']] as $severity){$warning=$fall;$warning['metrics']['RS20_pp']=$severity[0];$warning['trend']['support_broken']=true;guard_assert(LiteSwing::ms7FromAnalysis($warning)['code']===$severity[1],'absolute support warning does not weaken existing '.$severity[1].' severity');}
+          $empty=LiteMonitor::recommendThree([],[]);
+          foreach(['KR','US','JP'] as $cc)guard_assert(isset($empty[$cc])&&$empty[$cc]===[],'zero qualified references do not pad '.$cc);
+          $missing='US|NASDAQ|CIPENDING';
+          $lists=LiteMarketData::referenceLists([$up,$fall],[$up['symbol_id'],$fall['symbol_id'],$missing]);
+          guard_assert(count($lists['buy_candidates']['US'])===1&&$lists['buy_candidates']['US'][0]['symbol_id']===$up['symbol_id'],'only the qualified recovered signal appears in buy candidates');
+          guard_assert(count($lists['risk_warnings']['US'])>=1&&in_array($fall['symbol_id'],array_column($lists['risk_warnings']['US'],'symbol_id'),true),'declining positive-RS stock is visible as a risk warning');
+          guard_assert(in_array($missing,array_column($lists['unresolved']['US'],'symbol_id'),true),'pending identity stays unresolved instead of becoming filler');
+          $forged=$fall;$forged['eligible']=true;$forged['ms7']['code']='M2';
+          guard_assert(LiteMonitor::recommendThree([$forged],[])['US']===[],'a stale eligible flag cannot bypass the current absolute-trend guard');
+          $tooMany=[];
+          foreach(['CIA','CIB','CIC','CID'] as $ticker){$row=$up;$row['symbol_id']='US|NASDAQ|'.$ticker;$row['name']='Offline '.$ticker;$tooMany[]=$row;}
+          guard_assert(count(LiteMonitor::recommendThree($tooMany,[])['US'])===3,'qualified buy references remain capped at three');
+          $market=new LiteMarketData(new stdClass(),new stdClass());
+          $fingerprint='offline-shared-benchmark';
+          $row=(object)['status'=>'ok','bars'=>$bars,'analysis'=>$up,'benchmark_fingerprint'=>$fingerprint,'calculation_version'=>LitePolicy::CALCULATION_VERSION];
+          guard_assert($market->analysisReusable($row,$bars,$fingerprint)===true,'current exact same-bar analysis is reusable');
+          $legacy=clone $row;$legacy->calculation_version='MON-LITE-CALC-2.2.3-r15';$legacy->analysis['technical']['formula_version']='MON-SWING-1.1';
+          guard_assert($market->analysisReusable($legacy,$bars,$fingerprint)===false,'old strategy analysis is recomputed without a market redownload');
+          guard_assert(($up['reference_setup']['status']??'')==='active','qualified new signal checkpoints one active setup');
+          $locked=$up['reference_setup']['locked_support'];
+          // Accepted small provider revisions must still be compared with the fixed setup support.
+          $revisionBars=$bars;$revisionBenchmark=$benchmark;
+          // A slightly stronger original GC keeps histogram positive on D1; D2 must not accidentally be a new GC.
+          $revisionBars[count($revisionBars)-1][4]=126.5;$revisionInitial=guard_analyze($revisionBars,$revisionBenchmark);$revisionSupport=$revisionInitial['reference_setup']['locked_support'];
+          guard_assert(($revisionInitial['reference_setup']['status']??'')==='active'&&LiteSwing::referenceBuyReady($revisionInitial),'revision control starts from a fully qualified established setup');
+          guard_append($revisionBars,$revisionBenchmark,$revisionSupport+.01,1000);
+          $evaluatedHealthy=guard_analyze($revisionBars,$revisionBenchmark,$revisionInitial);$revisedDate=end($revisionBars)[0];
+          guard_assert(($evaluatedHealthy['reference_setup']['status']??'')==='active','pre-revision setup remains active above its fixed support');
+          $revisionBars[count($revisionBars)-1][4]=$revisionSupport-.01;guard_append($revisionBars,$revisionBenchmark,126,2500);
+          $revisionControl=guard_analyze($revisionBars,$revisionBenchmark);
+          $controlDiag=lm_json(['cross'=>$revisionControl['technical']['macd_cross_date']??null,'kind'=>$revisionControl['technical']['macd_kind']??null,'hist'=>$revisionControl['technical']['histogram']??null,'failure_date'=>$revisedDate,'support'=>$revisionSupport]);
+          $controlOk=LiteSwing::referenceBuyReady($revisionControl)&&is_string($revisionControl['technical']['macd_cross_date']??null)&&strcmp($revisionControl['technical']['macd_cross_date'],$revisedDate)<0;
+          guard_assert($controlOk,'revision control retains the old GC and full current gates'.($controlOk?'':': '.$controlDiag));
+          $revised=guard_analyze($revisionBars,$revisionBenchmark,$evaluatedHealthy);
+          $revisionDiag=lm_json(['status'=>$revised['reference_setup']['status']??null,'failure'=>$revised['reference_setup']['invalidated_at']??null,'rearmed_after'=>$revised['reference_setup']['rearmed_after']??null,'cross'=>$revised['technical']['macd_cross_date']??null,'kind'=>$revised['technical']['macd_kind']??null,'hist'=>$revised['technical']['histogram']??null]);
+          $revisionOk=($revised['reference_setup']['status']??'')==='invalidated'&&($revised['reference_setup']['invalidated_at']??null)===$revisedDate;
+          guard_assert($revisionOk,'accepted revision of an already evaluated bar records its original support failure date'.($revisionOk?'':': '.$revisionDiag));
+          guard_assert(!guard_buy_code($revised),'a later recovery with the old cross cannot hide a revised historical support failure');
+          $sameBarRevision=guard_fixture()[0];$lastIndex=count($sameBarRevision)-1;$sameBarRevision[$lastIndex][1]=$locked-.2;$sameBarRevision[$lastIndex][3]=$locked-1;$sameBarRevision[$lastIndex][4]=$locked-.01;
+          $sameBarBroken=guard_analyze($sameBarRevision,$benchmark,$up);
+          guard_assert(($sameBarBroken['reference_setup']['status']??'')==='invalidated'&&($sameBarBroken['reference_setup']['invalidated_at']??null)===$up['bars_as_of'],'same-date provider revision below established support cannot reuse an active setup');
+
+          $skippedBars=$bars;$skippedBenchmark=$benchmark;guard_append($skippedBars,$skippedBenchmark,100,2500);$firstBreakDate=end($skippedBars)[0];guard_append($skippedBars,$skippedBenchmark,124,2500);
+          $skipped=guard_analyze($skippedBars,$skippedBenchmark,$up);
+          guard_assert(($skipped['reference_setup']['status']??'')==='invalidated'&&($skipped['reference_setup']['invalidated_at']??null)===$firstBreakDate,'a skipped scan still records the earlier completed-bar support failure');
+          guard_assert(!guard_buy_code($skipped),'recovering above old support without a later new signal cannot hide a skipped failure');
+
+          guard_append($bars,$benchmark,100,2500);
+          $broken=guard_analyze($bars,$benchmark,$up);
+          guard_assert(($broken['trend']['support_broken']??false)===true&&!guard_buy_code($broken),'support breakdown blocks reference buys independently of relative strength');
+          guard_assert(($broken['reference_setup']['status']??'')==='invalidated','broken setup is explicitly invalidated');
+          guard_assert(($broken['reference_setup']['invalidated_support']??null)===$locked,'failed setup retains its old support instead of moving the goalpost');
+          $brokenAgain=guard_analyze($bars,$benchmark,$broken);
+          guard_assert(($brokenAgain['reference_setup']['invalidated_at']??null)===($broken['reference_setup']['invalidated_at']??null),'same-bar repeats retain original invalidation time');
+          guard_assert(!guard_buy_code($brokenAgain),'same-bar replay does not manufacture a new setup');
+          guard_append($bars,$benchmark,115,2500);
+          $bounce=guard_analyze($bars,$benchmark,$brokenAgain);
+          guard_assert(($bounce['reference_setup']['status']??'')==='invalidated'&&!guard_buy_code($bounce),'a lower bounce cannot reset the failed support narrative');
+          for($i=0;$i<80;$i++){
+              $close=$i<60?116+.15*$i:($i<70?125+.4*($i-60):128.6-.2*($i-69));
+              if($i===78)$close=128;
+              if($i===79)$close=131;
+              guard_append($bars,$benchmark,$close,$i===79?2500:1000);
+          }
+          $recovered=guard_analyze($bars,$benchmark,$bounce);
+          guard_assert(($recovered['trend']['buy_reference_qualified']??false)===true&&guard_buy_code($recovered),'a later fully qualified recovery can start a new setup');
+          guard_assert(($recovered['reference_setup']['status']??'')==='active'&&$recovered['reference_setup']['signal_date']>$broken['reference_setup']['invalidated_at'],'reentry is tied to a real later signal date');
+          // A newer invalidation must survive old rows, identical-date retries and watchlist removal/readdition.
+          $sid=$up['symbol_id'];$setupCache=(object)['reference_setups'=>(object)[$sid=>(object)['reference_setup'=>$broken['reference_setup'],'last_evaluated_date'=>$broken['bars_as_of']]]];
+          $olderRow=(object)['analysis'=>$up];$selectedPrior=$market->priorReferenceAnalysis($setupCache,$sid,$olderRow);
+          guard_assert(($selectedPrior['reference_setup']['status']??'')==='invalidated','newer durable invalidation wins over an older active row');
+          $guardedOutgoing=$market->guardCurrentAnalysis($setupCache,$sid,$olderRow);
+          guard_assert(!guard_buy_code($guardedOutgoing)&&($guardedOutgoing['reference_setup']['status']??'')==='invalidated','outgoing cached row is guarded by the newer durable invalidation');
+          $market->rememberReferenceSetup($setupCache,$sid,$up);
+          guard_assert(lm_get(lm_get(lm_get($setupCache->reference_setups,$sid),'reference_setup'),'status')==='invalidated','older setup write cannot roll back durable invalidation');
+          $sameDayActive=$up;$sameDayActive['bars_as_of']=$broken['bars_as_of'];$sameDayActive['reference_setup']['signal_date']=$broken['bars_as_of'];$market->rememberReferenceSetup($setupCache,$sid,$sameDayActive);
+          guard_assert(lm_get(lm_get(lm_get($setupCache->reference_setups,$sid),'reference_setup'),'status')==='invalidated','same-date active write cannot erase a failed setup');
+          $validSameDay=$sameDayActive;$validSameDay['reference_setup']['established_at']=$broken['bars_as_of'];$market->rememberReferenceSetup($setupCache,$sid,$validSameDay);
+          guard_assert(lm_get(lm_get(lm_get($setupCache->reference_setups,$sid),'reference_setup'),'status')==='invalidated','a valid same-date active setup cannot erase that date support failure');
+          $untrustedCache=lm_decode(lm_json($setupCache));$unverifiedWrite=$recovered;$unverifiedWrite['reference_setup']=['status'=>'unverified','first_guard_unverified_at'=>$recovered['bars_as_of'],'previous_failure_date_unknown'=>true];$market->rememberReferenceSetup($untrustedCache,$sid,$unverifiedWrite);$keptFailure=lm_array(lm_get(lm_get($untrustedCache->reference_setups,$sid),'reference_setup'));
+          guard_assert(($keptFailure['status']??'')==='invalidated'&&($keptFailure['invalidated_at']??null)===$broken['reference_setup']['invalidated_at'],'a later explicit unverified write cannot erase a known failure date');
+          guard_assert(($keptFailure['invalidated_support']??null)===$locked,'an unverified write retains the known failed support');
+          $malformedWrite=$recovered;$malformedWrite['reference_setup']['locked_support']=0;$market->rememberReferenceSetup($untrustedCache,$sid,$malformedWrite);$keptMalformed=lm_array(lm_get(lm_get($untrustedCache->reference_setups,$sid),'reference_setup'));
+          guard_assert(($keptMalformed['status']??'')==='invalidated'&&($keptMalformed['invalidated_at']??null)===$broken['reference_setup']['invalidated_at'],'a later malformed write cannot erase a known failure date');
+          $legitCache=(object)['reference_setups'=>(object)[$sid=>(object)['reference_setup'=>$broken['reference_setup'],'last_evaluated_date'=>$broken['bars_as_of']]]];$market->rememberReferenceSetup($legitCache,$sid,$recovered);$legit=lm_array(lm_get(lm_get($legitCache->reference_setups,$sid),'reference_setup'));
+          guard_assert(($legit['status']??'')==='active'&&($legit['rearmed_after']??null)===$broken['reference_setup']['invalidated_at'],'a real later fully qualified new signal can replace the failed checkpoint');
+          guard_assert(($legit['previous_invalidated_support']??null)===$locked,'legitimate new setup preserves the failed support as provenance');
+
+          // A corrupt future checkpoint date must not discard real past evidence or freeze later recovery.
+          $futureCheckpoint=lm_decode(lm_json($setupCache));$futureCheckpoint->reference_setups->$sid->last_evaluated_date='2100-01-01';
+          $futurePrior=$market->priorReferenceAnalysis($futureCheckpoint,$sid,(object)['analysis'=>$broken]);
+          guard_assert(($futurePrior['reference_setup']['invalidated_at']??null)===$broken['reference_setup']['invalidated_at']&&($futurePrior['reference_setup_last_evaluated_date']??null)===$broken['reference_setup']['invalidated_at'],'future evaluation date preserves the independently valid past failure as its anchor');
+          $market->rememberReferenceSetup($futureCheckpoint,$sid,$bounce);
+          guard_assert(lm_get(lm_get($futureCheckpoint->reference_setups,$sid),'last_evaluated_date')===$bounce['bars_as_of'],'future checkpoint does not permanently reject a real current evaluation');
+          $market->rememberReferenceSetup($futureCheckpoint,$sid,$recovered);$futureRecovered=lm_array(lm_get(lm_get($futureCheckpoint->reference_setups,$sid),'reference_setup'));
+          guard_assert(($futureRecovered['status']??'')==='active'&&($futureRecovered['rearmed_after']??null)===$broken['reference_setup']['invalidated_at'],'future evaluation date permits a legitimate later recovery while retaining the original failure provenance');
+          $activeFuture=(object)['reference_setups'=>(object)[$sid=>(object)['reference_setup'=>$up['reference_setup'],'last_evaluated_date'=>'2100-01-01']]];
+          $activePrior=$market->priorReferenceAnalysis($activeFuture,$sid,(object)['analysis'=>$up]);
+          guard_assert(($activePrior['reference_setup_last_evaluated_date']??null)===$up['reference_setup']['established_at'],'a valid active setup anchors a future checkpoint to its actual establishment');
+          $activeNow=$market->guardCurrentAnalysis($activeFuture,$sid,(object)['analysis'=>$up,'bars'=>guard_fixture()[0]]);$market->rememberReferenceSetup($activeFuture,$sid,$activeNow);
+          guard_assert(guard_buy_code($activeNow)&&lm_get(lm_get($activeFuture->reference_setups,$sid),'last_evaluated_date')===$up['bars_as_of'],'future checkpoint alone cannot freeze a valid current active setup');
+          $unknownFuture=$broken['reference_setup'];$unknownFuture['invalidated_at']='2099-01-01';$unknownCache=(object)['reference_setups'=>(object)[$sid=>(object)['reference_setup'=>$unknownFuture,'last_evaluated_date'=>'2100-01-01']]];
+          $unknownNow=$market->guardCurrentAnalysis($unknownCache,$sid,(object)['analysis'=>$up,'bars'=>guard_fixture()[0]]);$market->rememberReferenceSetup($unknownCache,$sid,$unknownNow);
+          guard_assert(!guard_buy_code($unknownNow)&&($unknownNow['reference_setup']['status']??'')==='unverified'&&($unknownNow['reference_setup']['first_guard_unverified_at']??null)===$up['bars_as_of'],'a future setup and future checkpoint are quarantined at the actual first completed bar');
+          $unknownCache->reference_setups->$sid->last_evaluated_date='2100-01-01';$unknownPrior=$market->priorReferenceAnalysis($unknownCache,$sid,(object)['analysis'=>$bounce]);
+          $unknownAgain=LiteSwing::applyReferenceSetup($bounce,$unknownPrior);$market->rememberReferenceSetup($unknownCache,$sid,$unknownAgain);
+          guard_assert(($unknownAgain['reference_setup']['first_guard_unverified_at']??null)===$up['bars_as_of']&&lm_get(lm_get($unknownCache->reference_setups,$sid),'last_evaluated_date')===$bounce['bars_as_of'],'unverified first detection remains stable while a future checkpoint is repaired');
+          $unknownRearm=guard_analyze($bars,$benchmark,$market->priorReferenceAnalysis($unknownCache,$sid,null));$market->rememberReferenceSetup($unknownCache,$sid,$unknownRearm);
+          guard_assert(guard_buy_code($unknownRearm)&&($unknownRearm['reference_setup']['previous_guard_unverified']??false)===true&&($unknownRearm['reference_setup']['guard_unverified_since']??null)===$up['bars_as_of'],'quarantined future metadata permits recovery only after a real later qualified cross');
+
+          $roundTrip=lm_decode(lm_json($setupCache));$restoredPrior=$market->priorReferenceAnalysis($roundTrip,$sid,null);
+          guard_assert(($restoredPrior['reference_setup']['invalidated_at']??null)===$broken['reference_setup']['invalidated_at'],'watchlist removal and persisted restore retain original invalidation');
+          foreach([['invalidated_at',null],['invalidated_at','2026-99-99'],['locked_support',0]] as $badField){$badPrior=$broken;$badPrior['reference_setup'][$badField[0]]=$badField[1];$blocked=guard_analyze($bars,$benchmark,$badPrior);guard_assert(!guard_buy_code($blocked)&&($blocked['reference_setup']['status']??'')==='unverified','malformed setup '.$badField[0].' cannot rearm even on a current new signal');}
+          $futureGuard=$broken;$futureGuard['reference_setup']['invalidated_at']='2099-01-01';$futureBlocked=guard_analyze($bars,$benchmark,$futureGuard);
+          guard_assert(!guard_buy_code($futureBlocked),'future guard metadata cannot release a failed setup into a current buy reference');
+          foreach([60,204] as $oldCount){$oldShort=(object)['bars'=>array_slice($checkBars??guard_fixture()[0],-$oldCount),'calculation_version'=>'MON-LITE-CALC-2.2.3-r15'];guard_assert(LiteMarketData::needsTrendHistoryRefresh($oldShort)===true,'old '.$oldCount.'-bar analysis requests the one-time trend history refresh');$oldShort->calculation_version=LitePolicy::CALCULATION_VERSION;guard_assert(LiteMarketData::needsTrendHistoryRefresh($oldShort)===false,'new formula does not repeatedly full-download a still-short '.$oldCount.'-bar listing');}
+          $short=guard_analyze(array_slice($bars,-60),array_slice($benchmark,-60));
+          guard_assert(!guard_buy_code($short)&&($short['trend']['state']??'')==='insufficient_history','missing long-horizon history is not silently treated as an uptrend');
+          final class GuardCheckYahoo {
+              public $calls=0,$dailyCalls=0,$mode='unavailable',$bars;
+              public function __construct(array $bars){$this->bars=$bars;}
+              public function recent(array $symbol,string $last,int $overlap=10): array {$this->calls++;if($this->mode==='unavailable')throw new LiteMonFault('OFFLINE_SECONDARY_FAILURE');$rows=$this->bars;if($this->mode==='mismatch'){$i=count($rows)-1;$rows[$i][4]+=5;$rows[$i][2]+=$rows[$i][4];}return $rows;}
+              public function daily(array $symbol,int $days=220): array {$this->dailyCalls++;throw new RuntimeException('secondary check must not redownload daily bars');}
+          }
+          [$checkBars,$checkBenchmark]=guard_fixture();$checkAnalysis=guard_analyze($checkBars,$checkBenchmark);$checkAnalysis['rank_hint']=1;$checkSymbol=guard_symbol();$checkId=$checkSymbol['symbol_id'];
+          $checkRow=(object)['status'=>'ok','symbol'=>(object)$checkSymbol,'bars'=>$checkBars,'analysis'=>$checkAnalysis,'benchmark_fingerprint'=>$fingerprint,'calculation_version'=>LitePolicy::CALCULATION_VERSION];
+          $checkCache=(object)['symbols'=>(object)[$checkId=>$checkRow]];$secondary=new GuardCheckYahoo($checkBars);$checkMarket=new LiteMarketData(new stdClass(),$secondary);$stats=['final_recheck_cache_hits'=>0,'final_rechecks'=>0];
+          $checkMarket->finalRecheck($checkCache,[$checkAnalysis],$stats);$unavailable=lm_get($checkCache->symbols,$checkId);
+          guard_assert(lm_get($unavailable->final_check,'status')==='unavailable'&&$unavailable->analysis['selection_ready']===true,'secondary unavailability is distinct from a verified price mismatch');
+          guard_assert($unavailable->bars===$checkBars&&$secondary->dailyCalls===0&&$checkMarket->analysisReusable($unavailable,$checkBars,$fingerprint)===true,'secondary failure preserves valid OHLC and does not trigger a full market redownload');
+          $unavailableLists=LiteMarketData::referenceLists([$unavailable->analysis]);
+          guard_assert($unavailableLists['buy_candidates']['US']===[]&&in_array($checkId,array_column($unavailableLists['unresolved']['US'],'symbol_id'),true),'secondary unavailable reference stays unresolved and out of buy candidates');
+          guard_assert(($unavailableLists['unresolved']['US'][0]['ms7']['code']??'')==='W'&&($unavailableLists['unresolved']['US'][0]['ms7']['confidence']??'')==='PROVISIONAL','secondary unavailable display cannot retain a confirmed buy label');
+          $secondary->mode='mismatch';$checkCache->symbols->$checkId=clone $checkRow;$checkMarket->finalRecheck($checkCache,[$checkAnalysis],$stats);$mismatch=lm_get($checkCache->symbols,$checkId);
+          guard_assert($mismatch->analysis['selection_ready']===false&&lm_get($mismatch->final_check,'status')==='needs_review','observed secondary price mismatch remains selection-blocking');
+          guard_assert(LiteMarketData::referenceLists([$mismatch->analysis])['buy_candidates']['US']===[],'mismatched price cannot reappear in buy candidates');
+          // Public completed Yahoo OHLCV, retrieved 2026-10-26T07:38:25Z; KB 105560.KS and ^KS11.
+          // Both end on 2026-10-26. Fixed bytes make this a reproducible regression, not a live recommendation.
+          $publicRaw=gzdecode(base64_decode('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',true));
+          guard_assert(is_string($publicRaw)&&hash('sha256',$publicRaw)==='3aa439e7ea21bad60626db2f6373e64ed9e364884a39b7aab2f9061070587b5a','public KB and KOSPI fixture identity');
+          $public=json_decode($publicRaw,true,512,JSON_THROW_ON_ERROR);$kbSymbol=LiteMarketData::symbolFromId('KR|KOSPI|105560',['name'=>'KB Financial public regression']);
+          foreach(['2026-10-19','2026-10-26'] as $asOf){
+              $kbBars=array_values(array_filter($public['stock_rows'],static function($r)use($asOf){return $r[0]<=$asOf;}));
+              $kbBench=array_values(array_filter($public['benchmark_rows'],static function($r)use($asOf){return $r[0]<=$asOf;}));
+              $kb=LiteSwing::analyzeMapped($kbSymbol,$kbBars,LiteSwing::benchmarkMap($kbBench));
+              guard_assert($kb['metrics']['R20']<0&&$kb['metrics']['RS20_pp']>0,'actual '.$asOf.' KB is falling despite positive RS');
+              guard_assert(!guard_buy_code($kb)&&$kb['eligible']===false&&LiteMonitor::recommendThree([$kb],[])['KR']===[],'actual '.$asOf.' KB cannot become a reference buy');
+              if($asOf==='2026-10-26'){
+                  guard_assert($kb['metrics']['last_close']===147200.0&&abs($kb['metrics']['R20']+.162208)<.000002&&abs($kb['metrics']['RS20_pp']-5.843288)<.00001,'actual 2026-10-26 KB price and return/RS arithmetic preserved');
+                  guard_assert(($kb['trend']['support_broken']??false)===true&&in_array($kb['symbol_id'],array_column(LiteMarketData::referenceLists([$kb])['risk_warnings']['KR'],'symbol_id'),true),'actual 2026-10-26 KB broken support is explicitly a risk warning');
+              }
+          }
+          echo lm_json(['scenario'=>'absolute_trend_reference_and_invalidation','status'=>'PASS','case_count'=>count($checks),'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE')),'cases'=>$checks])."\n";
+          PHP
           rm -rf mon_runtime
+
       - name: ChatGPT final authority contract
         run: |
           set -eu
@@ -383,6 +608,11 @@ jobs:
               $conclusion=(string)lm_get($result,'conclusion','');ci_assert(strlen($conclusion)>=8&&strpos($http->files['mon_result.md']['content'],$conclusion)!==false,'conclusion retained in Markdown');
           }
           $http=ci_reset();$http->seed('mon_chatgpt_handoff.json',lm_json(['contract'=>'MON-LITE-BRIDGE-1.0','policy'=>MON_LITE_POLICY,'stage'=>'decision','request_id'=>'ci-reference-is-not-final','authority'=>'php_reference','independent_analysis'=>false]));LiteRuntime::write('request',(object)['request_id'=>'ci-reference-is-not-final','stage'=>'details']);$fault=null;try{ci_call(ci_monitor($http),'processMailbox');}catch(LiteMonFault $error){$fault=$error->faultCode;}ci_assert($fault==='DECISION_AUTHORITY_REQUIRED'&&$http->puts===[],'reference authority cannot enter final persistence');echo "PASS reference authority rejected before final writes\n";
+          $mixed=[];foreach([['005930','Buy-only fixture','M1'],['105560','Observe-only fixture','M0'],['000660','Risk-only fixture','S2']] as $item)$mixed[]=['symbol_id'=>'KR|KOSPI|'.$item[0],'name'=>$item[1],'ms7'=>['code'=>$item[2]],'reason'=>'Independent current classification, not a PHP override','risk_note'=>'Explicit independent risk'];
+          $mixed=LiteMonitor::normalizeChatgptDecision($mixed);$http=ci_reset();ci_decide(ci_monitor($http),'ci-display-split',$mixed);ci_saved($http,'ci-display-split');$mixedData=lm_decode($http->files['mon_data.json']['content']);$preserved=lm_array(lm_get(lm_get($mixedData,'chatgpt_final'),'selected'));
+          ci_assert(array_column(array_column($preserved,'ms7'),'code')===['M1','M0','S2'],'separate display preserves ChatGPT final stages and full JSON selection');
+          $text=$http->files['mon_result.md']['content'];$buyPos=strpos($text,'매입 검토 · M1/M2');$observePos=strpos($text,'관찰·대기 · M0/W');$riskPos=strpos($text,'위험 경계 · S1/S2/S3');ci_assert($buyPos!==false&&$observePos!==false&&$riskPos!==false&&$buyPos<$observePos&&$observePos<$riskPos,'final Markdown has separate ordered buy, observation and risk headings');
+          $buySection=substr($text,$buyPos,$observePos-$buyPos);$observeSection=substr($text,$observePos,$riskPos-$observePos);ci_assert(strpos($buySection,'Buy-only fixture')!==false&&strpos($buySection,'Observe-only fixture')===false&&strpos($buySection,'Risk-only fixture')===false,'observation and risk rows never share the final buy list');ci_assert(strpos($observeSection,'Observe-only fixture')!==false&&strpos($observeSection,'Buy-only fixture')===false&&strpos($observeSection,'Risk-only fixture')===false,'observation row is isolated under its own heading');ci_assert(strpos(substr($text,$riskPos),'Risk-only fixture')!==false,'risk row stays visible outside buy candidates');echo "PASS final display separation and independent authority preservation\n";
           foreach(['mon_result.md','mon_data.json','mon_chatgpt_response.json'] as $failPath){
               foreach(['failBefore','failAfter','failRead','badRead'] as $failure){
                   $http=ci_reset();$http->{$failure}[$failPath]=1;$monitor=ci_monitor($http);$thrown=false;
@@ -770,13 +1000,13 @@ jobs:
           function bench_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           final class BenchFixtureGithub {public $watch=[],$files=[],$puts=[],$raceData=null,$dataReads=0;public function githubGet(string $path,bool $force=false): ?array {if($path==='mon_data.json'&&++$this->dataReads===2&&$this->raceData!==null)$this->files[$path]=$this->raceData;if(isset($this->files[$path]))return $this->files[$path];if($path!=='mon_data.json')return null;$bytes=lm_json(['contract'=>'MON-LITE-DATA-2.2','policy'=>MON_LITE_POLICY,'watchlist'=>['symbols'=>$this->watch]]);return ['content'=>$bytes,'sha'=>lm_git_blob_sha($bytes),'commit_sha'=>null];}public function githubPut(string $path,string $content,string $message,?string $oldSha=null): array {$this->puts[]=$path;$this->files[$path]=['content'=>$content,'sha'=>lm_git_blob_sha($content),'commit_sha'=>sha1('ci-'.$path)];return ['blob_sha'=>$this->files[$path]['sha'],'commit_sha'=>$this->files[$path]['commit_sha'],'unchanged'=>false];}public function clearRequestCache(): void {}public function resetStats(): void {}public function releasePayloads(): void {}public function stats(): array {return [];}}
           final class BenchFixtureTransport {
-              public $mode='proxy',$calls=[],$advanceBenchmark=false,$advanceStock=false,$stockFail=false,$stockCorrection=1.0;
+              public $mode='proxy',$calls=[],$requests=[],$advanceBenchmark=false,$advanceStock=false,$stockFail=false,$stockCorrection=1.0,$stockBarCount=220;
               public function get(string $url,array $headers=[],int $timeout=8): string {
-                  preg_match('~/chart/([^?]+)~',$url,$m);$ticker=rawurldecode($m[1]);$this->calls[]=$ticker;
+                  preg_match('~/chart/([^?]+)~',$url,$m);$ticker=rawurldecode($m[1]);$this->calls[]=$ticker;$this->requests[]=['ticker'=>$ticker,'url'=>$url];
                   $isBenchmark=in_array($ticker,['^TOPX','1306.T','^N225'],true);if(!$isBenchmark&&$this->stockFail)throw new LiteMonFault('HTTP_404');
                   if(in_array($ticker,['^TOPX','1306.T','^N225'],true)&&($this->mode==='failed'||$ticker==='^TOPX'||($ticker==='1306.T'&&$this->mode==='nikkei')))throw new LiteMonFault('HTTP_404');
                   $base=$ticker==='1306.T'?2000:($ticker==='^N225'?60000:4000);$timestamp=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];
-                  for($i=0;$i<220;$i++){$timestamp[]=1600000000+$i*86400+($isBenchmark&&$this->advanceBenchmark||!$isBenchmark&&$this->advanceStock?86400:0);$open=$base+$i;$scale=$isBenchmark?1.0:$this->stockCorrection;$q['open'][]=$open*$scale;$q['high'][]=($open+3)*$scale;$q['low'][]=($open-1)*$scale;$q['close'][]=($open+2)*$scale;$q['volume'][]=100000+$i;}
+                  for($i=$isBenchmark?0:max(0,220-$this->stockBarCount);$i<220;$i++){$timestamp[]=1600000000+$i*86400+($isBenchmark&&$this->advanceBenchmark||!$isBenchmark&&$this->advanceStock?86400:0);$open=$base+$i;$scale=$isBenchmark?1.0:$this->stockCorrection;$q['open'][]=$open*$scale;$q['high'][]=($open+3)*$scale;$q['low'][]=($open-1)*$scale;$q['close'][]=($open+2)*$scale;$q['volume'][]=100000+$i;}
                   return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'JPY'],'timestamp'=>$timestamp,'indicators'=>['quote'=>[$q]]]]]]);
               }
           }
@@ -792,6 +1022,23 @@ jobs:
           if($baseline){$results['known_warm_fallback_bug_reproduced']=$warm['pending']===1&&in_array('^TOPX',$warmCalls,true)&&!in_array('1306.T',$warmCalls,true);$results['stock_download_after_common_benchmark_failure']=in_array('6758.T',$warmCalls,true);bench_assert($results['known_warm_fallback_bug_reproduced'],'baseline warm JP fallback bug reproduced');}
           else{
               bench_assert($warm['done']===1&&$warm['pending']===0,'warm JP must retain successful fallback route');bench_assert(lm_get(lm_get($warmCache->benchmark_meta,'JP'),'source_ticker')==='1306.T','chosen benchmark source survives persisted cache read');bench_assert(!in_array('^TOPX',$warmCalls,true)&&in_array('1306.T',$warmCalls,true),'warm route uses saved proxy rather than known failing index');
+              // Download counters include the common benchmark: one benchmark incremental request per warm turn.
+              // Stock URL periods independently prove full-history migration followed by ordinary overlap collection.
+              function bench_stock_periods(BenchFixtureTransport $transport): array {$out=[];foreach($transport->requests as $request){if($request['ticker']!=='6758.T')continue;parse_str((string)parse_url($request['url'],PHP_URL_QUERY),$query);$out[]=['period1'=>(int)($query['period1']??0),'period2'=>(int)($query['period2']??0)];}return $out;}
+              function bench_migration_path(array $turn,BenchFixtureTransport $transport,bool $full,string $label,string $lastDate): void {$periods=bench_stock_periods($transport);$expectedRecent=strtotime($lastDate.' 00:00:00 UTC')-max(7,LitePolicy::INCREMENTAL_OVERLAP_DAYS)*86400;$pathOk=count($periods)===1&&($full?$periods[0]['period2']-$periods[0]['period1']===375*86400:$periods[0]['period1']===$expectedRecent);$stats=$turn['network_stats']??[];$ok=($stats['full_downloads']??0)===($full?1:0)&&($stats['incremental_downloads']??0)===($full?1:2)&&$pathOk;$diagnostic=$ok?'':': '.lm_json(['network_stats'=>$stats,'stock_periods'=>$periods,'provider_calls'=>$transport->calls,'expected_recent'=>$expectedRecent]);bench_assert($ok,$label.$diagnostic);}
+              $migration=[];
+              foreach([60,204] as $oldCount){
+                  $legacyCache=lm_decode(lm_json($warmCache));$legacyRow=$legacyCache->symbols->{'JP|TSE|6758'};$legacyRow->bars=array_slice($legacyRow->bars,-$oldCount);$legacyRow->analysis=lm_array($legacyRow->analysis);$legacyRow->analysis['technical']['formula_version']='MON-SWING-1.1';$legacyRow->calculation_version='MON-LITE-CALC-2.2.3-r15';unset($legacyRow->final_check);$legacyCache->scan_queue=[];LiteRuntime::write('cache',$legacyCache);
+                  $prepared=LiteRuntime::read('cache');$preparedRow=$prepared->symbols->{'JP|TSE|6758'};bench_assert(count($preparedRow->bars)===$oldCount&&LiteMarketData::needsTrendHistoryRefresh($preparedRow)===true,'persisted legacy '.$oldCount.'-bar input requires history migration');
+                  $transport->calls=[];$transport->requests=[];$firstMigration=$monitor->fullScan(false);$migratedCache=LiteRuntime::read('cache');$migratedRow=$migratedCache->symbols->{'JP|TSE|6758'};
+                  bench_assert($firstMigration['done']===1&&$firstMigration['pending']===0&&count($migratedRow->bars)===220&&$migratedRow->calculation_version===LitePolicy::CALCULATION_VERSION,'legacy '.$oldCount.'-bar row gets complete history and the current calculation identity');
+                  bench_migration_path($firstMigration,$transport,true,'legacy '.$oldCount.'-bar strategy migration uses the full-download path once',end($migratedRow->bars)[0]);
+                  bench_assert(LiteMarketData::needsTrendHistoryRefresh($migratedRow)===false,'current migrated row no longer requests a strategy full refresh');
+                  $transport->calls=[];$transport->requests=[];$secondMigration=$monitor->fullScan(false);bench_migration_path($secondMigration,$transport,false,'migrated '.$oldCount.'-bar row returns to the normal incremental path',end($migratedRow->bars)[0]);$migration[(string)$oldCount]=['first_full'=>1,'next_full'=>0,'bars'=>220];
+              }
+              $shortCache=lm_decode(lm_json($warmCache));$shortRow=$shortCache->symbols->{'JP|TSE|6758'};$shortRow->bars=array_slice($shortRow->bars,-60);$shortRow->calculation_version='MON-LITE-CALC-2.2.3-r15';$shortRow->analysis=lm_array($shortRow->analysis);$shortRow->analysis['technical']['formula_version']='MON-SWING-1.1';unset($shortRow->final_check);$shortCache->scan_queue=[];LiteRuntime::write('cache',$shortCache);$transport->stockBarCount=180;
+              $transport->calls=[];$transport->requests=[];$ipoFirst=$monitor->fullScan(false);$ipoCache=LiteRuntime::read('cache');$ipoRow=$ipoCache->symbols->{'JP|TSE|6758'};$ipoAnalysis=lm_array($ipoRow->analysis);bench_assert($ipoFirst['done']===1&&count($ipoRow->bars)===180&&$ipoAnalysis['eligible']===false,'genuinely short listing remains observed without claiming a complete trend');bench_migration_path($ipoFirst,$transport,true,'short listing receives one complete provider history request',end($ipoRow->bars)[0]);
+              $transport->calls=[];$transport->requests=[];$ipoNext=$monitor->fullScan(false);bench_migration_path($ipoNext,$transport,false,'a short listing is not full-downloaded forever after strategy migration',end($ipoRow->bars)[0]);$migration['short_listing']=['bars'=>180,'first_full'=>1,'next_full'=>0];$results['trend_history_migration']=$migration;$transport->stockBarCount=220;LiteRuntime::write('cache',$warmCache);unset($legacyCache,$legacyRow,$migratedCache,$migratedRow,$shortCache,$shortRow,$ipoCache,$ipoRow,$ipoAnalysis,$prepared,$preparedRow);
               $transport->stockCorrection=1.0001;$GLOBALS['bench_stock_quality_calls']=0;$corrected=$monitor->fullScan(false);$acceptedQualityCalls=$GLOBALS['bench_stock_quality_calls'];$expectReuse=getenv('MON_EXPECT_R16')==='1';bench_assert($corrected['done']===1&&$corrected['pending']===0&&$acceptedQualityCalls===($expectReuse?1:2),'accepted corrected incremental stock data is quality checked exactly once after reuse optimization');if($expectReuse)bench_assert(($corrected['network_stats']['quality_reused']??null)===1,'accepted correction reports one reused quality result');$transport->stockCorrection=1.2;LiteRuntime::write('cache',$warmCache);$GLOBALS['bench_stock_quality_calls']=0;$badFull=$monitor->fullScan(false);$badCache=bench_call($monitor,'cacheObj');bench_assert($badFull['done']===0&&$badFull['pending']===1&&$GLOBALS['bench_stock_quality_calls']===2&&($badFull['network_stats']['fallback_full_downloads']??0)===1,'rejected incremental correction still quality checks and rejects replacement full data');if($expectReuse)bench_assert(($badFull['network_stats']['quality_reused']??null)===0,'rejected full fallback cannot reuse a prior accepted quality result');$results['quality_result_reuse']=['accepted_stock_compare_calls'=>$acceptedQualityCalls,'accepted_quality_reused'=>$corrected['network_stats']['quality_reused']??0,'rejected_full_stays_pending'=>true,'rejected_compare_calls'=>$GLOBALS['bench_stock_quality_calls']];$transport->stockCorrection=1.0;LiteRuntime::write('cache',$warmCache);
               $normalized=bench_call($monitor,'cacheObj');$row=lm_get($normalized->symbols,'JP|TSE|6758');$fingerprint=(string)lm_get($row,'benchmark_fingerprint','');bench_assert($fingerprint!==''&&bench_call($monitor,'analysisReusable',[$row,$row->bars,$fingerprint])===true,'same stock and benchmark permit legitimate analysis reuse');bench_assert(bench_call($monitor,'analysisReusable',[$row,$row->bars,'different-benchmark-fingerprint'])===false,'changed benchmark invalidates cached analysis');$legacy=clone $row;unset($legacy->benchmark_fingerprint,$legacy->calculation_version);bench_assert(bench_call($monitor,'analysisReusable',[$legacy,$legacy->bars,$fingerprint])===false,'legacy analysis without provenance is recomputed');$results['analysis_fingerprint']=['present'=>true,'same_reused'=>true,'changed_rejected'=>true,'legacy_rejected'=>true];$last=end($row->bars);$row->analysis['eligible']=true;$row->analysis['rank_hint']=1;$row->final_check=(object)['status'=>'confirmed','date'=>$last[0],'close'=>$last[4],'checked_at'=>lm_iso()];LiteRuntime::write('cache',$normalized);unset($normalized,$row,$legacy);
               $cachedFinal=$monitor->fullScan(false);$results['confirmed_final_check_reuse']=['cache_hits'=>$cachedFinal['network_stats']['final_recheck_cache_hits'],'rechecks'=>$cachedFinal['network_stats']['final_rechecks']];bench_assert($cachedFinal['network_stats']['final_recheck_cache_hits']===1&&$cachedFinal['network_stats']['final_rechecks']===0,'unchanged bars preserve the confirmed final-check cache across row replacement');
@@ -1785,4 +2032,3 @@ jobs:
 
       - name: Source identities
         run: sha256sum mon.php monitor.md MON-Wiki.md mon_data.json mon_result.md mon_chatgpt_handoff.json mon_chatgpt_response.json
-
