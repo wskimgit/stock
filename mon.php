@@ -2491,8 +2491,11 @@ final class LiteMarketData {
         if (!$stored) return $prior;
         $storedSetup = LiteSwing::normalizeReferenceSetup(lm_get($stored, 'reference_setup'));
         $storedDay = (string)lm_get($stored, 'last_evaluated_date', '');
-        if ($storedSetup === null || !LiteSwing::referenceDate($storedDay)) {
-            $prior['reference_setup'] = ['status' => 'unverified', 'first_guard_unverified_at' => $storedSetup['first_guard_unverified_at'] ?? null,
+        $timelineValid = LiteSwing::referenceDate($storedDay);
+        foreach (['signal_date', 'established_at', 'invalidated_at', 'rearmed_after', 'guard_unverified_since', 'first_guard_unverified_at'] as $field)
+            if (isset($storedSetup[$field]) && strcmp((string)$storedSetup[$field], $storedDay) > 0) $timelineValid = false;
+        if ($storedSetup === null || !$timelineValid) {
+            $prior['reference_setup'] = ['status' => 'unverified', 'first_guard_unverified_at' => $timelineValid ? ($storedSetup['first_guard_unverified_at'] ?? null) : null,
                 'previous_failure_date_unknown' => true, 'reason_codes' => ['reference_setup_invalid']];
             return $prior;
         }
@@ -2516,10 +2519,16 @@ final class LiteMarketData {
         $old = lm_get($c->reference_setups, $sid);
         $oldDay = (string)lm_get($old, 'last_evaluated_date', '');
         $oldSetup = LiteSwing::normalizeReferenceSetup(lm_get($old, 'reference_setup'));
+        $knownFailure = is_array($oldSetup) && ($oldSetup['status'] ?? '') === 'invalidated'
+            && LiteSwing::referenceDate($oldDay) && strcmp((string)$oldSetup['invalidated_at'], $oldDay) <= 0;
         $legitimateRearm = is_array($oldSetup) && ($setup['status'] ?? '') === 'active' && LiteSwing::referenceBuyReady($a)
             && ((($oldSetup['status'] ?? '') === 'invalidated' && ($setup['rearmed_after'] ?? null) === ($oldSetup['invalidated_at'] ?? null))
                 || (($oldSetup['status'] ?? '') === 'unverified' && ($setup['previous_guard_unverified'] ?? false) === true
                     && ($setup['guard_unverified_since'] ?? null) === ($oldSetup['first_guard_unverified_at'] ?? null)));
+        // Uncertain or unproven incoming state cannot erase a dated, known failure.
+        // A future/otherwise inconsistent old checkpoint is not protected as known evidence.
+        if ($knownFailure && (($setup['status'] ?? '') === 'unverified'
+            || (($setup['status'] ?? '') === 'active' && !$legitimateRearm))) return;
         if ($old && (strcmp($day, $oldDay) < 0 || ($day === $oldDay && is_array($oldSetup)
             && in_array($oldSetup['status'] ?? '', ['invalidated', 'unverified'], true) && ($setup['status'] ?? '') === 'active' && !$legitimateRearm))) return;
         $c->reference_setups->$sid = (object)['reference_setup' => $setup, 'last_evaluated_date' => $day];
