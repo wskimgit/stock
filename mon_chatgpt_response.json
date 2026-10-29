@@ -4,38 +4,41 @@
   "stage": "decision",
   "authority": "chatgpt_final",
   "status": "saved",
-  "decision_id": "mon-final-8abf2e079107d0f4d52ca43599699f44",
-  "request_id": "mon-20261026T124351Z-r20",
-  "evaluation_id": "independent-eab4f137e4cdd40250d7ef14",
-  "analysis_at": "2026-10-26T12:43:51Z",
+  "decision_id": "mon-final-f931074ba0f97f863ecd70b52577f0d5",
+  "request_id": "mon-20261029T140442Z-r20",
+  "evaluation_id": "independent-f2429fccb50bc6b757a90a60",
+  "analysis_at": "2026-10-29T14:04:42Z",
   "outcome": "limited_evidence",
-  "result_blob_sha": "ebfa1650e432901ebd135a8cbe118d28b076d098",
-  "data_blob_sha": "1837359edae97df6449af56adb93b7b564f86150",
-  "result_commit_sha": "b1b3f62a4dc820dd308bd904e655b7bbbbf49e53",
-  "data_commit_sha": "b1b3f62a4dc820dd308bd904e655b7bbbbf49e53",
+  "result_blob_sha": "b31902002111c79d62398f7d11f2afc7bee12947",
+  "data_blob_sha": "7e24798a80384303070cfa5401df2caa7345899a",
+  "result_commit_sha": "4c5d45843bf1127e2be7ebd68d68df8822b538a5",
+  "data_commit_sha": "4c5d45843bf1127e2be7ebd68d68df8822b538a5",
   "pair_readback_verified": true,
-  "selected_count": 9,
+  "selected_count": 8,
   "country_counts": {
-    "KR": 3,
+    "KR": 2,
     "US": 3,
     "JP": 3
   },
-  "reviewed_candidate_count": 124,
-  "independent_ohlcv_count": 123,
+  "reviewed_candidate_count": 130,
+  "independent_ohlcv_count": 129,
+  "known_ineligible_ids": [
+    "US|NASDAQ|EXAS"
+  ],
   "completed_daily_sessions": {
-    "KR": "2026-10-26",
-    "US": "2026-10-23",
-    "JP": "2026-10-26"
+    "KR": "2026-10-29",
+    "US": "2026-10-28",
+    "JP": "2026-10-29"
   },
   "immediate_buy_count": 0,
   "m2_count": 0,
   "conditional_m1_count": 0,
   "ms7_counts": {
-    "M0": 6,
+    "M0": 5,
     "M1": 0,
     "M2": 0,
-    "W": 2,
-    "S1": 1,
+    "W": 1,
+    "S1": 2,
     "S2": 0,
     "S3": 0
   },
@@ -44,5 +47,5 @@
     "result": "Exact commit file content and Git blob SHA",
     "data": "Exact commit file Git blob SHA plus immutable blob content; GitHub Contents response omits content over 1 MiB"
   },
-  "saved_at": "2026-10-26T12:47:00Z"
+  "saved_at": "2026-10-29T14:09:14Z"
 }
