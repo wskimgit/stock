@@ -305,4 +305,58 @@ MA 돌파 표와 중복될 수 있는 독립 조건입니다. 최신 완료 일�
 이 결과는 모니터링 참고 자료이며 MON의 최종 추천이 아닙니다.
 
 <!-- /LBUNIT -->
+
+<!-- LBUNIT eyJpZCI6IjQ4MDc2MTEwZjEzMjBmZDExZDBiY2Q5MTQxNGM4NWFmYzBiZjRhYThmMjA5Y2VkOGY5OWRhMDVlNzdkMThiZTYiLCJrZXkiOiJjYjdkZDQzMWM0NTVmMjVhMGJjMmE3MTFiN2ZlNjBhZDMyOGVlYjkwNjhiZmRlYjAzY2U4ODQ5YmFkMGExYjA0Iiwib3JpZ2luIjoiNGFkZThiMDY5MjU4NWQ3NyIsInNlcSI6NCwiY3JlYXRlZF9hdCI6MTc5MzQwNzAwMiwiaGFzaCI6IjllZGRmODgzZDI0Mzc5NmZjYTZlOGY3NWM5ZmE0YjE1YzlkODhlZWZjODFkNTM0YWM2MWVkMjM0N2U0MWZlZTMifQ== -->
+# LongBreak 선택 실행 결과
+
+- 실행 ID: c9559b03ffc217a7f65d9c50
+- 원래 실행 버전: 1.8.0
+- 실행 상태: COMPLETE_WITH_ERRORS · 일부 자료 오류 또는 미해결 항목 있음
+- 시작: 2026-10-25 20:10:49 KST / 완료: 2026-10-31 09:36:42 KST
+- 판정 동결 시각: 2026-10-31 09:36:42 KST (한국·미국 시세를 포함한 모든 시각 Asia/Seoul, KST). 원래 관측 시각은 유지하고 시간대만 변환했습니다. 아래 현재 돌파는 이 완료 시각에만 유효했던 판정입니다. 게시 시점의 실시간 확정이 아닙니다.
+- 선택 범위: 대형주 후보 · 한국 101&#126;150위&#40;50종목&#41; · 미국 101&#126;150위&#40;50종목&#41; · 합계 100종목
+- 저장된 시장별 범위: KR 101~150 / 50종목 · US 101~150 / 50종목
+- MA 설정: 시장 ALL / MA200 / 연속 하회 40거래일 / 돌파 후 허용 5거래일
+- STC 설정: 완료 일봉 Slow Stochastic (14,3,3)의 두 선이 30 이하에서 Slow %K가 Slow %D를 상향 돌파한 뒤, 다음 거래일 이후 첫 MACD (12,26,9) GC 발생일 포함 5거래일(D0~D4). EMA는 각 기간 SMA로 초기화합니다.
+
+| 대상 총수 | 처리수 | MA 분석수 | STC·MACD 분석수 | 자료 오류수 | 미해결수 | 현재 돌파 | 이전·완료봉 돌파 | STC→MACD GC 5일 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 100 | 100 | 99 | 0 | 1 | 1 | 0 | 1 | 0 |
+
+**일부 오류 포함:** 성공한 분석과 자료 오류를 함께 기록한 완료 결과입니다. 오류 1종목 / 저장된 미해결 1종목은 검증된 후보가 아닙니다.
+
+## 완료 시각에 최근 시세로 확인한 MA 돌파
+
+해당 조건 0종목.
+
+## 이전 관측·완료봉 MA 돌파 참고
+
+이전 관측은 원래 시세 시각과 출처를 보존합니다. 현재 돌파로 재확정하지 않습니다.
+
+| 시장 | 종목코드 | 종목명 | 판정 | 가격 | MA | 일봉일자·출처 | 시세 시각·출처 |
+| --- | --- | --- | --- | ---: | ---: | --- | --- |
+| US | ISRG | Intuitive Surgical, Inc. - Common Stock | 완료봉 돌파 참고 | 452.290009 | 436.211949 | 2026-10-23 / YAHOO | 완료 종가 / YAHOO |
+
+총 1건 중 1건 표시.
+
+## 저점 STC GC 이후 MACD GC · 발생일 포함 5거래일
+
+MA 돌파 표와 중복될 수 있는 독립 조건입니다. 최신 완료 일봉 기준이며 실시간 분봉 신호가 아닙니다.
+
+해당 조건 0종목.
+
+## 오류·조건 미달 사유 집계
+
+종목 목록 자체는 돌파 결과가 아닙니다. STC 미계산 100종목. 사유는 행당 MA·시세 사유와 STC 미계산 사유를 함께 집계하므로 중복될 수 있습니다.
+
+| 사유 코드 | 건수 |
+| --- | ---: |
+| STC:STOCH&#95;RULE&#95;CHANGED | 99 |
+| MA/시세:COMPLETED&#95;BAR&#95;REFERENCE | 98 |
+| MA/시세:HISTORY&#95;CLOSE&#95;INVALID | 1 |
+| STC:NOT&#95;CALCULATED | 1 |
+
+이 결과는 모니터링 참고 자료이며 MON의 최종 추천이 아닙니다.
+
+<!-- /LBUNIT -->
 <!-- LONGBREAK:END -->
