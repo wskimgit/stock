@@ -2,59 +2,74 @@
 
 <!-- REPORT_ONE:STC14:BEGIN -->
 ## STC14
-<!-- STC14_META status=DONE updated_at=2026-11-05T19:18:11+09:00 fingerprint=3c1d84e95f6d955e swing_fingerprint=- -->
+<!-- STC14_META status=DONE updated_at=2026-11-06T19:18:40+09:00 fingerprint=1e1164ee1ca99eb6 swing_fingerprint=- -->
 
-- 기준일: KR `2026-11-05` · US `2026-11-04` · JP `2026-11-05`
-- 결과: `DONE` · 품질 `LIMITED` · 후보 **46** · 처리 350/351 (99.72%) · 오류 1
+- 기준일: KR `2026-11-06` · US `2026-11-05` · JP `2026-11-06`
+- 결과: `DONE` · 품질 `LIMITED` · 후보 **61** · 처리 350/351 (99.72%) · 오류 1
 
 | 시장 | 종목 | 코드 | 상태 | D1 K/D | H60 K/D | MS7 |
 |---|---|---|---|---:|---:|---|
-| KR | 원익IPS | `240810` | CROSS | 6.34/6.58 | 1.89/1.36 CROSS | M0 · 관찰 |
-| JP | 후루카와전기 | `5801` | CROSS | 8.71/11.68 | 3.45/3.05 CROSS | W · 대기 |
-| KR | LG전자 | `066570` | CROSS | 9.56/12.37 | 16.00/15.28 CROSS | W · 대기 |
-| KR | LG | `003550` | CROSS | 13.74/18.38 | 17.36/14.03 CROSS | W · 대기 |
-| KR | 에코프로 | `086520` | CROSS | 18.16/16.53 | 11.59/10.99 CROSS | W · 대기 |
-| KR | 에코프로비엠 | `247540` | CROSS | 20.63/15.24 | 21.14/20.05 CROSS | W · 대기 |
-| KR | 엘앤에프 | `066970` | CROSS | 24.29/17.53 | 23.24/21.61 CROSS | M2 · 분할매입 |
-| US | Datadog | `DDOG` | MATCH | 4.96/9.75 | 23.39/24.02 PRE_CROSS | W · 대기 |
-| KR | HPSP | `403870` | MATCH | 5.26/5.30 | 2.89/4.04 PRE_CROSS | M1 · 매입 검토 |
-| JP | 히타치제작소 | `6501` | MATCH | 5.39/6.91 | 13.02/15.23 PRE_CROSS | W · 대기 |
-| KR | LG이노텍 | `011070` | MATCH | 5.63/5.82 | 16.15/14.76 POST_CROSS | M0 · 관찰 |
-| US | Arm Holdings | `ARM` | MATCH | 5.98/10.44 | 21.09/22.21 PRE_CROSS | W · 대기 |
-| US | Caterpillar | `CAT` | MATCH | 6.12/5.53 | 16.68/19.11 PRE_CROSS | W · 대기 |
-| US | Dell | `DELL` | MATCH | 6.61/8.33 | 9.13/9.99 PRE_CROSS | W · 대기 |
-| KR | 한전기술 | `052690` | MATCH | 7.02/9.85 | 16.67/14.13 POST_CROSS | M1 · 매입 검토 |
-| JP | 미쓰비시중공업 | `7011` | MATCH | 7.65/7.33 | 5.13/7.22 PRE_CROSS | W · 대기 |
-| KR | SFA반도체 | `036540` | MATCH | 7.67/6.07 | 1.34/1.56 PRE_CROSS | M0 · 관찰 |
-| KR | 두산에너빌리티 | `034020` | MATCH | 7.72/10.06 | 10.64/10.64 PRE_CROSS | W · 대기 |
-| US | Sandisk | `SNDK` | MATCH | 8.07/10.74 | 15.21/18.07 PRE_CROSS | W · 대기 |
-| US | Applied Materials | `AMAT` | MATCH | 8.92/12.68 | 23.01/25.85 PRE_CROSS | W · 대기 |
-| KR | 세아베스틸지주 | `001430` | MATCH | 8.95/9.16 | 20.41/17.69 POST_CROSS | W · 대기 |
-| JP | 후지쿠라 | `5803` | MATCH | 8.99/11.27 | 3.05/3.11 PRE_CROSS | W · 대기 |
-| KR | 팬오션 | `028670` | MATCH | 9.44/10.69 | 5.33/6.57 PRE_CROSS | M1 · 매입 검토 |
-| JP | 키엔스 | `6861` | MATCH | 9.44/12.15 | 4.87/5.44 PRE_CROSS | W · 대기 |
-| KR | 미래에셋벤처투자 | `100790` | MATCH | 9.75/8.41 | 7.65/9.13 PRE_CROSS | M1 · 매입 검토 |
-| KR | 대한전선 | `001440` | MATCH | 10.32/11.47 | 3.80/5.56 PRE_CROSS | W · 대기 |
-| KR | 태웅 | `044490` | MATCH | 10.34/10.56 | 8.14/6.46 POST_CROSS | M2 · 분할매입 |
-| KR | 솔루스첨단소재 | `336370` | MATCH | 10.58/9.38 | 22.01/15.83 POST_CROSS | M1 · 매입 검토 |
-| KR | 비에이치아이 | `083650` | MATCH | 11.04/13.70 | 11.33/9.82 POST_CROSS | M1 · 매입 검토 |
-| KR | 로보스타 | `090360` | MATCH | 11.06/11.90 | 11.33/9.56 POST_CROSS | M2 · 분할매입 |
-| US | NVIDIA | `NVDA` | MATCH | 11.22/12.82 | 17.08/15.84 POST_CROSS | W · 대기 |
-| KR | 현대무벡스 | `319400` | MATCH | 11.33/14.63 | 26.36/26.61 PRE_CROSS | M0 · 관찰 |
-| KR | 천보 | `278280` | MATCH | 11.54/8.76 | 12.73/12.98 PRE_CROSS | M0 · 관찰 |
-| KR | 한미반도체 | `042700` | MATCH | 11.96/13.79 | 11.69/10.85 POST_CROSS | W · 대기 |
-| JP | 이비덴 | `4062` | MATCH | 14.07/18.79 | 10.34/13.31 PRE_CROSS | W · 대기 |
-| KR | GS | `078930` | MATCH | 14.19/14.60 | 29.08/26.00 POST_CROSS | W · 대기 |
-| KR | 일진전기 | `103590` | MATCH | 15.16/16.78 | 14.77/13.05 POST_CROSS | M2 · 분할매입 |
-| KR | 클래시스 | `214150` | MATCH | 16.33/15.51 | 25.44/27.01 PRE_CROSS | W · 대기 |
-| JP | 파나소닉홀딩스 | `6752` | MATCH | 17.95/18.74 | 1.51/1.94 PRE_CROSS | W · 대기 |
-| KR | HD현대일렉트릭 | `267260` | MATCH | 19.78/22.06 | 14.47/12.68 POST_CROSS | W · 대기 |
-| KR | 두산퓨얼셀 | `336260` | MATCH | 21.53/18.88 | 14.49/11.66 POST_CROSS | M2 · 분할매입 |
-| KR | LG에너지솔루션 | `373220` | MATCH | 21.53/15.65 | 26.11/27.41 PRE_CROSS | W · 대기 |
-| KR | 현대오토에버 | `307950` | MATCH | 21.80/25.87 | 15.79/13.84 POST_CROSS | W · 대기 |
-| KR | 코오롱인더 | `120110` | MATCH | 21.85/18.88 | 16.67/13.64 POST_CROSS | W · 대기 |
-| JP | 교세라 | `6971` | MATCH | 22.01/24.68 | 19.67/20.04 PRE_CROSS | W · 대기 |
-| JP | 도쿄일렉트론 | `8035` | MATCH | 29.77/32.39 | 5.98/7.43 PRE_CROSS | W · 대기 |
+| US | Fortinet | `FTNT` | CROSS | 4.01/4.51 | 19.08/9.15 CROSS | W · 대기 |
+| US | Caterpillar | `CAT` | CROSS | 5.83/5.80 | 17.71/8.60 CROSS | W · 대기 |
+| US | Datadog | `DDOG` | CROSS | 5.97/6.20 | 24.13/16.38 CROSS | W · 대기 |
+| US | Dell | `DELL` | CROSS | 6.61/6.91 | 20.42/10.09 CROSS | W · 대기 |
+| US | Arm Holdings | `ARM` | CROSS | 7.16/7.25 | 29.57/16.97 CROSS | W · 대기 |
+| US | Sandisk | `SNDK` | CROSS | 7.55/8.34 | 18.35/12.94 CROSS | W · 대기 |
+| US | Micron | `MU` | CROSS | 8.11/10.39 | 22.17/13.87 CROSS | W · 대기 |
+| US | TSMC (ADR) | `TSM` | CROSS | 8.61/8.85 | 27.10/16.86 CROSS | W · 대기 |
+| US | MongoDB | `MDB` | CROSS | 9.16/10.53 | 24.46/18.18 CROSS | M2 · 분할매입 |
+| US | Alphabet | `GOOGL` | CROSS | 9.51/6.85 | 20.36/16.45 CROSS | W · 대기 |
+| KR | 네패스 | `033640` | CROSS | 9.56/10.70 | 29.70/25.94 CROSS | M2 · 분할매입 |
+| US | Trane | `TT` | CROSS | 9.88/10.00 | 2.70/2.21 CROSS | W · 대기 |
+| US | Tech ETF | `XLK` | CROSS | 10.08/10.08 | 15.85/8.19 CROSS | W · 대기 |
+| US | HPE | `HPE` | CROSS | 10.41/10.27 | 19.12/11.77 CROSS | W · 대기 |
+| US | Vistra | `VST` | CROSS | 11.13/10.73 | 26.29/17.95 CROSS | M1 · 매입 검토 |
+| US | AMD | `AMD` | CROSS | 12.38/11.22 | 18.23/10.87 CROSS | W · 대기 |
+| KR | 한솔케미칼 | `014680` | CROSS | 13.21/13.08 | 16.18/13.95 CROSS | W · 대기 |
+| US | Okta | `OKTA` | CROSS | 15.72/18.49 | 19.52/10.10 CROSS | W · 대기 |
+| KR | 키움증권 | `039490` | CROSS | 16.07/12.62 | 27.59/25.73 CROSS | W · 대기 |
+| US | ARK ETF | `ARKK` | CROSS | 16.95/14.35 | 19.10/15.34 CROSS | W · 대기 |
+| US | Robinhood | `HOOD` | CROSS | 17.00/14.61 | 25.32/19.44 CROSS | W · 대기 |
+| US | Oracle | `ORCL` | CROSS | 17.66/17.58 | 29.58/23.94 CROSS | W · 대기 |
+| KR | 코오롱인더 | `120110` | CROSS | 18.32/20.09 | 25.79/25.06 CROSS | W · 대기 |
+| KR | DB손해보험 | `005830` | CROSS | 18.40/12.70 | 15.38/15.03 CROSS | M2 · 분할매입 |
+| US | ON Semi | `ON` | CROSS | 18.96/19.30 | 18.89/9.91 CROSS | W · 대기 |
+| US | Coinbase | `COIN` | CROSS | 20.16/17.45 | 15.14/11.42 CROSS | W · 대기 |
+| KR | 에코프로비엠 | `247540` | CROSS | 22.52/20.26 | 27.83/24.74 CROSS | W · 대기 |
+| KR | 에이비엘바이오 | `298380` | CROSS | 22.72/18.84 | 27.23/24.47 CROSS | W · 대기 |
+| US | Marathon | `MARA` | CROSS | 24.84/21.89 | 22.40/17.15 CROSS | W · 대기 |
+| US | Eaton | `ETN` | CROSS | 27.56/30.41 | 25.26/14.20 CROSS | W · 대기 |
+| KR | 롯데케미칼 | `011170` | CROSS | 29.11/29.26 | 9.72/9.06 CROSS | W · 대기 |
+| KR | 엘앤에프 | `066970` | CROSS | 29.48/25.47 | 28.71/24.50 CROSS | M2 · 분할매입 |
+| US | Marvell | `MRVL` | MATCH | 3.74/4.54 | 23.18/12.74 POST_CROSS | W · 대기 |
+| KR | LIG넥스원 | `079550` | MATCH | 5.19/6.73 | 11.67/11.74 PRE_CROSS | W · 대기 |
+| JP | NTT | `9432` | MATCH | 6.74/16.35 | 7.10/5.07 POST_CROSS | W · 대기 |
+| KR | HPSP | `403870` | MATCH | 6.89/6.13 | 18.19/19.24 PRE_CROSS | M2 · 분할매입 |
+| KR | 파트론 | `091700` | MATCH | 7.51/7.55 | 18.28/20.49 PRE_CROSS | W · 대기 |
+| US | 3X Semiconductor | `SOXL` | MATCH | 7.87/8.31 | 18.27/10.32 POST_CROSS | W · 대기 |
+| KR | 원익IPS | `240810` | MATCH | 8.24/7.30 | 12.39/13.63 PRE_CROSS | M1 · 매입 검토 |
+| US | Applied Materials | `AMAT` | MATCH | 8.95/9.52 | 25.98/13.66 POST_CROSS | W · 대기 |
+| JP | 키옥시아홀딩스 | `285A` | MATCH | 9.32/13.41 | 17.48/19.66 PRE_CROSS | W · 대기 |
+| US | NVIDIA | `NVDA` | MATCH | 9.82/12.03 | 22.82/12.71 POST_CROSS | W · 대기 |
+| US | Semiconductor ETF | `SMH` | MATCH | 9.95/10.65 | 24.55/13.02 POST_CROSS | W · 대기 |
+| US | 3X Nasdaq | `TQQQ` | MATCH | 10.34/9.26 | 17.97/10.37 POST_CROSS | W · 대기 |
+| KR | SFA반도체 | `036540` | MATCH | 10.47/8.09 | 20.53/21.08 PRE_CROSS | M0 · 관찰 |
+| US | Snowflake | `SNOW` | MATCH | 10.75/11.61 | 24.91/17.88 POST_CROSS | W · 대기 |
+| KR | 퍼스텍 | `010820` | MATCH | 10.84/14.39 | 23.98/26.15 PRE_CROSS | W · 대기 |
+| US | NASDAQ ETF | `QQQ` | MATCH | 11.49/10.35 | 20.72/11.90 POST_CROSS | W · 대기 |
+| KR | KODEX 코스닥150 | `229200` | MATCH | 11.64/11.48 | 23.77/26.62 PRE_CROSS | W · 대기 |
+| JP | 코쿠사이일렉트릭 | `6525` | MATCH | 12.04/15.45 | 27.15/28.26 PRE_CROSS | W · 대기 |
+| JP | 고마쓰 | `6301` | MATCH | 12.76/11.38 | 16.57/16.98 PRE_CROSS | W · 대기 |
+| KR | 대한전선 | `001440` | MATCH | 12.88/12.67 | 23.18/24.45 PRE_CROSS | W · 대기 |
+| KR | 주성엔지니어링 | `036930` | MATCH | 13.08/10.85 | 20.92/23.21 PRE_CROSS | W · 대기 |
+| JP | 이비덴 | `4062` | MATCH | 13.67/14.97 | 17.78/18.76 PRE_CROSS | W · 대기 |
+| KR | 씨젠 | `096530` | MATCH | 13.90/11.12 | 24.34/24.89 PRE_CROSS | M1 · 매입 검토 |
+| US | Palantir | `PLTR` | MATCH | 16.50/14.78 | 19.93/10.88 POST_CROSS | W · 대기 |
+| US | Broadcom | `AVGO` | MATCH | 19.90/21.07 | 24.08/14.37 POST_CROSS | W · 대기 |
+| JP | 가와사키중공업 | `7012` | MATCH | 26.06/22.63 | 22.90/23.45 PRE_CROSS | W · 대기 |
+| US | Arista | `ANET` | MATCH | 27.02/21.46 | 23.96/14.11 POST_CROSS | W · 대기 |
+| US | S&P500 ETF | `SPY` | MATCH | 27.44/23.64 | 11.91/7.18 POST_CROSS | W · 대기 |
+| US | Vanguard S&P500 | `VOO` | MATCH | 28.78/24.59 | 11.77/7.32 POST_CROSS | M2 · 분할매입 |
 
 <!-- REPORT_ONE:STC14:END -->
 
