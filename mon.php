@@ -6,7 +6,7 @@
  */
 declare(strict_types = 1);
 const MON_LITE_VERSION = '2.2.3';
-const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261026-r20';
+const MON_LITE_BUILD = 'MON-LITE-2.2.3-20261101-r21';
 const MON_LITE_POLICY = 'MON-LITE-OPS-2.2.3';
 const MON_LITE_RUNTIME = __DIR__ . '/mon_runtime';
 const MON_LITE_GITHUB_REPO = 'wskimgit/stock';
@@ -981,12 +981,17 @@ final class LiteHttp {
         }
         $j = lm_decode($r['body']);
         $sha = (string) lm_get($j, 'sha', '');
+        if (!preg_match('/^[a-f0-9]{40}$/D', $sha)) throw new LiteMonFault('GITHUB_BLOB_VERIFY_FAILED');
         $content = lm_get($j, 'content');
-        $b = is_string($content) && $content !== '' ? base64_decode(str_replace(["\r", "\n"], '', $content), true): false;
+        $b = is_string($content) && lm_get($j, 'encoding', 'base64') === 'base64'
+            ? base64_decode(str_replace(["\r", "\n"], '', $content), true): false;
         if (!is_string($b)) {
             $rawHeaders = ['Accept: application/vnd.github.raw+json', 'Authorization: Bearer ' . $this->cfg->githubToken];
-            $b = $this->get($url, $rawHeaders, 12);
+            // Contents omits large bodies. Read its immutable blob, not a branch that may advance between requests.
+            $blobUrl = 'https://api.github.com/repos/' . MON_LITE_GITHUB_REPO . '/git/blobs/' . $sha;
+            $b = $this->get($blobUrl, $rawHeaders, 12);
         }
+        if (!hash_equals($sha, lm_git_blob_sha($b))) throw new LiteMonFault('GITHUB_BLOB_VERIFY_FAILED');
         $etag = self::headerValue($r['headers'], 'etag');
         unset ($r, $j, $content);
         $item = ['content' => $b, 'sha' => $sha, 'commit_sha' => null, 'etag' => $etag];
@@ -1689,6 +1694,12 @@ final class LiteYahoo {
                 'YAHOO_EMPTY',
                 'YAHOO_ROWS_INVALID',
                 'YAHOO_CURRENCY_MISMATCH',
+                'YAHOO_IDENTITY_MISSING',
+                'YAHOO_IDENTITY_MISMATCH',
+                'YAHOO_SYMBOL_MISMATCH',
+                'YAHOO_EXCHANGE_MISMATCH',
+                'YAHOO_TIMEZONE_MISMATCH',
+                'YAHOO_INSTRUMENT_MISMATCH',
                 'YAHOO_INVALID_BAR_BURST',
                 'YAHOO_LATEST_BAR_INVALID'
             ],
@@ -1756,6 +1767,49 @@ final class LiteYahoo {
         if ($s['country'] === 'JP') return $s['symbol'] . '.T';
         return str_replace('.', '-', $s['symbol']);
     }
+
+    /** Raw tickers belong only to the two internal benchmark request shapes. */
+    private static function validateBenchmarkRequest(array $s): void {
+        if (!isset($s['raw_ticker'])) return;
+        $raw = $s['raw_ticker'];
+        $country = $s['country'] ?? null;
+        $exchange = $s['exchange'] ?? null;
+        if (!is_string($raw) || ($s['symbol'] ?? null) !== $raw
+            || !in_array($country, ['KR', 'US', 'JP'], true)
+            || ($country === 'US' && $exchange !== 'NYSE') || ($country === 'JP' && $exchange !== 'TSE')
+            || ($country === 'KR' && !in_array($exchange, ['KOSPI', 'KOSDAQ'], true))) throw new LiteMonFault('YAHOO_IDENTITY_MISMATCH');
+        $key = $country === 'KR' ? 'KR-' . $exchange : $country;
+        if (!in_array($s['symbol_id'] ?? null, [$country . '|INDEX|' . $raw, $country . '|INDEX|' . $key], true)
+            || !in_array($raw, self::benchmarkCandidates($country, $exchange), true)) throw new LiteMonFault('YAHOO_IDENTITY_MISMATCH');
+    }
+
+    /** Validate the returned listing before any provider rows or cache may be used. */
+    private static function validateProviderIdentity(array $s, $meta): void {
+        $currency = lm_get($meta, 'currency');
+        if (!is_string($currency) || $currency === '' || $currency !== ($s['currency'] ?? null)) throw new LiteMonFault('YAHOO_CURRENCY_MISMATCH');
+        foreach (['symbol', 'exchangeTimezoneName', 'instrumentType'] as $field) {
+            $value = lm_get($meta, $field);
+            if (!is_string($value) || trim($value) === '') throw new LiteMonFault('YAHOO_IDENTITY_MISSING');
+        }
+        if (strcasecmp((string)lm_get($meta, 'symbol'), self::ticker($s)) !== 0) throw new LiteMonFault('YAHOO_SYMBOL_MISMATCH');
+        $zones = ['KR' => 'Asia/Seoul', 'US' => 'America/New_York', 'JP' => 'Asia/Tokyo'];
+        $country = (string)($s['country'] ?? '');
+        if (!isset($zones[$country]) || lm_get($meta, 'exchangeTimezoneName') !== $zones[$country]) throw new LiteMonFault('YAHOO_TIMEZONE_MISMATCH');
+        if (isset($s['raw_ticker'])) {
+            // Only the internal, country-specific benchmark route may request indices or the TOPIX proxy ETF.
+            self::validateBenchmarkRequest($s);
+            $type = self::ticker($s) === '1306.T' ? 'ETF' : 'INDEX';
+            if (lm_get($meta, 'instrumentType') !== $type) throw new LiteMonFault('YAHOO_INSTRUMENT_MISMATCH');
+            return;
+        }
+        $exchange = lm_get($meta, 'exchangeName');
+        if (!is_string($exchange) || trim($exchange) === '') throw new LiteMonFault('YAHOO_IDENTITY_MISSING');
+        $listings = ['KR' => ['KOSPI' => ['KSC'], 'KOSDAQ' => ['KOE']],
+            'US' => ['NASDAQ' => ['NMS', 'NGM', 'NCM'], 'NYSE' => ['NYQ'], 'AMEX' => ['ASE']],
+            'JP' => ['TSE' => ['JPX']]];
+        if (!in_array($exchange, $listings[$country][$s['exchange'] ?? ''] ?? [], true)) throw new LiteMonFault('YAHOO_EXCHANGE_MISMATCH');
+        if (lm_get($meta, 'instrumentType') !== 'EQUITY') throw new LiteMonFault('YAHOO_INSTRUMENT_MISMATCH');
+    }
     // Yahoo daily OHLC/Close is already split-adjusted; never apply split events a second time.
     private static function completed(array $rows, string $country): array {
         if (!$rows) return $rows;
@@ -1801,7 +1855,12 @@ final class LiteYahoo {
         $this->stats['yahoo_envelope_recovery_requests']++;
         $j = lm_decode($this->http->get($url, [], 8));
         $r = lm_get(lm_get(lm_get($j, 'chart'), 'result'), 0);
-        if (!$r || lm_get(lm_get($r, 'meta'), 'currency') !== $s['currency']) throw new LiteMonFault('YAHOO_LATEST_BAR_INVALID');
+        if (!$r) throw new LiteMonFault('YAHOO_LATEST_BAR_INVALID');
+        try {
+            self::validateProviderIdentity($s, lm_get($r, 'meta'));
+        } catch (LiteMonFault $identityError) {
+            throw new LiteMonFault('YAHOO_LATEST_BAR_INVALID');
+        }
         $ts = lm_get($r, 'timestamp', []);
         $q = lm_get(lm_get(lm_get($r, 'indicators'), 'quote'), 0);
         if (!is_array($ts) || !is_object($q)) throw new LiteMonFault('YAHOO_LATEST_BAR_INVALID');
@@ -1846,10 +1905,13 @@ final class LiteYahoo {
     }
 
     private function fetchRange(array $s, int $p1, int $p2): array {
+        self::validateBenchmarkRequest($s);
         $tickerRaw = self::ticker($s);
+        $requestIdentity = lm_hash([$s['country'] ?? null, $s['exchange'] ?? null, $s['currency'] ?? null, isset($s['raw_ticker'])]);
         $p2Day = gmdate('Y-m-d', $p2);
         $cached = $this->rangeCache[$tickerRaw] ?? null;
         if (is_array($cached) && $cached['p2_day'] === $p2Day && $cached['p1'] <= $p1) {
+            if (($cached['request_identity'] ?? null) !== $requestIdentity) throw new LiteMonFault('YAHOO_IDENTITY_MISMATCH');
             $this->stats['yahoo_range_cache_hits']++;
             $from = gmdate('Y-m-d', $p1);
             return array_values(array_filter($cached['rows'], static function ($r) use($from) {
@@ -1864,8 +1926,7 @@ final class LiteYahoo {
         $r = lm_get(lm_get(lm_get($j, 'chart'), 'result'), 0);
         if (!$r) throw new LiteMonFault('YAHOO_EMPTY');
         $m = lm_get($r, 'meta');
-        $cur = (string) lm_get($m, 'currency');
-        if ($cur !== $s['currency']) throw new LiteMonFault('YAHOO_CURRENCY_MISMATCH');
+        self::validateProviderIdentity($s, $m);
         $ts = lm_get($r, 'timestamp', []);
         $q = lm_get(lm_get(lm_get($r, 'indicators'), 'quote'), 0);
         if (!is_array($ts) || !is_object($q)) throw new LiteMonFault('YAHOO_ROWS_INVALID');
@@ -1904,7 +1965,7 @@ final class LiteYahoo {
         $cacheRows = array_slice($rows, - self::RANGE_CACHE_BARS);
         $cacheP1 = $cacheRows ? strtotime($cacheRows[0][0] . ' 00:00:00 UTC'): $p1;
         if ($cacheP1 === false) $cacheP1 = $p1;
-        if (!is_array($cached) || $cacheP1 < $cached['p1']) $this->rangeCache[$tickerRaw] = ['p1' => $cacheP1, 'p2_day' => $p2Day, 'rows' => $cacheRows];
+        if (!is_array($cached) || $cacheP1 < $cached['p1']) $this->rangeCache[$tickerRaw] = ['p1' => $cacheP1, 'p2_day' => $p2Day, 'rows' => $cacheRows, 'request_identity' => $requestIdentity];
         while (count($this->rangeCache) > self::RANGE_CACHE_SYMBOLS) unset ($this->rangeCache[array_key_first($this->rangeCache)]);
         return $rows;
     }
@@ -2033,9 +2094,22 @@ final class LiteQuality {
             }
         }
         if ($diff === 0) return ['state' => 'exact', 'accept' => true, 'reason' => null];
-        $oldTech = LiteSwing::technical($old);
-        $newTech = LiteSwing::technical($new);
-        $same = lm_hash([$oldTech['qualifying_signals'], $oldTech['macd_kind'], $oldTech['ma5_reclaim_close']]) === lm_hash([$newTech['qualifying_signals'], $newTech['macd_kind'], $newTech['ma5_reclaim_close']]);
+        // Compare corrections at the same observation dates. A normal new completed
+        // bar may create a new signal and must not be blamed on an older correction.
+        $commonOld = [];
+        $commonNew = [];
+        foreach ($new as $r) if (isset($a[$r[0]])) {
+            $commonOld[] = $a[$r[0]];
+            $commonNew[] = $r;
+        }
+        $same = false;
+        // SMA-seeded MACD starts at bar 34; the complete three-day AFTER
+        // window also needs the histogram immediately before its earliest cross.
+        if (count($commonOld) >= 38) {
+            $oldTech = LiteSwing::technical($commonOld);
+            $newTech = LiteSwing::technical($commonNew);
+            $same = lm_hash([$oldTech['qualifying_signals'], $oldTech['macd_kind'], $oldTech['ma5_reclaim_close']]) === lm_hash([$newTech['qualifying_signals'], $newTech['macd_kind'], $newTech['ma5_reclaim_close']]);
+        }
         if ($same && $maxRel <= 0.001) return [
             'state' => 'minor_no_signal_change',
             'accept' => true,
@@ -3162,7 +3236,8 @@ final class LiteDecisionService {
         $seen = [];
         foreach ($selected as $x) {
             if (!is_array($x)) throw new LiteMonFault('DECISION_ITEM_INVALID');
-            $sid = trim((string)($x['symbol_id'] ?? ''));
+            if (!is_string($x['symbol_id'] ?? null)) throw new LiteMonFault('DECISION_SYMBOL_INVALID');
+            $sid = trim($x['symbol_id']);
             $sym = LiteMarketData::symbolFromId($sid);
             if (!$sym) throw new LiteMonFault('DECISION_SYMBOL_INVALID');
             if (isset ($seen[$sid])) throw new LiteMonFault('DECISION_DUPLICATE_SYMBOL');
@@ -3171,14 +3246,18 @@ final class LiteDecisionService {
             if (isset ($x['country']) && $x['country'] !== $country) throw new LiteMonFault('DECISION_COUNTRY_MISMATCH');
             $per[$country]++;
             if ($per[$country] > 3) throw new LiteMonFault('DECISION_LIMIT_INVALID');
-            $name = trim((string)($x['name'] ?? ''));
-            if ($name === '' || strcasecmp($name, (string) $sym['symbol']) === 0) throw new LiteMonFault('DECISION_NAME_REQUIRED');
-            $reason = trim((string)($x['reason'] ?? ''));
-            $risk = trim((string)($x['risk_note'] ?? ''));
+            if (!is_string($x['name'] ?? null)) throw new LiteMonFault('DECISION_NAME_REQUIRED');
+            $name = trim($x['name']);
+            // Legitimate issuer names such as SLB and KOA may equal their ticker.
+            if ($name === '' || preg_match('/^[0-9]+$/D', $name)) throw new LiteMonFault('DECISION_NAME_REQUIRED');
+            if (!is_string($x['reason'] ?? null) || !is_string($x['risk_note'] ?? null)) throw new LiteMonFault('DECISION_ANALYSIS_TOO_THIN');
+            $reason = trim($x['reason']);
+            $risk = trim($x['risk_note']);
             if (strlen($reason) < 8 || strlen($risk) < 4) throw new LiteMonFault('DECISION_ANALYSIS_TOO_THIN');
             $ms = $x['ms7'] ?? null;
             if (!is_array($ms)) throw new LiteMonFault('DECISION_MS7_REQUIRED');
-            $code = (string)($ms['code'] ?? '');
+            if (!is_string($ms['code'] ?? null)) throw new LiteMonFault('DECISION_MS7_INVALID');
+            $code = $ms['code'];
             if (!isset ($labels[$code])) throw new LiteMonFault('DECISION_MS7_INVALID');
             $y = $x;
             $y['symbol_id'] = $sid;
@@ -3196,6 +3275,58 @@ final class LiteDecisionService {
             $out[] = $y;
         }
         return $out;
+    }
+
+    /** Sort object keys recursively while retaining the order of selections and other lists. */
+    private static function canonicalDecisionValue($value) {
+        if ($value instanceof stdClass) $value = (array) $value;
+        if (!is_array($value)) return $value;
+        if ($value && array_keys($value) !== range(0, count($value) - 1)) ksort($value, SORT_STRING);
+        foreach ($value as $key => $item) $value[$key] = self::canonicalDecisionValue($item);
+        return $value;
+    }
+
+    /** A decision's identity excludes transport formatting, receipt time and delivery SHA. */
+    private static function decisionFingerprint(string $rid, array $selected, array $unresolved, string $evaluationId, array $marketView, array $context): string {
+        return lm_hash(self::canonicalDecisionValue([
+            'contract' => 'MON-LITE-RESULT-2.1', 'policy' => MON_LITE_POLICY,
+            'authority' => 'chatgpt_final', 'independent_analysis' => true,
+            'request_id' => $rid, 'evaluation_id' => $evaluationId,
+            'selected' => $selected, 'unresolved_ids' => $unresolved, 'market_view' => $marketView,
+            'outcome' => $context['outcome'] ?? ($selected ? 'completed' : 'limited_evidence'),
+            'conclusion' => $context['conclusion'] ?? 'ChatGPT independent final decision.',
+            'analysis_at' => $context['analysis_at'] ?? null,
+            'independent_sources' => $context['independent_sources'] ?? []
+        ]));
+    }
+
+    private static function decisionId(array $context, string $fingerprint): string {
+        if (!array_key_exists('decision_id', $context)) return $fingerprint;
+        $id = $context['decision_id'];
+        if (!is_string($id) || $id === '' || strlen($id) > 160 || $id !== trim($id)
+            || preg_match('/[\x00-\x20\x7f]/', $id)) throw new LiteMonFault('DECISION_ID_INVALID');
+        return $id;
+    }
+
+    private static function sameAcceptedDecision($old, string $id, string $fingerprint): bool {
+        if (lm_get($old, 'authority') !== 'chatgpt_final' || lm_get($old, 'independent_analysis') !== true
+            || lm_get($old, 'decision_id') !== $id) return false;
+        $known = lm_get($old, 'decision_fingerprint');
+        if (!is_string($known) || $known === '') {
+            // Legacy accepted records have no fingerprint; compare their original semantic fields.
+            $value = lm_array($old);
+            if (!array_key_exists('conclusion', $value) && !is_array($value['outbox'] ?? null)
+                && in_array($value['save_status'] ?? '', ['pending_remote', 'saved'], true)) {
+                $value['conclusion'] = 'Previously accepted ChatGPT decision; original source metadata unavailable.';
+            }
+            $known = self::decisionFingerprint(
+                (string)($value['request_id'] ?? ''), self::normalizeChatgptDecision($value['selected'] ?? []),
+                (array)($value['unresolved_ids'] ?? []), (string)($value['evaluation_id'] ?? ''),
+                (array)($value['market_view'] ?? []), $value
+            );
+        }
+        if (!hash_equals($known, $fingerprint)) throw new LiteMonFault('DECISION_ID_REUSE_CONFLICT');
+        return true;
     }
 
     public function mailboxCheck(): void {
@@ -3221,7 +3352,8 @@ final class LiteDecisionService {
     public function decisionPending($result = null): bool {
         $r = $result ?? LiteRuntime::read('result');
         return in_array(lm_get($r, 'save_status'), ['pending_remote', 'pending_receipt'], true) || (
-            lm_get($r, 'save_status') === 'saved' && lm_get($r, 'authority') === 'chatgpt_final' && lm_get($r, 'receipt_readback_verified') !== true
+            lm_get($r, 'save_status') === 'saved' && lm_get($r, 'authority') === 'chatgpt_final'
+                && (lm_get($r, 'pair_readback_verified') !== true || lm_get($r, 'receipt_readback_verified') !== true)
         );
     }
 
@@ -3398,47 +3530,65 @@ final class LiteDecisionService {
         $views = lm_get($q, 'market_view', []);
         if (!is_array($views)) throw new LiteMonFault('DECISION_MARKET_VIEW_REQUIRED');
         foreach (['KR', 'US', 'JP'] as $cc) {
-            $v = trim((string)($views[$cc] ?? ''));
+            if (!is_string($views[$cc] ?? null)) throw new LiteMonFault('DECISION_MARKET_VIEW_TOO_THIN');
+            $v = trim($views[$cc]);
             if (strlen($v) < 8) throw new LiteMonFault('DECISION_MARKET_VIEW_TOO_THIN');
             $views[$cc] = $v;
         }
-        $outcome = (string) lm_get($q, 'outcome', 'completed');
+        $outcome = lm_get($q, 'outcome', 'completed');
+        if (!is_string($outcome)) throw new LiteMonFault('DECISION_OUTCOME_INVALID');
         if (!in_array($outcome, ['completed', 'limited_evidence', 'no_candidates'], true)) throw new LiteMonFault('DECISION_OUTCOME_INVALID');
-        $conclusion = trim((string) lm_get($q, 'conclusion', ''));
+        if (!is_string(lm_get($q, 'conclusion'))) throw new LiteMonFault('DECISION_CONCLUSION_REQUIRED');
+        $conclusion = trim($q['conclusion']);
         if (strlen($conclusion) < 8) throw new LiteMonFault('DECISION_CONCLUSION_REQUIRED');
-        $analysisAt = (string) lm_get($q, 'analysis_at', '');
+        if (!is_string(lm_get($q, 'analysis_at'))) throw new LiteMonFault('DECISION_FRESH_ANALYSIS_REQUIRED');
+        $analysisAt = $q['analysis_at'];
         $at = strtotime($analysisAt);
-        if ($at === false || $at > time() + 300 || time() - $at > 86400) throw new LiteMonFault('DECISION_FRESH_ANALYSIS_REQUIRED');
+        if ($at === false) throw new LiteMonFault('DECISION_FRESH_ANALYSIS_REQUIRED');
         $selected = lm_get($q, 'selected', []);
         if (!is_array($selected)) throw new LiteMonFault('DECISION_ITEMS_REQUIRED');
         if (!$selected && $outcome === 'completed') throw new LiteMonFault('DECISION_EMPTY_OUTCOME_REQUIRED');
         $sources = lm_get($q, 'independent_sources', []);
         if (!is_array($sources) || ($selected && count($sources) < 2)) throw new LiteMonFault('DECISION_INDEPENDENT_SOURCES_REQUIRED');
         $sourceUrls = [];
+        $sourceTimes = [];
         foreach ($sources as $source) {
-            $url = is_array($source) ? trim((string)($source['url'] ?? '')): '';
-            $checked = is_array($source) ? strtotime((string)($source['checked_at'] ?? '')): false;
+            $url = is_array($source) && is_string($source['url'] ?? null) ? trim($source['url']) : '';
+            $checked = is_array($source) && is_string($source['checked_at'] ?? null) ? strtotime($source['checked_at']) : false;
             $parts = parse_url($url);
             if (!is_array($parts) || !in_array(strtolower((string)($parts['scheme'] ?? '')), ['https', 'http'], true)
-                || empty ($parts['host']) || $checked === false || $checked > time() + 300 || time() - $checked > 86400) throw new LiteMonFault('DECISION_SOURCE_EVIDENCE_REQUIRED');
+                || empty ($parts['host']) || $checked === false) throw new LiteMonFault('DECISION_SOURCE_EVIDENCE_REQUIRED');
             $sourceUrls[$url] = true;
+            $sourceTimes[] = $checked;
         }
         if ($selected && count($sourceUrls) < 2) throw new LiteMonFault('DECISION_INDEPENDENT_SOURCES_REQUIRED');
+        foreach (['candidate_request_sha', 'details_blob_sha', 'evaluation_id'] as $field)
+            if (!is_string(lm_get($req, $field)) || trim(lm_get($req, $field)) === '') throw new LiteMonFault('DECISION_PROOF_MISMATCH');
+        foreach (['candidate_request_sha', 'details_receipt_sha', 'evaluation_id'] as $field)
+            if (!is_string(lm_get($q, $field)) || trim(lm_get($q, $field)) === '') throw new LiteMonFault('DECISION_PROOF_MISMATCH');
         if (lm_get($req, 'request_id') !== $rid || lm_get($q, 'candidate_request_sha') !== lm_get($req, 'candidate_request_sha')
             || lm_get($q, 'details_receipt_sha') !== lm_get($req, 'details_blob_sha') || lm_get($q, 'evaluation_id') !== lm_get($req, 'evaluation_id')) throw new LiteMonFault('DECISION_PROOF_MISMATCH');
+        $context = ['outcome' => $outcome, 'conclusion' => $conclusion, 'analysis_at' => $analysisAt, 'independent_sources' => $sources];
+        if (array_key_exists('decision_id', $q)) $context['decision_id'] = $q['decision_id'];
+        $selected = self::normalizeChatgptDecision($selected);
+        $unresolved = (array) lm_get($req, 'unresolved_ids', []);
+        $fingerprint = self::decisionFingerprint($rid, $selected, $unresolved, (string)$req->evaluation_id, $views, $context);
+        $decisionId = self::decisionId($context, $fingerprint);
+        if (self::sameAcceptedDecision($saved, $decisionId, $fingerprint)
+            && in_array(lm_get($saved, 'save_status'), ['saved', 'superseded'], true)) return;
+        // A known identical decision is a delivery retry. Freshness is required only for new decisions.
+        $clock = time();
+        if ($at > $clock + 300 || $clock - $at > 86400) throw new LiteMonFault('DECISION_FRESH_ANALYSIS_REQUIRED');
+        foreach ($sourceTimes as $checked)
+            if ($checked > $clock + 300 || $clock - $checked > 86400) throw new LiteMonFault('DECISION_SOURCE_EVIDENCE_REQUIRED');
         $this->saveDecision(
             $rid,
             $selected,
-            (array) lm_get($req, 'unresolved_ids', []),
+            $unresolved,
             (string) $req->evaluation_id,
             $views,
             $m['sha'],
-            [
-                'outcome' => $outcome,
-                'conclusion' => $conclusion,
-                'analysis_at' => $analysisAt,
-                'independent_sources' => $sources
-            ]
+            $context
         );
     }
 
@@ -3452,15 +3602,19 @@ final class LiteDecisionService {
         array $context = []
     ): void {
         $old = LiteRuntime::read('result');
+        $selected = self::normalizeChatgptDecision(lm_array($selected));
+        $fingerprint = self::decisionFingerprint($rid, $selected, $unresolved, $evaluationId, $marketView, $context);
+        $decisionId = self::decisionId($context, $fingerprint);
+        $same = self::sameAcceptedDecision($old, $decisionId, $fingerprint);
+        if ($same && in_array(lm_get($old, 'save_status'), ['saved', 'superseded'], true) && !$this->decisionPending($old)) return;
         if ($this->decisionPending($old)) {
-            if (lm_get($old, 'request_id') !== $rid || lm_get($old, 'handoff_sha') !== $handoffSha) throw new LiteMonFault('PENDING_DECISION_MUST_FINISH');
+            if (!$same && (lm_get($old, 'request_id') !== $rid || lm_get($old, 'handoff_sha') !== $handoffSha)) throw new LiteMonFault('PENDING_DECISION_MUST_FINISH');
             if (lm_get($old, 'outbox')) {
                 $this->resumeDecision();
                 return;
             }
         }
         $now = is_string($context['saved_at'] ?? null) ? $context['saved_at'] : lm_iso();
-        $selected = self::normalizeChatgptDecision(lm_array($selected));
         $grouped = ['KR' => [], 'US' => [], 'JP' => []];
         foreach ($selected as $x) $grouped[$x['country']][] = $x;
         $decisionLists = ['buy_candidates' => ['KR' => [], 'US' => [], 'JP' => []],
@@ -3494,7 +3648,8 @@ final class LiteDecisionService {
             'pair_readback_verified' => false,
             'receipt_readback_verified' => false
         ];
-        $result['decision_id'] = lm_hash($result);
+        $result['decision_id'] = $decisionId;
+        $result['decision_fingerprint'] = $fingerprint;
         $lines = [
             "MON 2.2.3 Lite · ChatGPT 최종 결정 · " . ($result['analysis_at'] ?? '원 분석시각 미확인'),
             "",
@@ -3675,7 +3830,7 @@ final class LiteDecisionService {
                     'independent_sources' => $r['independent_sources'] ?? [],
                     'outcome' => $r['outcome'] ?? (empty ($r['selected']) ? 'limited_evidence' : 'completed'),
                     'conclusion' => $r['conclusion'] ?? 'Previously accepted ChatGPT decision; original source metadata unavailable.'
-                ]
+                ] + (is_string($r['decision_id'] ?? null) && $r['decision_id'] !== '' ? ['decision_id' => $r['decision_id']] : [])
             );
             return;
         }
@@ -5101,8 +5256,9 @@ final class LiteWebController {
         };
         $nas = $health['ready_to_start'] ? 'LOCAL PASS · 시작 시 CLI/통신 재검사' : 'BLOCK ' . implode(',', (array) $health['blockers']);
         $final = $mon ? $mon->finalSaveStatus(): ['status' => 'unknown', 'last_local_receipt_verified' => false];
-        $finalText = $final['last_local_receipt_verified'] ? '마지막 저장 영수증 검증 · ' . (string)($final['saved_at'] ?? ''): ((string)($final['status']
-            ?? 'unknown'));
+        $finalText = $final['last_local_receipt_verified'] ? 'NAS 로컬 영수증 검증 · ' . (string)($final['saved_at'] ?? '')
+            : (($final['status'] ?? 'unknown') === 'none' ? 'NAS 경유 저장 기록 없음'
+                : (($final['status'] ?? 'unknown') === 'saved' ? 'NAS 로컬 저장 검증 미완료' : (string)($final['status'] ?? 'unknown')));
         $alive = $mon ? $mon->daemonLiveness(): ['status' => 'unknown'];
         $identity = lm_get($state, 'run_identity');
         $daemonText = $identity ? (
@@ -5117,7 +5273,14 @@ final class LiteWebController {
                 . ' · 사용 ' . round((int) lm_get($mem, 'php_memory_used_bytes', 0) / 1048576, 1) . ' MiB · 최대 ' . round((int) lm_get($mem, 'php_memory_peak_bytes', 0) / 1048576, 1)
                 . ' MiB · 여유 ' . ($room === null ? '제한 없음' : round((int) $room / 1048576, 1) . ' MiB');
         }
-        echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MON 2.2.3 Lite</title><style>body{font-family:system-ui;margin:24px;max-width:760px}section{border:1px solid #ddd;border-radius:12px;padding:18px;margin:14px 0}button{padding:10px 18px;margin-right:8px}.bad{color:#a00}.ok{color:#073}</style><h1>MON 2.2.3 Lite</h1><section><b>상태:</b> '
+        $finalRoot = 'https://github.com/' . MON_LITE_GITHUB_REPO . '/blob/' . rawurlencode(MON_LITE_GITHUB_BRANCH) . '/';
+        $finalLinks = '<section id="chatgpt-final-authority" data-authority="chatgpt_final"><h2>ChatGPT 최종 판단</h2>'
+            . '<p>최종 종목과 MS7은 ChatGPT가 독립 결정합니다. 아래 원문에서 분석 시각과 같은 결정의 결과·저장 영수증을 확인하세요.</p>'
+            . '<p><a href="' . $h($finalRoot . 'mon_result.md') . '" target="_blank" rel="noopener noreferrer">최종 보고서</a> · '
+            . '<a href="' . $h($finalRoot . 'mon_data.json') . '" target="_blank" rel="noopener noreferrer">결과 JSON</a> · '
+            . '<a href="' . $h($finalRoot . 'mon_chatgpt_response.json') . '" target="_blank" rel="noopener noreferrer">저장 영수증</a></p>'
+            . '<p>이 화면의 NAS 로컬 기록과 GitHub 직접 저장은 별도입니다. 페이지 조회는 원격 저장 여부를 새로 검증하지 않습니다. PHP는 아래 참고자료를 제공합니다.</p></section>';
+        echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>MON 2.2.3 Lite</title><style>body{font-family:system-ui;margin:24px;max-width:760px}section{border:1px solid #ddd;border-radius:12px;padding:18px;margin:14px 0}button{padding:10px 18px;margin-right:8px}.bad{color:#a00}.ok{color:#073}</style><h1>MON 2.2.3 Lite</h1>' . $finalLinks . '<section><b>상태:</b> '
             . $h($state->phase) . ' / ' . $h($alive['status']) . ' <br><b>설치 Build:</b> ' . $h(MON_LITE_BUILD) . ' <br><b>실행 데몬:</b> '
             . $h($daemonText) . ' <br><b>최근 응답:</b> ' . $h($state->heartbeat_at) . ' <br><b>최근 정밀 스캔:</b> ' . $h($state->last_full_scan)
             . ' <br><b>다음 경량 확인:</b> ' . $h($state->next_light_check) . ' <br><b>다음 정밀 스캔:</b> ' . $h($state->next_full_scan)
@@ -5126,7 +5289,7 @@ final class LiteWebController {
             . ' <br><b>PHP CLI:</b> ' . $h($cfg->phpCli) . ' <br><b>NAS 준비:</b> ' . $h($nas) . ' <br><b>Mailbox:</b> '
             . $h($state->last_mailbox_check) . ' / 오류 ' . $h($state->last_mailbox_error) . ' <br><b>데몬 메모리 관측:</b> '
             . $h($memText) . ' <br><b>참고자료 게시:</b> ' . ($state->publication_pending ? '재시도 대기' : '대기 없음') . ' / '
-            . $h($state->last_publication_error) . ' <br><b>최종 결과 저장:</b> ' . $h($finalText) . ' <br><b>저장:</b> '
+            . $h($state->last_publication_error) . ' <br><b>NAS 경유 최종 저장 (로컬):</b> ' . $h($finalText) . ' <br><b>저장:</b> '
             . $h(lm_get($runtime, 'path', MON_LITE_RUNTIME)) . ' · ' . $h(lm_get($runtime, 'file_count', 0)) . ' files · '
             . round((int) lm_get($runtime, 'bytes', 0) / 1048576, 2) . ' MiB</section><form id="mon-controls" method="post"><button name="action" value="start">시작</button><button name="action" value="restart">재시작</button><button name="action" value="stop">중지</button><button name="action" value="scan">정밀 스캔 요청</button></form><p id="control-progress" role="status" aria-live="polite" class="'
             . ($ok ? 'ok' : 'bad') . '">' . $h($notice) . '</p><section><b>운영 원칙</b><br>5분: mailbox 확인<br>30분: 경량 확인 · 미확인 재시도: 2분<br>정밀 스캔: 평일 16:40 KST · 증분 기본 / 7일마다 220봉 전체 재동기화<br>모든 부속파일: /web/mon_runtime 고정파일<br>운영 규격: '

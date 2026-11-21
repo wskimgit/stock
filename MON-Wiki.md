@@ -1,7 +1,7 @@
 # MON Wiki — 2.2.3 Lite 운영 요약
 
 > **비권위 요약 문서**입니다. 실행 규칙의 유일한 권위는 같은 저장소의 `monitor.md`입니다.
-> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261026-r20` · Code: `mon.php` · Repository: `wskimgit/stock`
+> Policy: `MON-LITE-OPS-2.2.3` · Build: `MON-LITE-2.2.3-20261101-r21` · Code: `mon.php` · Repository: `wskimgit/stock`
 
 ## 최종 판단과 효율적인 실행
 
@@ -13,7 +13,7 @@
 4. PHP의 `PARTIAL`·자료 부족·NAS 지연은 해당 범위에만 표시하고 독립 조사를 계속한다. PHP 신호·참고순위를 최종 선정의 필수 gate로 사용하지 않는다.
 5. ChatGPT가 국가별 판단과 새 결론을 확정하고 저장·재조회를 끝낸다. 과거 답변을 새 판단처럼 반복하지 않는다.
 
-최종 종목에는 종목명·종목코드·MS7·근거·위험을 기록한다. MS7은 `M0/M1/M2/W/S1/S2/S3`다. 가격에는 실제 확인 시각·통화를 붙이고 완료 종가와 실시간 가격을 구분한다. Markdown 표 안의 ID는 `KR\|KOSPI\|005930`처럼 `|`를 이스케이프하며 JSON의 실제 ID는 바꾸지 않는다.
+PHP는 신원·형식·근거·저장 무결성을 검증하며 ChatGPT의 선정 순서나 최종 MS7을 기계적으로 바꾸지 않는다. 정상 명칭이 코드와 같은 `SLB`·`KOA`도 명칭 누락으로 거부하지 않는다. 최종 종목에는 종목명·종목코드·MS7·근거·위험을 기록한다. MS7은 `M0/M1/M2/W/S1/S2/S3`다. 가격에는 실제 확인 시각·통화를 붙이고 완료 종가와 실시간 가격을 구분한다. Markdown 표 안의 ID는 `KR\|KOSPI\|005930`처럼 `|`를 이스케이프하며 JSON의 실제 ID는 바꾸지 않는다.
 
 ## 절대 추세·관찰·이전 가설
 
@@ -21,7 +21,7 @@
 
 - MA20·60의 가격 위치와 기울기, MA120·200 이탈을 구분한다. MA5 재돌파·MACD 음수 폭 축소만 있는 하락 중 반등은 관찰이며 상승 전환으로 확정하지 않는다.
 - PHP의 매입 검토 참고목록은 실제 기술 적격·양수 histogram/R20/RS20·종가의 MA5/20/60/200 회복·MA5 상승·MA20/60 비하락 기울기·거래량 1.10배 이상·유효한 ATR14와 MA20 위 거리 2 ATR 이하를 확인한 M1/M2만 제공하며 M0/W·미확인·fallback으로 나라별 3개를 채우지 않는다. M2에는 이평 정배열과 MA200의 5일 기울기 비하락을 추가 확인하며 MA120은 진단에 사용한다. 매입 검토 0개도 정상이다. 초기 회복·새 관심은 별도 관찰에 남긴다. 참고 자격을 통과해도 과열·갭·변동성·손익비를 별도로 확인하며 M2 참고를 실행 신호로 부르지 않는다. 사람의 표도 M1/M2, M0/W, S1/S2/S3를 나누며 JSON의 `selected`·`recommendations`와 MS7 계약은 유지하고 새 최종 결과에는 `decision_lists`의 매입/관찰/위험 분류를 추가한다.
-- 직전 20일 저가 붕괴 등 절대 위험은 양수 RS와 무관하게 표시한다. 위험 경고는 자동 매도나 주문이 아니다. r20 계산 완료 참고 MS7은 `REFERENCE_ONLY`, 자료 미확인은 `PROVISIONAL`이며 과거 `CONFIRMED`도 상승 전환 보장이 아니다.
+- 직전 20일 저가 붕괴 등 절대 위험은 양수 RS와 무관하게 표시한다. 위험 경고는 자동 매도나 주문이 아니다. 현재 계산 완료 참고 MS7은 `REFERENCE_ONLY`, 자료 미확인은 `PROVISIONAL`이며 과거 `CONFIRMED`도 상승 전환 보장이 아니다.
 - 종가가 MA20보다 2 ATR14를 넘게 높으면 매입 참고에서 제외하고 과열 관찰로 남긴다. ATR 0·미확인은 통과가 아니다. 이 기준은 추격을 줄이는 보수적 설계값이며 성과 검증을 마친 최적치가 아니다.
 - PHP는 참고 가설의 실제 신호일·고정 지지를 기존 cache의 `reference_setup` 한 건에 보존한다. 지지 이탈 후 같은 봉·신호로 다시 추천하지 않으며 새 MA5 재돌파는 원래 지지 회복, 새 실제 MACD 골든크로스 기반 가설은 새 지지와 전체 자격을 확인한다. 기존 `cache.reference_setups`에 최대 256종목을 유지하며 초과 시 오래된 완료 평가일의 항목부터 제거한다. 후보를 삭제했다 다시 넣어도 범위 안의 실패 정보는 남지만 cache 초기화·용량 제한 제거 후에는 과거 상태가 보장되지 않는다. 무한 이력·새 runtime 파일을 만들지 않는다.
 - 매번 이전 결정의 원래 진입 가정·무효화 조건을 최신 완료봉과 대조하고 실패·철회 여부를 결과에 남긴다. 지지가 깨지면 새 지지로 서사를 연장하지 않는다. 실패 이후 새 완료봉 회복 신호·새 지지를 확인한 경우에만 새 가설로 재검토한다.
@@ -36,7 +36,9 @@ PHP 참고 적격은 ChatGPT 최종 판단의 필수 gate가 아니다. 독립 �
 **최종 결정과 저장의 1차 책임은 ChatGPT 지시문**이다. 한 번의 MON 수행은 새 판단·결론·저장·재조회까지 포함한다.
 
 - 같은 `decision_id`·`request_id`·`evaluation_id`·`analysis_at`, `outcome`·`conclusion`으로 `mon_data.json`과 `mon_result.md`를 만든다.
+- ChatGPT의 명시적 `decision_id`를 보존한다. JSON 공백·객체 키 순서를 정규화하되 목록 순서는 보존하고, 같은 ID·같은 판단의 재전송은 원래 시각으로 멱등 처리한다. 같은 ID에 다른 판단을 넣으면 `DECISION_ID_REUSE_CONFLICT`로 거부한다. ID가 없는 기존 형식은 내용의 SHA256 ID로 호환하며 새 제출은 공백·제어문자 없는 최대 160바이트의 명시적 ID를 사용한다. 신규 분석의 24시간 검증을 기존 완료 결정의 재전송과 혼동하지 않는다.
 - ChatGPT 직접 경로는 두 결과를 **하나의 Git commit**으로 원자 저장하고 정확한 ref에서 실제 내용·blob SHA를 재조회한다. NAS 정지나 request proof 소실도 이 경로를 막지 않는다.
+- GitHub 원문은 metadata SHA와 실제 본문의 Git blob SHA를 대조한다. 큰 파일의 본문은 metadata가 가리키는 불변 blob에서 읽어 브랜치 변경 전후의 본문·SHA가 섞이지 않게 한다.
 - 검증된 결과 쌍을 가리키는 receipt를 `mon_chatgpt_response.json`에 기록하고 receipt 자체도 재조회한다. 세 파일의 증명이 맞을 때만 `SAVED_VERIFIED`다.
 - JSON 스냅샷의 `chatgpt_final.save_status=receipt_required`만으로 성공/실패를 판정하지 않는다. 현재 결과 쌍과 일치하는 receipt 및 실제 재조회가 증명이다.
 - 직접 저장이 불가하고 NAS가 동작하면 실제 request/details 증명을 가진 같은 decision을 handoff한다. PHP는 기존 `result.php`에 정확한 게시 원문을 먼저 보존하고 `pending_remote → pending_receipt → saved`로 복구한다. 가짜 SHA로 proof를 대체하지 않는다.
@@ -53,6 +55,8 @@ PHP 참고 적격은 ChatGPT 최종 판단의 필수 gate가 아니다. 독립 �
 - 한국 기준지수는 Yahoo 실패·날짜 미충족 시 NAVER fchart의 같은 KOSPI/KOSDAQ 실제 220봉으로 전체 교체한다. `source_provider`·`provider_symbol`을 보존하고 정상 NAVER 경로를 재사용하며 Yahoo 행과 섞지 않는다. 공급원 변경도 fingerprint에 반영한다. 미래·한국 당일 16:00 전 봉을 제외하고 완료 220봉을 확보하며, 잘못된 응답·프로그래밍 오류를 정상 값으로 덮지 않는다.
 - 대체 공급원도 같은 실제 지수·거래일의 값이어야 한다. 과거 종가를 새 날짜로 복사하거나 다른 지수·ETF를 원 지수처럼 표시하지 않는다.
 - 종목 봉·기준지수 신원/자료 fingerprint·계산 버전이 모두 같을 때 분석을 재사용하고 변경 시 한 번 다시 계산한다. 게시 `benchmark_details`로 실제 provider/symbol·자료 시각·필요 날짜·coverage/status를 확인한다. 다른 시장과 ChatGPT 독립 판단·결론 저장은 계속한다.
+- 작은 가격 정정은 같은 거래일·같은 시작/종료 구간의 기존·신규 봉으로 신호를 비교한다. 새 완료봉의 정상 신호를 정정 영향으로 오인하지 않으며 기존 0.1% 한도와 실제 같은 시점의 신호 변경 거부는 유지한다. 공통 이력이 부족하면 안전한 정정이라고 인증하지 않는다.
+- Yahoo 주식 자료의 종목코드·통화·거래소·시간대·주식 유형이 없거나 요청 신원과 다르면 미확인이다. 허용된 기준지수와 `1306.T` ETF 대용은 별도로 검증한다. 전체·증분·캐시·미국 5분봉 복구에서 같은 신원을 유지하며 정상 요청에 신원 확인용 외부 통신을 더하지 않는다.
 - 미국 완료봉의 제한된 H/L 복구는 6.2절의 78개 정규장 5분봉 검증을 모두 통과한 경우만 허용한다. 위반 H/L만 보정하고 O/C/V는 보존하며, 미검증은 pending이다.
 
 ## 자원과 운영 주기
@@ -76,6 +80,7 @@ PHP 참고 적격은 ChatGPT 최종 판단의 필수 gate가 아니다. 독립 �
 - 설치 파일 build/SHA와 `run_identity`의 현재 CLI 데몬 시작 시 build/SHA·PID·시각을 분리한다. 구버전 실행 증명이 없으면 `UNKNOWN`이다. 다르면 수동 재시작이 필요하다.
 - `WAIT`·`SCAN`·`RESULT`·`SAVE_PENDING` 및 `progress.state=partial`을 구분하고 국가별 정상/요청/미확인/큐 잔여를 표시한다. 25/35 정상은 전체 완료가 아니다.
 - 현재 `resource_wait`와 원래 시각의 `historical_error`를 구분한다. mailbox 성공이 시장 자료 회복을 뜻하지 않는다.
+- 화면의 ChatGPT 최종 보고서·결과·receipt 링크를 PHP 참고목록보다 먼저 확인한다. NAS 로컬 영수증의 `none`·`unknown`은 직접 GitHub 저장 실패라는 뜻이 아니며, 원격 증명 확인 없이 `saved`로 표시하지 않는다.
 - PHP 참고분석 게시 성공은 ChatGPT 최종 저장 성공이 아니다. `SAVED_VERIFIED`에는 같은 결정 쌍과 receipt 재조회가 필요하다.
 - 새 스캔의 이전 결론은 `previous_chatgpt_final`에 보존하고 원래 시각의 과거 판단으로 표시한다. Markdown에 남은 마지막 결론도 JSON scan 상태·결정 ID와 대조한다.
 
@@ -97,4 +102,4 @@ PHP 참고 적격은 ChatGPT 최종 판단의 필수 gate가 아니다. 독립 �
 
 Runtime은 최대 11파일·64 MiB·단일 16 MiB다. 별도 bridge·이벤트별 파일·cron·부팅 자동시작·자동주문·자동매매를 추가하지 않는다. NAS가 꺼지면 수동 시작 전까지 PHP 복구도 실행되지 않는다.
 
-운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`은 유지하며 r20 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.
+운영 권위는 `monitor.md`, 구현은 `mon.php`, 이 문서는 비권위 요약이다. 정책 `MON-LITE-OPS-2.2.3`과 r20 수치 계산 버전은 유지하며 r21 코드/지시문과 과거 시장 결과의 생성 당시 build는 구분한다. 코드 정비로 시장 JSON을 새 결과처럼 고치지 않는다. 코드 검증·GitHub 반영·NAS 배포·NAS 실동작을 각각 보고하고 실제 새 빌드 lifecycle을 확인해야 `LIVE_VERIFIED`다.

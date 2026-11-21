@@ -59,7 +59,7 @@ jobs:
           build = re.search(r"MON_LITE_BUILD\s*=\s*'([^']+)'", src)
           assert version and version.group(1) == '2.2.3'
           assert policy and policy.group(1) == 'MON-LITE-OPS-2.2.3'
-          assert build and build.group(1) == 'MON-LITE-2.2.3-20261026-r20'
+          assert build and build.group(1) == 'MON-LITE-2.2.3-20261101-r21'
 
           for text, name in [(prompt,'monitor.md'),(wiki,'MON-Wiki.md')]:
               assert 'MON-LITE-OPS-2.2.3' in text, name
@@ -205,7 +205,7 @@ jobs:
               echo lm_json(['scenario'=>'bounded_http_cache','known_entries'=>count((array)mem_prop($http,'githubKnown')),'known_body_bytes'=>$bytes,'source_sha256'=>hash_file('sha256',getenv('MON_TEST_SOURCE'))])."\n";exit(0);
           }
           if($mode==='yahoo'){
-              final class MemYahooTransport {public $calls=0;public function get(string $url,array $headers=[],int $timeout=8): string {$this->calls++;$t=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];for($i=0;$i<60;$i++){$t[]=1600000000+$i*86400;$q['open'][]=100+$i;$q['high'][]=102+$i;$q['low'][]=99+$i;$q['close'][]=101+$i;$q['volume'][]=1000+$i;}return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'USD'],'timestamp'=>$t,'indicators'=>['quote'=>[$q]]]]]]);}}
+              final class MemYahooTransport {public $calls=0;public function get(string $url,array $headers=[],int $timeout=8): string {$this->calls++;$t=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];for($i=0;$i<60;$i++){$t[]=1600000000+$i*86400;$q['open'][]=100+$i;$q['high'][]=102+$i;$q['low'][]=99+$i;$q['close'][]=101+$i;$q['volume'][]=1000+$i;}return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'USD','symbol'=>rawurldecode(basename((string)parse_url($url,PHP_URL_PATH))),'exchangeName'=>'NMS','exchangeTimezoneName'=>'America/New_York','instrumentType'=>'EQUITY'],'timestamp'=>$t,'indicators'=>['quote'=>[$q]]]]]]);}}
               $transport=new MemYahooTransport();$yahoo=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();mem_prop($yahoo,'http',$transport,true);$yahoo->beginTurn();$symbols=[];
               for($i=0;$i<300;$i++){$s=['symbol'=>'CI'.$i,'country'=>'US','exchange'=>'NASDAQ','currency'=>'USD'];$symbols[]=$s;$rows=$yahoo->daily($s,60);mem_assert(count($rows)===60&&$rows[59][4]===160.0,'bounded cache preserves complete provider output');mem_assert(count((array)mem_prop($yahoo,'rangeCache'))<=48,'Yahoo cache bounded during a long scan');if($i===34){$calls=$transport->calls;foreach($symbols as $recentSymbol)$yahoo->recent($recentSymbol,$rows[59][0],10);mem_assert($transport->calls===$calls,'35-symbol normal scan keeps cached rechecks');}}
               $latest=$symbols[299];$calls=$transport->calls;$reuse=$yahoo->recent($latest,$rows[59][0],10);mem_assert($transport->calls===$calls&&count($reuse)>0,'recent recheck still reuses latest cached ticker');$yahoo->releasePayloads();mem_assert(count((array)mem_prop($yahoo,'rangeCache'))===0,'Yahoo explicit release clears rows');
@@ -267,6 +267,475 @@ jobs:
           php -r 'require "mon.php"; $ok=false; try {LiteYahoo::sanitizeProviderRows([["2026-01-01",100,101,99,100,10],["2026-01-02",100,90,95,100,10]]);} catch (LiteMonFault $e) {$ok=$e->faultCode==="YAHOO_LATEST_BAR_INVALID";} if(!$ok) exit(1); echo "latest bad bar protection PASS\n";'
           php -r 'require "mon.php"; $x=LiteYahoo::benchmarkCandidates("JP"); if ($x!==["^TOPX","1306.T","^N225"]) {var_export($x); exit(1);} echo "JP benchmark fallback policy PASS\n";'
           rm -rf mon_runtime
+
+
+
+
+
+      # BEGIN MON r21 cause-based regressions
+      - name: ChatGPT authority, immutable reads and provider identity regressions
+        run: |
+          set -eu
+          test_dir="$(mktemp -d)"
+          trap 'rm -rf "$test_dir"' EXIT
+          cp mon.php "$test_dir/mon.php"
+          cmp -s mon.php "$test_dir/mon.php"
+          cat >"$test_dir/runtime_quality_repro.php" <<'QUALITY'
+          <?php
+          declare(strict_types=1);
+          // Pure offline regression: a later real signal is not a historical correction.
+          require $argv[1];
+
+          function rq_assert(bool $ok, string $label): void {
+              if (!$ok) throw new RuntimeException($label);
+          }
+          function rq_rows(): array {
+              $out = [];
+              $day = new DateTimeImmutable('2025-01-01', new DateTimeZone('UTC'));
+              for ($i = 0; $i < 220; $i++) {
+                  $c = 100.0 - 0.1 * $i;
+                  $out[] = [$day->format('Y-m-d'), $c, $c + .5, $c - .5, $c, 100.0];
+                  $day = $day->modify('+1 day');
+              }
+              return $out;
+          }
+          $old = rq_rows();
+          $next = array_slice($old, 1);
+          $newDay = (new DateTimeImmutable($old[219][0], new DateTimeZone('UTC')))->modify('+1 day')->format('Y-m-d');
+          $next[] = [$newDay, 80.0, 80.5, 79.5, 80.0, 100.0];
+          $minor = $old;
+          $minor[210][2] += .001;
+          $nextMinor = $next;
+          $nextMinor[209][2] += .001; // Same date as old[210], never the new session.
+          $oldTech = LiteSwing::technical($old);
+          $nextTech = LiteSwing::technical($nextMinor);
+          rq_assert($oldTech['ma5_reclaim_close'] === false && $nextTech['ma5_reclaim_close'] === true, 'fixture has a genuine later MA5 recovery');
+          rq_assert(LiteQuality::compare($old, $next)['accept'] === true, 'new completed bar without a correction is accepted');
+          rq_assert(LiteQuality::compare($old, $minor)['accept'] === true, 'minor same-session high correction without a signal change is accepted');
+
+          $sameDay = $old;
+          $sameDay[219][1] = $sameDay[219][4] = 78.345;
+          $signalChangingCorrection = $sameDay;
+          $signalChangingCorrection[219][4] = 78.355;
+          rq_assert(LiteSwing::technical($sameDay)['ma5_reclaim_close'] === false && LiteSwing::technical($signalChangingCorrection)['ma5_reclaim_close'] === true, 'negative control changes the same-session MA5 signal');
+          rq_assert(LiteQuality::compare($sameDay, $signalChangingCorrection)['accept'] === false, 'a genuine same-session signal-changing correction remains rejected');
+          $large = $old;
+          for ($i = 1; $i <= 4; $i++) $large[210][$i] *= 1.2;
+          rq_assert(LiteQuality::compare($old, $large)['accept'] === false, 'large same-session correction remains rejected');
+
+          $quality = LiteQuality::compare($old, $nextMinor);
+          echo json_encode(['scenario' => 'historical_correction_with_new_completed_signal',
+              'source_sha256' => hash_file('sha256', $argv[1]), 'old_as_of' => $old[219][0],
+              'new_as_of' => $nextMinor[219][0], 'old_reclaim' => $oldTech['ma5_reclaim_close'],
+              'new_reclaim' => $nextTech['ma5_reclaim_close'], 'quality' => $quality], JSON_UNESCAPED_SLASHES) . "\n";
+          rq_assert($quality['accept'] === true, 'minor old-session correction must not reject a genuine later completed-session signal');
+          $shortOld = array_slice($old, -37);
+          $shortNew = $shortOld;
+          $shortNew[30][2] += .001;
+          rq_assert(LiteQuality::compare($shortOld, $shortNew)['accept'] === false, '37 shared bars cannot certify the full MACD event window');
+          $boundaryOld = array_slice($old, -38);
+          $boundaryNew = $boundaryOld;
+          $boundaryNew[31][2] += .001;
+          rq_assert(LiteQuality::compare($boundaryOld, $boundaryNew)['accept'] === true, '38 matching-date bars provide the complete MACD event window');
+          echo "PASS same-session correction checks exclude legitimate later sessions\n";
+          QUALITY
+          cat >"$test_dir/repro_github_read.php" <<'GITHUB_READ'
+          <?php
+          declare(strict_types=1);
+          // Read-only behavioral probe: execute the exact current githubGet method body
+          // with deterministic metadata/raw transport. No NAS or external network calls.
+          $source=getenv('MON_TEST_SOURCE')?:dirname(__DIR__).'/baseline/mon.php';
+          require $source;
+          $method=new ReflectionMethod(LiteHttp::class,'githubGet');
+          $lines=file($source);$body=implode('',array_slice($lines,$method->getStartLine()-1,$method->getEndLine()-$method->getStartLine()+1));
+          $prefix=<<<'PHP'
+          final class ReadIdentityHarness {
+              private $cfg,$githubKnown=[],$githubTurn=[],$stats=['github_body_cache_hits'=>0,'http_304'=>0];
+              public $metadata,$branchBody,$immutableBody,$rawUrls=[],$remembered=[],$status=200,$requests=[];
+              public function __construct(array $metadata,string $branchBody,string $immutableBody) {$this->cfg=(object)['githubToken'=>'synthetic'];$this->metadata=$metadata;$this->branchBody=$branchBody;$this->immutableBody=$immutableBody;}
+              public function seed(array $item): void {$this->githubKnown['mon_data.json']=$item;}
+              private function headers(bool $json=false): array {return [];}
+              private function request(string $method,string $url,array $headers=[],?string $body=null,int $timeout=8,int $retries=1,array $allow=[]): array {$this->requests[]=['url'=>$url,'headers'=>$headers];return ['status'=>$this->status,'body'=>lm_json($this->metadata),'headers'=>['etag'=>'"fixture"']];}
+              private function get(string $url,array $headers=[],int $timeout=8): string {$this->rawUrls[]=$url;return strpos($url,'/git/blobs/')!==false?$this->immutableBody:$this->branchBody;}
+              private static function headerValue(array $headers,string $name): ?string {return $headers[strtolower($name)]??null;}
+              private function remember(string $path,?array $item): void {$this->remembered[$path]=$item;$this->githubKnown[$path]=$item;$this->githubTurn[$path]=$item;}
+          PHP;
+          eval($prefix."\n".$body."\n}");
+          $a=str_repeat('A',1048577);$b=str_repeat('B',1048577);$sha=lm_git_blob_sha($a);
+          $records=[];
+          $cases=[
+              'valid_small'=>['meta'=>['sha'=>lm_git_blob_sha('small'),'content'=>base64_encode('small')]],
+              'valid_empty'=>['meta'=>['sha'=>lm_git_blob_sha(''),'content'=>'','encoding'=>'base64']],
+              'valid_large'=>['meta'=>['sha'=>$sha,'content'=>'','encoding'=>'none'],'branch'=>$a],
+              'corrupt_small'=>['meta'=>['sha'=>lm_git_blob_sha('original'),'content'=>base64_encode('different')]],
+              'large_branch_advanced'=>['meta'=>['sha'=>$sha,'content'=>'','encoding'=>'none']],
+              'corrupt_immutable_blob'=>['meta'=>['sha'=>$sha,'content'=>'','encoding'=>'none'],'immutable'=>$b],
+              'invalid_sha'=>['meta'=>['sha'=>'invalid-sha','content'=>base64_encode('small')]],
+              'not_found'=>['meta'=>[],'status'=>404,'seed'=>true],
+              'cached_304'=>['meta'=>[],'status'=>304,'seed'=>true,'force'=>false],
+              'uncached_304'=>['meta'=>[],'status'=>304,'force'=>false]
+          ];
+          foreach($cases as $name=>$case){
+              $h=new ReadIdentityHarness($case['meta'],$case['branch']??$b,$case['immutable']??$a);$h->status=$case['status']??200;
+              if($case['seed']??false)$h->seed(['content'=>'cached','sha'=>lm_git_blob_sha('cached'),'etag'=>'"cached"']);
+              $fault=null;$v=null;
+              try{$v=$h->githubGet('mon_data.json',$case['force']??true);}catch(LiteMonFault $e){$fault=$e->faultCode;}
+              $integrity=$v!==null&&($v['sha']??null)===lm_git_blob_sha($v['content']);
+              $records[$name]=['fault'=>$fault,'returned'=>$v!==null,'returned_pair_integrity'=>$integrity,'remembered'=>count($h->remembered),'remembered_missing'=>array_key_exists('mon_data.json',$h->remembered)&&$h->remembered['mon_data.json']===null,'raw_urls'=>$h->rawUrls,'requests'=>$h->requests];
+          }
+          $broken=!$records['corrupt_small']['returned_pair_integrity']&&$records['corrupt_small']['returned']
+              &&$records['large_branch_advanced']['returned']&&!$records['large_branch_advanced']['returned_pair_integrity'];
+          echo lm_json(['source_sha256'=>hash_file('sha256',$source),'exact_method_sha256'=>hash('sha256',$body),'instrumentation'=>'Production githubGet method body unchanged; only transport and cache sinks are deterministic test doubles.','baseline_bug_reproduced'=>$broken,'cases'=>$records])."\n";
+          if(getenv('MON_ASSERT_FIXED')==='1'){
+              foreach(['corrupt_small','large_branch_advanced','invalid_sha'] as $name)if($records[$name]['returned']&&!$records[$name]['returned_pair_integrity'])exit(1);
+              foreach(['valid_small','valid_empty','valid_large','cached_304','large_branch_advanced'] as $name)if(!$records[$name]['returned_pair_integrity'])exit(2);
+              foreach(['corrupt_small','corrupt_immutable_blob','invalid_sha'] as $name)if($records[$name]['fault']!=='GITHUB_BLOB_VERIFY_FAILED'||$records[$name]['remembered']!==0)exit(3);
+              foreach(['valid_large','large_branch_advanced'] as $name)if($records[$name]['raw_urls']!==['https://api.github.com/repos/'.MON_LITE_GITHUB_REPO.'/git/blobs/'.$sha])exit(4);
+              foreach(['valid_small','valid_empty','cached_304'] as $name)if($records[$name]['raw_urls']!==[])exit(5);
+              if($records['not_found']['returned']||!$records['not_found']['remembered_missing'])exit(6);
+              if($records['uncached_304']['fault']!=='GITHUB_304_WITHOUT_CACHE'||$records['uncached_304']['remembered']!==0)exit(7);
+              if(!in_array('If-None-Match: "cached"',$records['cached_304']['requests'][0]['headers'],true))exit(8);
+          }
+          GITHUB_READ
+          cat >"$test_dir/authority_regression.php" <<'AUTHORITY'
+          <?php
+          declare(strict_types=1);
+          // Offline synthetic regression. MON_TEST_SOURCE must be a disposable exact source copy.
+          $source = getenv('MON_TEST_SOURCE');
+          if (!is_string($source) || !is_file($source) || is_file(dirname($source) . '/AGENTS.md')) throw new RuntimeException('Disposable exact source copy required');
+          require $source;
+
+          final class AuthorityFixtureGithub {
+              public $files = [], $puts = [], $failBefore = [];
+              public function seed(string $path, string $content): void {
+                  $this->files[$path] = ['content' => $content, 'sha' => lm_git_blob_sha($content), 'commit_sha' => null];
+              }
+              public function githubGet(string $path, bool $force = false): ?array {
+                  return $this->files[$path] ?? null;
+              }
+              public function githubPut(string $path, string $content, string $message, ?string $oldSha = null): array {
+                  if (($this->failBefore[$path] ?? 0) > 0) { $this->failBefore[$path]--; throw new LiteMonFault('SYNTHETIC_PUT_FAILURE'); }
+                  if (($this->files[$path]['sha'] ?? null) !== $oldSha) throw new RuntimeException('fixture SHA precondition');
+                  $commit = sha1('synthetic-authority-commit-' . count($this->puts));
+                  $sha = lm_git_blob_sha($content);
+                  $this->files[$path] = ['content' => $content, 'sha' => $sha, 'commit_sha' => $commit];
+                  $this->puts[] = ['path' => $path, 'content' => $content];
+                  return ['blob_sha' => $sha, 'commit_sha' => $commit, 'unchanged' => false];
+              }
+              public function get(): string { throw new RuntimeException('External network forbidden'); }
+          }
+
+          function fixtureService(AuthorityFixtureGithub $http): LiteDecisionService {
+              $cfg = new LiteConfig();
+              $cfg->githubToken = 'synthetic-test-token';
+              return new LiteDecisionService($cfg, $http, new LiteMarketData($http, new stdClass()), new LiteVerifiedWriter($http));
+          }
+
+          function fixtureReset(): AuthorityFixtureGithub {
+              LiteRuntime::write('result', new stdClass());
+              LiteRuntime::write('request', new stdClass());
+              LiteRuntime::write('state', LiteStateStore::defaultState());
+              $http = new AuthorityFixtureGithub();
+              $http->seed('mon_data.json', lm_json(['contract' => 'MON-LITE-DATA-2.2', 'policy' => MON_LITE_POLICY,
+                  'version' => MON_LITE_VERSION, 'build' => MON_LITE_BUILD, 'scan' => ['decision_status' => 'awaiting_chatgpt'],
+                  'results' => [], 'errors' => []]));
+              return $http;
+          }
+
+          function fixtureProof(array $packet, bool $complete = true): void {
+              $request = ['request_id' => $packet['request_id'], 'stage' => 'details'];
+              if ($complete) $request += ['candidate_request_sha' => $packet['candidate_request_sha'], 'details_blob_sha' => $packet['details_receipt_sha'],
+                  'evaluation_id' => $packet['evaluation_id'], 'evaluated_ids' => [], 'unresolved_ids' => ['US|NASDAQ|NVDA']];
+              LiteRuntime::write('request', (object)$request);
+          }
+
+          function reverseObjectKeys($value) {
+              if (!is_array($value)) return $value;
+              if ($value && array_keys($value) !== range(0, count($value) - 1)) $value = array_reverse($value, true);
+              foreach ($value as $key => $item) $value[$key] = reverseObjectKeys($item);
+              return $value;
+          }
+
+          $checks = [];
+          $item = ['symbol_id' => 'US|NYSE|SLB', 'name' => 'SLB', 'ms7' => ['code' => 'M1'],
+              'reason' => 'ChatGPT independently verified the legitimate issuer identity.', 'risk_note' => 'Independent issuer-specific risk.'];
+          try {
+              $out = LiteDecisionService::normalizeChatgptDecision([$item]);
+              $checks[] = ['case' => 'legitimate issuer name may equal ticker', 'pass' => $out[0]['name'] === 'SLB', 'observed' => 'accepted'];
+          } catch (LiteMonFault $e) {
+              $checks[] = ['case' => 'legitimate issuer name may equal ticker', 'pass' => false, 'observed' => $e->faultCode];
+          }
+
+          $http = fixtureReset();
+          $service = fixtureService($http);
+          $at = lm_iso();
+          $packet = ['contract' => 'MON-LITE-BRIDGE-1.0', 'policy' => MON_LITE_POLICY, 'stage' => 'decision',
+              'authority' => 'chatgpt_final', 'independent_analysis' => true,
+              'decision_id' => 'chatgpt-decision-authority-regression', 'request_id' => 'authority-regression',
+              'candidate_request_sha' => 'fixture-candidate-proof', 'details_receipt_sha' => 'fixture-details-proof',
+              'evaluation_id' => 'fixture-independent-evaluation', 'analysis_at' => $at,
+              'outcome' => 'completed', 'conclusion' => 'Independent current decision; PHP reference eligibility is not final authority.',
+              'market_view' => ['KR' => 'Independent Korea market review.', 'US' => 'Independent US market review.', 'JP' => 'Independent Japan market review.'],
+              'independent_sources' => [['url' => 'https://example.com/evidence-a', 'checked_at' => $at],
+                  ['url' => 'https://example.org/evidence-b', 'checked_at' => $at]],
+              'selected' => [['symbol_id' => 'US|NASDAQ|NVDA', 'name' => 'NVIDIA', 'ms7' => ['code' => 'M2'],
+                  'reason' => 'ChatGPT independent final judgment with fresh external evidence.', 'risk_note' => 'Independent execution and thesis risk.',
+                  'eligible' => false, 'technical' => ['technical_qualified' => false]]]];
+          fixtureProof($packet);
+          $http->seed('mon_chatgpt_handoff.json', lm_json($packet));
+          $service->processMailbox();
+          $first = lm_array(lm_get(lm_decode($http->files['mon_data.json']['content']), 'chatgpt_final'));
+          $writesBeforeReplay = count($http->puts);
+          $checks[] = ['case' => 'ChatGPT supplied decision ID survives persistence',
+              'pass' => $first['decision_id'] === $packet['decision_id'], 'expected' => $packet['decision_id'], 'observed' => $first['decision_id']];
+          $checks[] = ['case' => 'PHP reference ineligibility cannot downgrade final MS7',
+              'pass' => $first['selected'][0]['ms7']['code'] === 'M2', 'observed' => $first['selected'][0]['ms7']['code']];
+
+          // Only transport formatting changes. The same decision and analysis timestamp are submitted.
+          $http->seed('mon_chatgpt_handoff.json', json_encode($packet, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+          $service->processMailbox();
+          $second = lm_array(lm_get(lm_decode($http->files['mon_data.json']['content']), 'chatgpt_final'));
+          $checks[] = ['case' => 'same decision with different JSON whitespace is idempotent',
+              'pass' => count($http->puts) === $writesBeforeReplay && $first['decision_id'] === $second['decision_id'],
+              'writes_before' => $writesBeforeReplay, 'writes_after' => count($http->puts),
+              'first_decision_id' => $first['decision_id'], 'second_decision_id' => $second['decision_id']];
+
+          $before = count($http->puts);
+          $http->seed('mon_chatgpt_handoff.json', lm_json(reverseObjectKeys($packet)));
+          $service = fixtureService($http); // A new service instance uses the durable result from the previous one.
+          $service->processMailbox();
+          $checks[] = ['case' => 'associative key order and service restart do not create another decision',
+              'pass' => count($http->puts) === $before && lm_get(LiteRuntime::read('result'), 'decision_id') === $packet['decision_id']];
+
+          $before = count($http->puts);
+          $priorBytes = file_get_contents(LiteRuntime::path('result.php'));
+          $changed = $packet;
+          $changed['selected'][0]['ms7']['code'] = 'S2';
+          $http->seed('mon_chatgpt_handoff.json', lm_json($changed));
+          $fault = null;
+          try { $service->processMailbox(); } catch (LiteMonFault $e) { $fault = $e->faultCode; }
+          $checks[] = ['case' => 'same ID with different final opinion is rejected without changing the accepted decision',
+              'pass' => $fault === 'DECISION_ID_REUSE_CONFLICT' && count($http->puts) === $before
+                  && file_get_contents(LiteRuntime::path('result.php')) === $priorBytes, 'observed' => $fault];
+
+          foreach ([['name' => ''], ['name' => ['SLB']], ['name' => '005930'], ['reason' => ['not a string']], ['symbol_id' => ['US|NYSE|SLB']]] as $bad) {
+              $invalid = array_merge($item, $bad);
+              $fault = null;
+              try { LiteDecisionService::normalizeChatgptDecision([$invalid]); } catch (LiteMonFault $e) { $fault = $e->faultCode; }
+              $checks[] = ['case' => 'invalid required item value remains rejected: ' . implode(',', array_keys($bad)),
+                  'pass' => $fault !== null, 'observed' => $fault];
+          }
+
+          $http = fixtureReset(); $service = fixtureService($http);
+          $legacy = $packet; unset($legacy['decision_id']);
+          fixtureProof($legacy); $http->seed('mon_chatgpt_handoff.json', lm_json($legacy)); $service->processMailbox();
+          $legacyId = lm_get(LiteRuntime::read('result'), 'decision_id'); $before = count($http->puts);
+          $http->seed('mon_chatgpt_handoff.json', lm_json(reverseObjectKeys($legacy))); fixtureService($http)->processMailbox();
+          $checks[] = ['case' => 'legacy ID omission gets a stable derived ID independent of transport formatting',
+              'pass' => is_string($legacyId) && strlen($legacyId) === 64 && count($http->puts) === $before
+                  && lm_get(LiteRuntime::read('result'), 'decision_id') === $legacyId, 'observed' => $legacyId];
+
+          $http = fixtureReset(); $service = fixtureService($http);
+          $missing = $packet; unset($missing['candidate_request_sha'], $missing['details_receipt_sha'], $missing['evaluation_id']);
+          fixtureProof($packet, false); $http->seed('mon_chatgpt_handoff.json', lm_json($missing));
+          $fault = null;
+          try { $service->processMailbox(); } catch (LiteMonFault $e) { $fault = $e->faultCode; }
+          $checks[] = ['case' => 'matching missing/null proof values cannot authorize a new final',
+              'pass' => $fault === 'DECISION_PROOF_MISMATCH' && count($http->puts) === 0, 'observed' => $fault];
+
+          $http = fixtureReset(); $service = fixtureService($http);
+          $stale = $packet; $stale['analysis_at'] = lm_iso(time() - 172800);
+          foreach ($stale['independent_sources'] as &$entry) $entry['checked_at'] = $stale['analysis_at']; unset($entry);
+          fixtureProof($stale); $http->seed('mon_chatgpt_handoff.json', lm_json($stale));
+          $fault = null;
+          try { $service->processMailbox(); } catch (LiteMonFault $e) { $fault = $e->faultCode; }
+          $checks[] = ['case' => 'new stale analysis remains rejected', 'pass' => $fault === 'DECISION_FRESH_ANALYSIS_REQUIRED'
+              && count($http->puts) === 0, 'observed' => $fault];
+
+          $http = fixtureReset(); $service = fixtureService($http); fixtureProof($stale);
+          $service->saveDecision($stale['request_id'], $stale['selected'], ['US|NASDAQ|NVDA'], $stale['evaluation_id'], $stale['market_view'],
+              'previously-accepted-synthetic-delivery', ['decision_id' => $stale['decision_id'], 'outcome' => $stale['outcome'],
+                  'conclusion' => $stale['conclusion'], 'analysis_at' => $stale['analysis_at'], 'independent_sources' => $stale['independent_sources']]);
+          $before = count($http->puts); $http->seed('mon_chatgpt_handoff.json', lm_json(reverseObjectKeys($stale)));
+          try { $service->processMailbox(); $fault = null; } catch (LiteMonFault $e) { $fault = $e->faultCode; }
+          $checks[] = ['case' => 'delivery retry of an already accepted old decision preserves its original timestamp without new writes',
+              'pass' => $fault === null && count($http->puts) === $before && lm_get(LiteRuntime::read('result'), 'analysis_at') === $stale['analysis_at'],
+              'observed' => $fault];
+
+          $http = fixtureReset(); $service = fixtureService($http); fixtureProof($packet);
+          $http->failBefore['mon_chatgpt_response.json'] = 1; $http->seed('mon_chatgpt_handoff.json', lm_json($packet));
+          try { $service->processMailbox(); } catch (LiteMonFault $expected) {}
+          $pending = lm_array(LiteRuntime::read('result'));
+          $frozenData = $pending['outbox']['data_json']; $frozenMarkdown = $pending['outbox']['markdown'];
+          $http->seed('mon_chatgpt_handoff.json', lm_json(reverseObjectKeys($packet))); fixtureService($http)->processMailbox();
+          $recovered = lm_array(LiteRuntime::read('result'));
+          $checks[] = ['case' => 'pending receipt recovery keeps the original decision and exact result-pair bytes',
+              'pass' => $pending['save_status'] === 'pending_receipt' && $recovered['save_status'] === 'saved'
+                  && $recovered['decision_id'] === $packet['decision_id'] && $recovered['outbox']['data_json'] === $frozenData
+                  && $recovered['outbox']['markdown'] === $frozenMarkdown && count($http->puts) === 3];
+
+          $before = count($http->puts);
+          $damaged = $recovered; $damaged['pair_readback_verified'] = false;
+          LiteRuntime::write('result', (object)$damaged);
+          $wasPending = $service->decisionPending(); $service->resumeDecision();
+          $repaired = lm_array(LiteRuntime::read('result'));
+          $checks[] = ['case' => 'saved label cannot bypass recovery of a missing pair verification flag',
+              'pass' => $wasPending && $repaired['save_status'] === 'saved' && $repaired['pair_readback_verified'] === true
+                  && $repaired['receipt_readback_verified'] === true && count($http->puts) === $before
+                  && $repaired['outbox']['data_json'] === $frozenData && $repaired['outbox']['markdown'] === $frozenMarkdown];
+
+          foreach (['pending_remote', 'saved'] as $legacyStatus) {
+              $http = fixtureReset(); $service = fixtureService($http); $created = lm_iso(time() - 7200);
+              $old = ['save_status' => $legacyStatus, 'request_id' => 'legacy-explicit-id', 'authority' => 'chatgpt_final',
+                  'independent_analysis' => true, 'decision_id' => 'legacy-accepted-decision-' . $legacyStatus,
+                  'selected' => $packet['selected'], 'unresolved_ids' => [], 'evaluation_id' => 'legacy-evaluation',
+                  'market_view' => $packet['market_view'], 'handoff_sha' => 'legacy-delivery', 'saved_at' => $created];
+              LiteRuntime::write('result', (object)$old);
+              $service->resumeDecision(); $migrated = lm_array(LiteRuntime::read('result'));
+              $checks[] = ['case' => 'legacy ' . $legacyStatus . ' with an explicit ID and no conclusion recovers without inventing a new identity',
+                  'pass' => $migrated['save_status'] === 'saved' && $migrated['decision_id'] === $old['decision_id']
+                      && $migrated['saved_at'] === $created && $migrated['analysis_at'] === null
+                      && $migrated['pair_readback_verified'] === true && $migrated['receipt_readback_verified'] === true];
+          }
+
+          LiteRuntime::write('evidence', (object)['latest_scan' => ['at' => lm_iso(), 'results' => []]]);
+          $method = new ReflectionMethod(LiteWebController::class, 'render'); $method->setAccessible(true);
+          ob_start();
+          $method->invoke(null, new LiteConfig(), null, LiteStateStore::defaultState(), LiteRuntime::view(),
+              ['ready_to_start' => false, 'blockers' => ['SYNTHETIC']], 'Synthetic read-only render.', true, null);
+          $html = ob_get_clean();
+          $finalAt = strpos($html, 'id="chatgpt-final-authority"'); $referenceAt = strpos($html, '마지막 PHP 참고분석');
+          $checks[] = ['case' => 'ChatGPT final document links are presented before PHP references with an honest local receipt scope',
+              'pass' => $finalAt !== false && $referenceAt !== false && $finalAt < $referenceAt
+                  && strpos($html, '/mon_result.md') !== false && strpos($html, '/mon_data.json') !== false
+                  && strpos($html, '/mon_chatgpt_response.json') !== false && strpos($html, 'NAS 경유 최종 저장 (로컬)') !== false
+                  && strpos($html, '페이지 조회는 원격 저장 여부를 새로 검증하지 않습니다.') !== false];
+
+          $unverified = $migrated; $unverified['pair_readback_verified'] = false;
+          LiteRuntime::write('result', (object)$unverified);
+          $monitor = (new ReflectionClass(LiteMonitor::class))->newInstanceWithoutConstructor();
+          ob_start();
+          $method->invoke(null, new LiteConfig(), $monitor, LiteStateStore::defaultState(), LiteRuntime::view(),
+              ['ready_to_start' => false, 'blockers' => ['SYNTHETIC']], 'Synthetic unverified-local-status render.', true, null);
+          $unverifiedHtml = ob_get_clean();
+          $checks[] = ['case' => 'an unverified local saved label is not rendered as verified saving',
+              'pass' => strpos($unverifiedHtml, 'NAS 로컬 저장 검증 미완료') !== false
+                  && strpos($unverifiedHtml, 'NAS 로컬 영수증 검증 ·') === false];
+
+          $failures = count(array_filter($checks, static function(array $x): bool { return !$x['pass']; }));
+          echo lm_json(['source_sha256' => hash_file('sha256', getenv('MON_TEST_SOURCE')), 'checks' => $checks, 'failures' => $failures]) . "\n";
+          exit($failures ? 1 : 0);
+          AUTHORITY
+          cat >"$test_dir/provider_identity_regression.php" <<'PROVIDER_IDENTITY'
+          <?php
+          declare(strict_types=1);
+          // Exact production LiteYahoo with an offline chart transport. No NAS or real network calls.
+          $source=getenv('MON_TEST_SOURCE')?:dirname(__DIR__).'/repo/mon.php';
+          require $source;
+          $records=[];$failures=[];
+          function identity_assert(bool $value,string $case,array $evidence=[]): void {
+              global $records,$failures;
+              $records[]=['case'=>$case,'status'=>$value?'PASS':'FAIL']+$evidence;
+              if(!$value)$failures[]=$case;
+          }
+          function identity_symbol(string $country,string $exchange,string $ticker): array {
+              return ['symbol_id'=>$country.'|'.$exchange.'|'.$ticker,'country'=>$country,'exchange'=>$exchange,
+                  'symbol'=>$ticker,'currency'=>['US'=>'USD','KR'=>'KRW','JP'=>'JPY'][$country],'name'=>'Offline fixture '.$ticker];
+          }
+          function identity_meta(array $symbol,string $exchangeCode,string $type='EQUITY'): array {
+              return ['symbol'=>LiteYahoo::ticker($symbol),'currency'=>$symbol['currency'],'exchangeName'=>$exchangeCode,
+                  'exchangeTimezoneName'=>['US'=>'America/New_York','KR'=>'Asia/Seoul','JP'=>'Asia/Tokyo'][$symbol['country']],
+                  'instrumentType'=>$type];
+          }
+          final class IdentityChartTransport {
+              public $meta,$recoveryMeta,$calls=[],$recover=false;
+              public function __construct(array $meta){$this->meta=$meta;$this->recoveryMeta=$meta;}
+              public function get(string $url,array $headers=[],int $timeout=8): string {
+                  if(strpos($url,'https://query1.finance.yahoo.com/v8/finance/chart/')!==0)throw new RuntimeException('Offline transport rejects unexpected URL');
+                  $this->calls[]=$url;$intraday=strpos($url,'interval=5m')!==false;
+                  $t=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];
+                  if($this->recover){
+                      $day=(new DateTimeImmutable('now',new DateTimeZone('America/New_York')))->modify('-7 days')->setTime(9,30);
+                      while((int)$day->format('N')>5)$day=$day->modify('-1 day');
+                      for($i=0;$i<($intraday?78:1);$i++){
+                          $t[]=$day->getTimestamp()+($intraday?$i*300:0);$q['open'][]=100.0;$q['close'][]=100.0;
+                          $q['high'][]=$intraday?100.0:99.95;$q['low'][]=99.0;$q['volume'][]=$intraday?10:1000;
+                      }
+                  }else{
+                      for($i=0;$i<60;$i++){$t[]=1600000000+$i*86400;$q['open'][]=100+$i;$q['high'][]=102+$i;$q['low'][]=99+$i;$q['close'][]=101+$i;$q['volume'][]=1000+$i;}
+                  }
+                  return lm_json(['chart'=>['result'=>[['meta'=>$intraday?$this->recoveryMeta:$this->meta,'timestamp'=>$t,'indicators'=>['quote'=>[$q]]]],'error'=>null]]);
+              }
+          }
+          function identity_yahoo(IdentityChartTransport $transport): LiteYahoo {
+              $y=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();
+              $p=new ReflectionProperty(LiteYahoo::class,'http');$p->setAccessible(true);$p->setValue($y,$transport);$y->beginTurn();return $y;
+          }
+          function identity_attempt(array $symbol,array $meta): array {
+              $transport=new IdentityChartTransport($meta);$y=identity_yahoo($transport);$fault=null;$rows=[];
+              try{$rows=$y->daily($symbol,60);}catch(LiteMonFault $e){$fault=$e->faultCode;}
+              return ['fault'=>$fault,'rows'=>count($rows),'requests'=>count($transport->calls)];
+          }
+          $normal=[
+              ['US','NASDAQ','NVDA','NMS'],['US','NASDAQ','INOD','NGM'],['US','NASDAQ','AEHR','NCM'],
+              ['US','NYSE','SLB','NYQ'],['US','AMEX','VGZ','ASE'],['KR','KOSPI','005930','KSC'],
+              ['KR','KOSDAQ','393210','KOE'],['JP','TSE','7203','JPX']
+          ];
+          foreach($normal as $n){$s=identity_symbol($n[0],$n[1],$n[2]);$v=identity_attempt($s,identity_meta($s,$n[3]));identity_assert($v['fault']===null&&$v['rows']===60,'valid listing '.$s['symbol_id'],$v);}
+          $s=identity_symbol('US','NYSE','BRK.B');$m=identity_meta($s,'NYQ');$v=identity_attempt($s,$m);identity_assert($v['fault']===null&&$m['symbol']==='BRK-B','class share ticker maps dot to Yahoo dash',$v);
+          $s=identity_symbol('US','NASDAQ','nvda');$m=identity_meta($s,'NMS');$m['symbol']='NVDA';$v=identity_attempt($s,$m);identity_assert($v['fault']===null,'same listing symbol case is not a different company',$v);
+          foreach([['US','NYSE','^GSPC','SNP'],['KR','KOSPI','^KS11','KSC'],['KR','KOSDAQ','^KQ11','KSC'],['JP','TSE','^TOPX','JPX'],['JP','TSE','^N225','OSA'],['JP','TSE','1306.T','JPX']] as $n){
+              $s=identity_symbol($n[0],$n[1],$n[2]);$s['raw_ticker']=$n[2];$s['symbol_id']=$n[0].'|INDEX|'.$n[2];$m=identity_meta($s,$n[3],$n[2]==='1306.T'?'ETF':'INDEX');
+              $v=identity_attempt($s,$m);identity_assert($v['fault']===null&&$v['rows']===60,'internal benchmark preserves '.$n[2].' identity',$v);
+          }
+          foreach([['US','NYSE','^GSPC','SNP'],['JP','TSE','1306.T','JPX'],['KR','KOSPI','^KS11','KSC'],['KR','KOSDAQ','^KQ11','KSC']] as $n){
+              $s=identity_symbol($n[0],$n[1],$n[2]);$s['raw_ticker']=$n[2];$s['symbol_id']=$n[0].'|INDEX|'.($n[0]==='KR'?'KR-'.$n[1]:$n[0]);
+              $m=identity_meta($s,$n[3],$n[2]==='1306.T'?'ETF':'INDEX');$v=identity_attempt($s,$m);
+              identity_assert($v['fault']===null&&$v['rows']===60,'incremental benchmark country-key identity '.$s['symbol_id'],$v);
+          }
+          $nvda=identity_symbol('US','NASDAQ','NVDA');$good=identity_meta($nvda,'NMS');
+          $negative=[];$m=$good;$m['symbol']='MSFT';$negative[]=['wrong returned symbol',$nvda,$m,'YAHOO_SYMBOL_MISMATCH'];
+          $s=$nvda;$s['exchange']='NYSE';$s['symbol_id']='US|NYSE|NVDA';$negative[]=['NASDAQ stock cannot be labeled NYSE',$s,$good,'YAHOO_EXCHANGE_MISMATCH'];
+          $m=$good;$m['exchangeTimezoneName']='Asia/Tokyo';$negative[]=['wrong exchange timezone',$nvda,$m,'YAHOO_TIMEZONE_MISMATCH'];
+          $m=$good;$m['instrumentType']='ETF';$negative[]=['ETF is not silently treated as an ordinary stock',$nvda,$m,'YAHOO_INSTRUMENT_MISMATCH'];
+          $m=$good;$m['currency']='JPY';$negative[]=['wrong currency',$nvda,$m,'YAHOO_CURRENCY_MISMATCH'];
+          foreach(['symbol','exchangeName','exchangeTimezoneName','instrumentType'] as $key){$m=$good;unset($m[$key]);$negative[]=['missing identity field '.$key,$nvda,$m,'YAHOO_IDENTITY_MISSING'];}
+          $m=$good;unset($m['currency']);$negative[]=['missing currency',$nvda,$m,'YAHOO_CURRENCY_MISMATCH'];
+          $s=identity_symbol('JP','TSE','1306.T');$s['raw_ticker']='1306.T';$s['symbol_id']='JP|INDEX|1306.T';$m=identity_meta($s,'JPX','EQUITY');$negative[]=['TOPIX proxy must retain ETF identity',$s,$m,'YAHOO_INSTRUMENT_MISMATCH'];
+          $s=identity_symbol('KR','KOSDAQ','^KS11');$s['raw_ticker']='^KS11';$s['symbol_id']='KR|INDEX|KR-KOSDAQ';$m=identity_meta($s,'KSC','INDEX');$negative[]=['KOSPI index cannot replace a KOSDAQ benchmark',$s,$m,'YAHOO_IDENTITY_MISMATCH'];
+          $s=identity_symbol('US','NYSE','NVDA');$s['raw_ticker']='^GSPC';$m=identity_meta($s,'SNP','INDEX');$negative[]=['ordinary stock cannot inject an allowed raw index',$s,$m,'YAHOO_IDENTITY_MISMATCH'];
+          $s['symbol']='^GSPC';$negative[]=['index symbol cannot retain an ordinary stock namespace',$s,$m,'YAHOO_IDENTITY_MISMATCH'];
+          foreach($negative as [$name,$s,$m,$expected]){$v=identity_attempt($s,$m);identity_assert($v['fault']===$expected&&$v['rows']===0,$name,['expected_fault'=>$expected]+$v);}
+          $transport=new IdentityChartTransport($good);$y=identity_yahoo($transport);$rows=$y->daily($nvda,60);$last=end($rows);$recent=$y->recent($nvda,$last[0],10);
+          identity_assert(count($transport->calls)===1&&count($recent)>0,'same listing recent range reuses bounded cache',['requests'=>count($transport->calls)]);
+          $wrong=$nvda;$wrong['exchange']='NYSE';$wrong['symbol_id']='US|NYSE|NVDA';$fault=null;
+          try{$y->recent($wrong,$last[0],10);}catch(LiteMonFault $e){$fault=$e->faultCode;}
+          identity_assert($fault==='YAHOO_IDENTITY_MISMATCH'&&count($transport->calls)===1,'cached NASDAQ rows cannot bypass a later NYSE identity check',['fault'=>$fault,'requests'=>count($transport->calls)]);
+          $benchmark=identity_symbol('US','NYSE','^GSPC');$benchmark['symbol_id']='US|INDEX|US';$benchmark['raw_ticker']='^GSPC';
+          $transport=new IdentityChartTransport(identity_meta($benchmark,'SNP','INDEX'));$y=identity_yahoo($transport);$rows=$y->daily($benchmark,60);$last=end($rows);
+          $alias=$benchmark;$alias['symbol_id']='US|INDEX|^GSPC';$recent=$y->recent($alias,$last[0],10);
+          identity_assert(count($transport->calls)===1&&count($recent)>0,'both canonical index aliases reuse the same provider cache',['requests'=>count($transport->calls)]);
+          $injected=$benchmark;$injected['symbol_id']='US|NYSE|NVDA';$fault=null;
+          try{$y->recent($injected,$last[0],10);}catch(LiteMonFault $e){$fault=$e->faultCode;}
+          identity_assert($fault==='YAHOO_IDENTITY_MISMATCH'&&count($transport->calls)===1,'cached index cannot bypass a later ordinary-stock namespace check',['fault'=>$fault,'requests'=>count($transport->calls)]);
+          foreach(['valid','wrong_symbol','wrong_exchange','missing_timezone'] as $mode){
+              $transport=new IdentityChartTransport($good);$transport->recover=true;
+              if($mode==='wrong_symbol')$transport->recoveryMeta['symbol']='MSFT';
+              if($mode==='wrong_exchange')$transport->recoveryMeta['exchangeName']='NYQ';
+              if($mode==='missing_timezone')unset($transport->recoveryMeta['exchangeTimezoneName']);
+              $y=identity_yahoo($transport);$fault=null;$rows=[];try{$rows=$y->daily($nvda,1);}catch(LiteMonFault $e){$fault=$e->faultCode;}
+              $ok=$mode==='valid'?$fault===null&&count($rows)===1&&$rows[0][2]===100.0:$fault==='YAHOO_LATEST_BAR_INVALID'&&count($rows)===0;
+              identity_assert($ok,'5m envelope recovery identity '.$mode,['fault'=>$fault,'rows'=>count($rows),'requests'=>count($transport->calls)]);
+          }
+          echo lm_json(['scenario'=>'provider_listing_identity','source_sha256'=>hash_file('sha256',$source),'status'=>$failures?'FAIL':'PASS','case_count'=>count($records),'failed_cases'=>$failures,'cases'=>$records])."\n";
+          exit($failures?1:0);
+          PROVIDER_IDENTITY
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/runtime_quality_repro.php" "$test_dir/mon.php"
+          MON_TEST_SOURCE="$test_dir/mon.php" MON_ASSERT_FIXED=1 php -d memory_limit=96M "$test_dir/repro_github_read.php"
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/authority_regression.php"
+          MON_TEST_SOURCE="$test_dir/mon.php" php -d memory_limit=96M "$test_dir/provider_identity_regression.php"
+          cmp -s mon.php "$test_dir/mon.php"
+      # END MON r21 cause-based regressions
 
       - name: Absolute trend, reference separation and invalidation regressions
         run: |
@@ -1007,7 +1476,7 @@ jobs:
                   if(in_array($ticker,['^TOPX','1306.T','^N225'],true)&&($this->mode==='failed'||$ticker==='^TOPX'||($ticker==='1306.T'&&$this->mode==='nikkei')))throw new LiteMonFault('HTTP_404');
                   $base=$ticker==='1306.T'?2000:($ticker==='^N225'?60000:4000);$timestamp=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];
                   for($i=$isBenchmark?0:max(0,220-$this->stockBarCount);$i<220;$i++){$timestamp[]=1600000000+$i*86400+($isBenchmark&&$this->advanceBenchmark||!$isBenchmark&&$this->advanceStock?86400:0);$open=$base+$i;$scale=$isBenchmark?1.0:$this->stockCorrection;$q['open'][]=$open*$scale;$q['high'][]=($open+3)*$scale;$q['low'][]=($open-1)*$scale;$q['close'][]=($open+2)*$scale;$q['volume'][]=100000+$i;}
-                  return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'JPY'],'timestamp'=>$timestamp,'indicators'=>['quote'=>[$q]]]]]]);
+                  return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'JPY','symbol'=>$ticker,'exchangeName'=>$ticker==='^N225'?'OSA':'JPX','exchangeTimezoneName'=>'Asia/Tokyo','instrumentType'=>$ticker==='1306.T'?'ETF':($isBenchmark?'INDEX':'EQUITY')],'timestamp'=>$timestamp,'indicators'=>['quote'=>[$q]]]]]]);
               }
           }
           function bench_reset(): void {foreach(LiteRuntime::FILES as $key){$p=LiteRuntime::path($key.'.php');if(is_file($p))unlink($p);}}
@@ -1179,7 +1648,7 @@ jobs:
           function env_stamp(string $date,string $clock): int {return (new DateTimeImmutable($date.' '.$clock,new DateTimeZone('America/New_York')))->getTimestamp();}
           function env_chart(array $timestamps,array $quote,string $currency='USD'): string {
               $start=env_stamp('2026-10-16','09:30:00');
-              return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>$currency,'exchangeTimezoneName'=>'America/New_York','timezone'=>'EDT','gmtoffset'=>-14400,'currentTradingPeriod'=>['regular'=>['timezone'=>'EDT','start'=>$start,'end'=>$start+23400,'gmtoffset'=>-14400]]],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$quote]]]],'error'=>null]]);
+              return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>$currency,'symbol'=>'CPUENV','exchangeName'=>'NMS','instrumentType'=>'EQUITY','exchangeTimezoneName'=>'America/New_York','timezone'=>'EDT','gmtoffset'=>-14400,'currentTradingPeriod'=>['regular'=>['timezone'=>'EDT','start'=>$start,'end'=>$start+23400,'gmtoffset'=>-14400]]],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$quote]]]],'error'=>null]]);
           }
           function env_daily(bool $valid=false,string $currency='USD',string $mode='complete'): string {
               $timestamps=[];$quote=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];$end=env_stamp('2026-10-16','09:30:00');
@@ -1324,7 +1793,7 @@ jobs:
           function nav_call($object,string $name,array $args=[]){return fx_call($object,$name,$args);}
           function nav_rows(int $count=220): array {$rows=[];$date=new DateTimeImmutable('2026-10-19',new DateTimeZone('Asia/Seoul'));while(count($rows)<$count){if((int)$date->format('N')<=5){$n=$count-count($rows);$close=5000.0+$n;$rows[]=[$date->format('Y-m-d'),$close-1,$close+2,$close-2,$close,100000.0+$n];}$date=$date->modify('-1 day');}return array_reverse($rows);}
           function nav_xml(array $rows,string $symbol='KOSPI',string $timeframe='day'): string {$body='<?xml version="1.0"?><protocol><chartdata symbol="'.$symbol.'" timeframe="'.$timeframe.'" count="'.count($rows).'">';foreach($rows as $row){$row[0]=str_replace('-','',(string)$row[0]);$body.='<item data="'.implode('|',$row).'" />';}return $body.'</chartdata></protocol>';}
-          function nav_chart(array $rows): string {$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];$timestamps=[];foreach($rows as $row){$timestamps[]=(new DateTimeImmutable($row[0].' 09:00:00',new DateTimeZone('Asia/Seoul')))->getTimestamp();foreach(['open','high','low','close','volume'] as $i=>$key)$q[$key][]=$row[$i+1];}return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'KRW','exchangeTimezoneName'=>'Asia/Seoul'],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$q]]]],'error'=>null]]);}
+          function nav_chart(array $rows): string {$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];$timestamps=[];foreach($rows as $row){$timestamps[]=(new DateTimeImmutable($row[0].' 09:00:00',new DateTimeZone('Asia/Seoul')))->getTimestamp();foreach(['open','high','low','close','volume'] as $i=>$key)$q[$key][]=$row[$i+1];}return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'KRW','symbol'=>'^KS11','instrumentType'=>'INDEX','exchangeTimezoneName'=>'Asia/Seoul'],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$q]]]],'error'=>null]]);}
           final class NaverFixtureTransport {public $calls=[],$body,$chart,$yahooFault=null;public function __construct(string $body,string $chart=''){$this->body=$body;$this->chart=$chart;}public function get(string $url,array $headers=[],int $timeout=8): string {$this->calls[]=['url'=>$url,'timeout'=>$timeout];if(strpos($url,'fchart.stock.naver.com/')!==false)return $this->body;if(strpos($url,'/finance/chart/')!==false){if($this->yahooFault!==null)throw new LiteMonFault($this->yahooFault);return $this->chart;}throw new RuntimeException('Unexpected offline request');}}
           function nav_provider(string $body,string $chart=''): array {$http=new NaverFixtureTransport($body,$chart);$provider=(new ReflectionClass(LiteYahoo::class))->newInstanceWithoutConstructor();nav_prop($provider,'http',$http,true);$provider->beginTurn();return [$provider,$http];}
           function nav_fault(string $body,string $name): void {[$provider,$http]=nav_provider($body);$fault=null;try{$provider->naverBenchmark('KR','KOSPI',220);}catch(LiteMonFault $e){$fault=$e->faultCode;}nav_check($fault!==null,$name.' rejected');nav_check(count($http->calls)===1,$name.' costs one bounded provider request');}
@@ -1408,7 +1877,7 @@ jobs:
               public function get(string $url,array $headers=[],int $timeout=8): string {
                   $q=[];parse_str((string)parse_url($url,PHP_URL_QUERY),$q);$p1=(int)($q['period1']??0);$this->calls[]=['url'=>$url,'period1'=>$p1];$timestamps=[];$quote=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];
                   foreach($this->rows as $row){$t=strtotime($row[0].' 09:00:00 UTC');if($t<$p1)continue;$timestamps[]=$t;foreach(array_keys($quote) as $i=>$key)$quote[$key][]=$row[$i+1];}
-                  return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'JPY'],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$quote]]]],'error'=>null]]);
+                  return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'JPY','symbol'=>rawurldecode(basename((string)parse_url($url,PHP_URL_PATH))),'instrumentType'=>'INDEX','exchangeTimezoneName'=>'Asia/Tokyo'],'timestamp'=>$timestamps,'indicators'=>['quote'=>[$quote]]]],'error'=>null]]);
               }
           }
           $rows=[];$day=new DateTimeImmutable('2026-10-19',new DateTimeZone('Asia/Tokyo'));while(count($rows)<220){if((int)$day->format('N')<=5){$close=60000.0+220-count($rows);$rows[]=[$day->format('Y-m-d'),$close-1,$close+2,$close-2,$close,100000.0];}$day=$day->modify('-1 day');}$rows=array_reverse($rows);$hole=$rows[200][0];$last=$rows[219][0];gap_assert(strtotime($hole)<strtotime($last)-21*86400,'fixture hole is outside 21 calendar day overlap but inside last21 trading dates');
@@ -1508,7 +1977,7 @@ jobs:
                   if($this->recorded){$dir=getenv('MON_KR_RECORDED_DIR');$path=$dir.'/provider_'.($ticker==='^KS11'?'ks11':'samsung').'.json';if(!$dir||!is_file($path))throw new RuntimeException('recorded provider fixture missing');return file_get_contents($path);}
                   $rows=kr_raw_rows($ticker==='^KS11'?'ks11':'samsung',$this->mode);if($this->respectPeriod1){parse_str((string)parse_url($url,PHP_URL_QUERY),$query);$start=gmdate('Y-m-d',(int)($query['period1']??0));$rows=array_values(array_filter($rows,static function($r)use($start){return $r[0]>=$start;}));}$ts=[];$q=['open'=>[],'high'=>[],'low'=>[],'close'=>[],'volume'=>[]];
                   foreach($rows as $row){$ts[]=strtotime($row[0].' 00:00:00 UTC');foreach(['open','high','low','close','volume'] as $i=>$k)$q[$k][]=$row[$i+1];}
-                  return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'KRW','symbol'=>$ticker],'timestamp'=>$ts,'indicators'=>['quote'=>[$q]]]]]]);
+                  return lm_json(['chart'=>['result'=>[['meta'=>['currency'=>'KRW','symbol'=>$ticker,'exchangeName'=>'KSC','instrumentType'=>$ticker==='^KS11'?'INDEX':'EQUITY','exchangeTimezoneName'=>'Asia/Seoul'],'timestamp'=>$ts,'indicators'=>['quote'=>[$q]]]]]]);
               }
           }
           final class KrFixtureGithub {
@@ -1921,7 +2390,7 @@ jobs:
           require $module;$cases=[];$scenarios=[];
           function ct_check(bool$ok,string$message):void{global$cases,$root;$cases[]=['case'=>$message,'status'=>$ok?'PASS':'FAIL'];if(!$ok){file_put_contents($root.'/failure.json',json_encode(['message'=>$message,'cases'=>$cases])."\n");throw new RuntimeException($message);}}
           function ct_request(string$method,array$fields=[]):array{$_SERVER['REQUEST_METHOD']=$method;$_GET=$method==='GET'?array_merge(['view'=>'control'],$fields):['view'=>'control'];$_POST=$method==='POST'?$fields:[];ob_start();$code=\MonControlTest\LiteWebController::run();$raw=ob_get_clean();$body=json_decode($raw,true);if(!is_array($body))throw new RuntimeException('JSON expected: '.$raw);return['code'=>$code,'body'=>$body,'control'=>$body['control']??null];}
-          function ct_state(){return\MonControlTest\LiteStateStore::state();}
+          function ct_state(){return \MonControlTest\LiteStateStore::state();}
           function ct_ticket():array{return(array)\MonControlTest\lm_get(ct_state(),'manual_control');}
           function ct_fields(array$t):array{return['operation_id'=>$t['id'],'operation_seq'=>$t['seq']];}
           function ct_status(array$t):array{return ct_request('GET',ct_fields($t))['control'];}
